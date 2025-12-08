@@ -42,27 +42,20 @@ export function initializeGame(teams, options = {}) {
 /**
  * Generate cards from word list
  * @param {Array<string>} words - Array of words
- * @param {number} cardsCount - Number of cards to generate (default: 33)
- * @param {number} wordsPerCard - Words per card (default: 6)
- * @returns {Array<Array<string>>} Array of cards, each containing words
+ * @param {number} cardsCount - Number of cards to generate (default: 200)
+ * @param {number} wordsPerCard - Words per card (default: 1 for single-word cards)
+ * @returns {Array<string>} Array of words (each word is a card)
  */
-export function generateCards(words, cardsCount = 33, wordsPerCard = 6) {
-  if (words.length < cardsCount * wordsPerCard) {
-    throw new Error(`Not enough words. Need at least ${cardsCount * wordsPerCard} words`);
+export function generateCards(words, cardsCount = 200, wordsPerCard = 1) {
+  if (words.length < cardsCount) {
+    throw new Error(`Not enough words. Need at least ${cardsCount} words`);
   }
 
   const shuffled = [...words].sort(() => Math.random() - 0.5);
-  const selectedWords = shuffled.slice(0, cardsCount * wordsPerCard);
-  const cards = [];
-
-  for (let i = 0; i < cardsCount; i++) {
-    const cardWords = selectedWords.slice(i * wordsPerCard, i * wordsPerCard + wordsPerCard);
-    if (cardWords.length === wordsPerCard) {
-      cards.push(cardWords);
-    }
-  }
-
-  return cards;
+  const selectedWords = shuffled.slice(0, cardsCount);
+  
+  // Return array of single words (each word is a card)
+  return selectedWords;
 }
 
 /**
@@ -102,9 +95,9 @@ export function startRound(gameState, cards) {
 
 /**
  * Get current word for a team
- * @param {Array<Array<string>>} cards - Cards array
+ * @param {Array<string>} cards - Cards array (each card is a single word)
  * @param {number} cardIndex - Current card index
- * @param {number} teamPosition - Team's current position
+ * @param {number} teamPosition - Team's current position (not used for single-word cards)
  * @returns {string} Current word to display
  */
 export function getCurrentWord(cards, cardIndex, teamPosition) {
@@ -112,19 +105,14 @@ export function getCurrentWord(cards, cardIndex, teamPosition) {
     return null;
   }
 
-  const cardWords = cards[cardIndex];
-  if (!cardWords || cardWords.length === 0) {
-    return null;
-  }
-
-  const wordIndex = teamPosition % cardWords.length;
-  return cardWords[wordIndex];
+  // For single-word cards, just return the word at the index
+  return cards[cardIndex] || null;
 }
 
 /**
  * Handle correct guess
  * @param {Object} gameState - Current game state
- * @param {Array<Array<string>>} cards - Cards array
+ * @param {Array<string>} cards - Cards array (each card is a single word)
  * @param {number} cardIndex - Current card index
  * @param {number} teamIndex - Team that guessed (for golden words)
  * @param {boolean} isTimeUp - Whether time is up
@@ -141,22 +129,20 @@ export function handleCorrect(gameState, cards, cardIndex, teamIndex = null, isT
     throw new Error('Invalid team index');
   }
 
-  // Get word to use
+  // Get word to use (single word for single-word cards)
   let wordToUse;
   if (isTimeUp && gameState.lastWordOnTimeUp) {
-    wordToUse = typeof gameState.lastWordOnTimeUp === 'string' 
-      ? [gameState.lastWordOnTimeUp] 
-      : (Array.isArray(gameState.lastWordOnTimeUp) ? gameState.lastWordOnTimeUp : []);
+    wordToUse = gameState.lastWordOnTimeUp;
   } else {
-    const currentCard = cards[cardIndex];
-    if (!currentCard) {
+    const currentWord = cards[cardIndex];
+    if (!currentWord) {
       throw new Error('Invalid card index');
     }
-    wordToUse = currentCard;
+    wordToUse = currentWord;
   }
 
   const currentCard = {
-    words: wordToUse,
+    word: wordToUse, // Single word, not array
     status: 'correct',
     cardNumber: cardIndex + 1,
     isLastWord: isTimeUp,
@@ -207,7 +193,7 @@ export function handleCorrect(gameState, cards, cardIndex, teamIndex = null, isT
 /**
  * Handle skip
  * @param {Object} gameState - Current game state
- * @param {Array<Array<string>>} cards - Cards array
+ * @param {Array<string>} cards - Cards array (each card is a single word)
  * @param {number} cardIndex - Current card index
  * @param {boolean} isTimeUp - Whether time is up
  * @returns {Object} Updated game state
@@ -219,19 +205,17 @@ export function handleSkip(gameState, cards, cardIndex, isTimeUp = false) {
 
   let wordToUse;
   if (isTimeUp && gameState.lastWordOnTimeUp) {
-    wordToUse = typeof gameState.lastWordOnTimeUp === 'string' 
-      ? [gameState.lastWordOnTimeUp] 
-      : (Array.isArray(gameState.lastWordOnTimeUp) ? gameState.lastWordOnTimeUp : []);
+    wordToUse = gameState.lastWordOnTimeUp;
   } else {
-    const currentCard = cards[cardIndex];
-    if (!currentCard) {
+    const currentWord = cards[cardIndex];
+    if (!currentWord) {
       throw new Error('Invalid card index');
     }
-    wordToUse = currentCard;
+    wordToUse = currentWord;
   }
 
   const currentCard = {
-    words: wordToUse,
+    word: wordToUse, // Single word, not array
     status: 'skipped',
     cardNumber: cardIndex + 1,
     isLastWord: isTimeUp,
@@ -264,7 +248,7 @@ export function handleSkip(gameState, cards, cardIndex, isTimeUp = false) {
 /**
  * Freeze word when timer expires
  * @param {Object} gameState - Current game state
- * @param {Array<Array<string>>} cards - Cards array
+ * @param {Array<string>} cards - Cards array (each card is a single word)
  * @param {number} cardIndex - Current card index
  * @returns {Object} Updated game state with frozen word
  */
@@ -278,14 +262,13 @@ export function freezeWordOnTimeUp(gameState, cards, cardIndex) {
     throw new Error('Invalid current turn');
   }
 
-  const currentCard = cards[cardIndex];
-  if (!currentCard || currentCard.length === 0) {
+  const currentWord = cards[cardIndex];
+  if (!currentWord) {
     throw new Error('Invalid card');
   }
 
-  const teamPosition = currentTeam.position;
-  const wordIndex = teamPosition % currentCard.length;
-  const wordToFreeze = currentCard[wordIndex];
+  // For single-word cards, just freeze the word at the current index
+  const wordToFreeze = currentWord;
 
   return {
     ...gameState,

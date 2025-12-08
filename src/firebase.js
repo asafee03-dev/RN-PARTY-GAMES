@@ -1,6 +1,6 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getDatabase } from "firebase/database";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 
 // Your Firebase configuration
 const firebaseConfig = {
@@ -17,9 +17,52 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Realtime Database and get a reference to the service
-const database = getDatabase(app);
+// Initialize Firestore
+const db = getFirestore(app);
+
+// Wait for Firestore to be ready (online)
+let firestoreReady = false;
+let firestoreReadyResolve = null;
+const firestoreReadyPromise = new Promise((resolve) => {
+  firestoreReadyResolve = resolve;
+});
+
+// Check if Firestore is online
+const checkFirestoreReady = async () => {
+  try {
+    // Try to read from Firestore to check if it's online
+    const { doc, getDoc } = await import("firebase/firestore");
+    const testDoc = doc(db, "_test", "connection");
+    await getDoc(testDoc);
+    if (!firestoreReady) {
+      firestoreReady = true;
+      if (firestoreReadyResolve) {
+        firestoreReadyResolve();
+      }
+    }
+  } catch (error) {
+    // If error, Firestore might be offline, but we'll still resolve after a timeout
+    setTimeout(() => {
+      if (!firestoreReady) {
+        firestoreReady = true;
+        if (firestoreReadyResolve) {
+          firestoreReadyResolve();
+        }
+      }
+    }, 1000);
+  }
+};
+
+// Start checking
+checkFirestoreReady();
+
+export const waitForFirestoreReady = async () => {
+  if (firestoreReady) {
+    return Promise.resolve();
+  }
+  return firestoreReadyPromise;
+};
 
 // Export for use in other files
-export { app, database };
-export default database;
+export { app, db };
+export default db;

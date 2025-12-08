@@ -12,6 +12,8 @@ export default function GradientBackground({ children, variant = 'purple' }) {
         return '#F44336';
       case 'teal':
         return '#00897B';
+      case 'green':
+        return '#10B981';
       default:
         return '#9C27B0';
     }

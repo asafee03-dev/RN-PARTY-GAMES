@@ -1,102 +1,275 @@
-import React, { useCallback, useState, forwardRef, useImperativeHandle } from 'react';
-import { View, StyleSheet, Dimensions } from 'react-native';
-import { 
-  Canvas, 
-  Path, 
-  useTouchHandler, 
-  useValue,
-  Skia,
-  Group,
-} from '@shopify/react-native-skia';
+import React, { useCallback, useState, useRef, forwardRef, useImperativeHandle, useEffect } from 'react';
+import { View, StyleSheet, Dimensions, PanResponder } from 'react-native';
+import Svg, { Path, G } from 'react-native-svg';
 
 const { width, height } = Dimensions.get('window');
 const CANVAS_WIDTH = width - 40;
 const CANVAS_HEIGHT = height * 0.6;
 
 /**
- * Draw Canvas component using @shopify/react-native-skia
- * Supports smooth finger drawing and stroke storage
- * 
- * @param {function} onDrawingChange - Callback when drawing changes (receives stroke data)
- * @param {Array} initialStrokes - Initial strokes to render (for multiplayer sync)
- * @param {boolean} disabled - Whether drawing is disabled
- * @param {function} onExportReady - Callback when export is ready (receives image data URI)
+ * Draw Canvas component using react-native-svg
+ * Supports Vite API: strokes, onStrokeComplete, canDraw, color, brushSize, toolType
+ * Also supports legacy API: initialStrokes, onDrawingChange, disabled
  */
 const DrawCanvas = forwardRef(({ 
+  // Vite API
+  strokes = [],
+  onStrokeComplete,
+  canDraw = false,
+  color = '#000000',
+  brushSize = 3,
+  toolType = 'pencil',
+  // Legacy API
   onDrawingChange,
   initialStrokes = [],
   disabled = false,
   onExportReady
 }, ref) => {
-  const [paths, setPaths] = useState(initialStrokes.map(stroke => ({
-    path: Skia.Path.MakeFromSVGString(stroke.path) || Skia.Path.Make(),
-    color: stroke.color || '#000000',
-    width: stroke.width || 3,
-  })));
-
-  const currentPath = useValue(Skia.Path.Make());
-  const currentColor = useValue('#000000');
-  const currentWidth = useValue(3);
-  const isDrawing = useValue(false);
-
-  const touchHandler = useTouchHandler({
-    onStart: (touchInfo) => {
-      if (disabled) return;
-      isDrawing.current = true;
-      const path = Skia.Path.Make();
-      path.moveTo(touchInfo.x, touchInfo.y);
-      currentPath.current = path;
-      currentColor.current = '#000000';
-      currentWidth.current = 3;
-    },
-    onActive: (touchInfo) => {
-      if (disabled || !isDrawing.current) return;
-      currentPath.current.lineTo(touchInfo.x, touchInfo.y);
-    },
-    onEnd: () => {
-      if (disabled || !isDrawing.current) return;
-      
-      // Convert path to SVG string for storage
-      const pathString = currentPath.current.toSVGString();
-      const newPath = {
-        path: currentPath.current,
-        color: currentColor.current,
-        width: currentWidth.current,
-        pathString,
-      };
-      
-      // Update paths state
-      const updatedPaths = [...paths, newPath];
-      setPaths(updatedPaths);
-      
-      // Notify parent of change
-      if (onDrawingChange) {
-        const strokeData = updatedPaths.map(p => ({
-          path: p.pathString,
-          color: p.color,
-          width: p.width,
-        }));
-        onDrawingChange(strokeData);
-      }
-      
-      // Reset current path
-      currentPath.current = Skia.Path.Make();
-      isDrawing.current = false;
-    },
+  // Use Vite API if strokes prop is provided, otherwise use legacy
+  const useViteAPI = strokes !== undefined && strokes.length >= 0;
+  const isDisabled = useViteAPI ? !canDraw : disabled;
+  
+  const [paths, setPaths] = useState(() => {
+    if (useViteAPI) {
+      return strokes.map(stroke => ({
+        pathString: stroke.path || '',
+        color: stroke.color || color,
+        width: stroke.width || brushSize,
+        points: stroke.points || [],
+      }));
+    } else {
+      return initialStrokes.map(stroke => ({
+        pathString: stroke.path || '',
+        color: stroke.color || '#000000',
+        width: stroke.width || 3,
+        points: stroke.points || [],
+      }));
+    }
   });
 
-  // Export drawing as image (PNG data URI)
+  const [currentPath, setCurrentPath] = useState(null);
+  const [currentPoints, setCurrentPoints] = useState([]);
+  const isDrawingRef = useRef(false);
+  const svgRef = useRef(null);
+  const disabledRef = useRef(isDisabled);
+  const currentColorRef = useRef(color);
+  const currentBrushSizeRef = useRef(brushSize);
+  const currentToolTypeRef = useRef(toolType);
+  
+  // Update refs when props change
+  useEffect(() => {
+    disabledRef.current = isDisabled;
+    currentColorRef.current = color;
+    currentBrushSizeRef.current = brushSize;
+    currentToolTypeRef.current = toolType;
+  }, [isDisabled, color, brushSize, toolType]);
+
+  // Update paths when strokes prop changes (Vite API)
+  useEffect(() => {
+    if (useViteAPI && strokes) {
+      const newPaths = strokes.map(stroke => ({
+        pathString: stroke.path || '',
+        color: stroke.color || color,
+        width: stroke.width || brushSize,
+        points: stroke.points || [],
+      }));
+      setPaths(newPaths);
+    }
+  }, [useViteAPI, strokes, color, brushSize]);
+
+  // Update paths when initialStrokes changes (Legacy API)
+  useEffect(() => {
+    if (!useViteAPI && initialStrokes) {
+      if (initialStrokes.length > 0) {
+        const newPaths = initialStrokes.map(stroke => ({
+          pathString: stroke.path || '',
+          color: stroke.color || '#000000',
+          width: stroke.width || 3,
+          points: stroke.points || [],
+        }));
+        setPaths(newPaths);
+      } else if (initialStrokes.length === 0 && paths.length > 0) {
+        setPaths([]);
+      }
+    }
+  }, [useViteAPI, initialStrokes]);
+
+  // Convert points array to SVG path string
+  const pointsToPath = useCallback((points) => {
+    if (points.length === 0) return '';
+    if (points.length === 1) {
+      return `M ${points[0].x} ${points[0].y}`;
+    }
+    
+    let pathString = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length; i++) {
+      pathString += ` L ${points[i].x} ${points[i].y}`;
+    }
+    return pathString;
+  }, []);
+
+  // Create smooth path using quadratic curves
+  const pointsToSmoothPath = useCallback((points) => {
+    if (points.length === 0) return '';
+    if (points.length === 1) {
+      return `M ${points[0].x} ${points[0].y}`;
+    }
+    if (points.length === 2) {
+      return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+    }
+
+    let pathString = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length - 1; i++) {
+      const current = points[i];
+      const next = points[i + 1];
+      const midX = (current.x + next.x) / 2;
+      const midY = (current.y + next.y) / 2;
+      
+      if (i === 1) {
+        pathString += ` Q ${current.x} ${current.y} ${midX} ${midY}`;
+      } else {
+        pathString += ` T ${midX} ${midY}`;
+      }
+    }
+    
+    const lastPoint = points[points.length - 1];
+    pathString += ` T ${lastPoint.x} ${lastPoint.y}`;
+    
+    return pathString;
+  }, []);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => !disabledRef.current,
+      onMoveShouldSetPanResponder: () => !disabledRef.current,
+      onPanResponderGrant: (evt) => {
+        if (disabledRef.current) return;
+        const { locationX, locationY } = evt.nativeEvent;
+        const point = { x: locationX, y: locationY };
+        isDrawingRef.current = true;
+        setCurrentPoints([point]);
+        
+        const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
+        const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
+        
+        setCurrentPath({
+          pathString: `M ${point.x} ${point.y}`,
+          color: strokeColor,
+          width: strokeWidth,
+        });
+      },
+      onPanResponderMove: (evt) => {
+        if (disabledRef.current || !isDrawingRef.current) return;
+        const { locationX, locationY } = evt.nativeEvent;
+        const point = { x: locationX, y: locationY };
+        
+        setCurrentPoints(prev => {
+          const newPoints = [...prev, point];
+          const limitedPoints = newPoints.slice(-50);
+          
+          const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
+          const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
+          
+          const pathString = pointsToSmoothPath(limitedPoints);
+          setCurrentPath({
+            pathString,
+            color: strokeColor,
+            width: strokeWidth,
+          });
+          
+          return limitedPoints;
+        });
+      },
+      onPanResponderRelease: () => {
+        if (disabledRef.current || !isDrawingRef.current) return;
+        
+        setCurrentPoints(prevPoints => {
+          if (prevPoints.length === 0) {
+            isDrawingRef.current = false;
+            setCurrentPath(null);
+            return [];
+          }
+          
+          const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
+          const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
+          
+          const finalPathString = pointsToSmoothPath(prevPoints);
+          const newPath = {
+            pathString: finalPathString,
+            color: strokeColor,
+            width: strokeWidth,
+            points: prevPoints,
+          };
+          
+          // Update paths state
+          setPaths(prev => {
+            const updatedPaths = [...prev, newPath];
+            
+            // Vite API: call onStrokeComplete with single stroke
+            if (useViteAPI && onStrokeComplete) {
+              onStrokeComplete({
+                path: finalPathString,
+                color: strokeColor,
+                width: strokeWidth,
+                points: prevPoints,
+              });
+            }
+            
+            // Legacy API: call onDrawingChange with all strokes
+            if (!useViteAPI && onDrawingChange) {
+              const strokeData = updatedPaths.map(p => ({
+                path: p.pathString,
+                color: p.color,
+                width: p.width,
+                points: p.points,
+              }));
+              onDrawingChange(strokeData);
+            }
+            
+            return updatedPaths;
+          });
+          
+          setCurrentPath(null);
+          isDrawingRef.current = false;
+          return [];
+        });
+      },
+      onPanResponderTerminate: () => {
+        setCurrentPath(null);
+        setCurrentPoints([]);
+        isDrawingRef.current = false;
+      },
+    })
+  ).current;
+
+  // Export drawing as SVG string
   const exportDrawing = useCallback(async () => {
     try {
-      // This would typically use Skia's image export capabilities
-      // For now, return the stroke data which can be reconstructed
+      const svgString = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+  ${paths.map((pathData, index) => 
+    `<path 
+      key="${index}"
+      d="${pathData.pathString}" 
+      stroke="${pathData.color}" 
+      stroke-width="${pathData.width}" 
+      fill="none" 
+      stroke-linecap="round" 
+      stroke-linejoin="round"
+    />`
+  ).join('\n  ')}
+</svg>`;
+
       if (onExportReady) {
-        const exportData = paths.map(p => ({
-          path: p.pathString,
-          color: p.color,
-          width: p.width,
-        }));
-        onExportReady(exportData);
+        onExportReady({
+          svg: svgString,
+          strokes: paths.map(p => ({
+            path: p.pathString,
+            color: p.color,
+            width: p.width,
+            points: p.points,
+          })),
+        });
       }
     } catch (error) {
       console.error('Error exporting drawing:', error);
@@ -108,60 +281,50 @@ const DrawCanvas = forwardRef(({
     exportDrawing,
     clearCanvas: () => {
       setPaths([]);
-      currentPath.current = Skia.Path.Make();
-      onDrawingChange?.([]);
+      setCurrentPath(null);
+      setCurrentPoints([]);
+      isDrawingRef.current = false;
+      if (!useViteAPI && onDrawingChange) {
+        onDrawingChange([]);
+      }
     },
   }));
 
-  // Update paths when initialStrokes changes (for multiplayer sync)
-  React.useEffect(() => {
-    if (initialStrokes.length > 0 && initialStrokes.length !== paths.length) {
-      const newPaths = initialStrokes.map(stroke => {
-        const path = Skia.Path.MakeFromSVGString(stroke.path);
-        return {
-          path: path || Skia.Path.Make(),
-          color: stroke.color || '#000000',
-          width: stroke.width || 3,
-          pathString: stroke.path,
-        };
-      });
-      setPaths(newPaths);
-    }
-  }, [initialStrokes]);
-
   return (
-    <View style={styles.container}>
-      <Canvas 
-        style={styles.canvas}
-        onTouch={touchHandler}
+    <View style={styles.container} {...panResponder.panHandlers}>
+      <Svg
+        ref={svgRef}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        style={styles.svg}
       >
-        <Group>
+        <G>
           {/* Render all completed paths */}
           {paths.map((pathData, index) => (
             <Path
-              key={index}
-              path={pathData.path}
-              color={pathData.color}
-              style="stroke"
+              key={`path-${index}`}
+              d={pathData.pathString}
+              stroke={pathData.color}
               strokeWidth={pathData.width}
-              strokeCap="round"
-              strokeJoin="round"
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             />
           ))}
           
           {/* Render current drawing path */}
-          {isDrawing.current && (
+          {currentPath && (
             <Path
-              path={currentPath.current}
-              color={currentColor.current}
-              style="stroke"
-              strokeWidth={currentWidth.current}
-              strokeCap="round"
-              strokeJoin="round"
+              d={currentPath.pathString}
+              stroke={currentPath.color}
+              strokeWidth={currentPath.width}
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             />
           )}
-        </Group>
-      </Canvas>
+        </G>
+      </Svg>
     </View>
   );
 });
@@ -183,8 +346,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
-  canvas: {
+  svg: {
     flex: 1,
   },
 });
-

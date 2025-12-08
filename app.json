@@ -8,6 +8,7 @@
     "scheme": "partygamesnative",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "main": "App.js",
     "ios": {
       "supportsTablet": true
     },
@@ -26,7 +27,6 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router",
       [
         "expo-splash-screen",
         {
@@ -41,7 +41,6 @@
       ]
     ],
     "experiments": {
-      "typedRoutes": true,
       "reactCompiler": true
     }
   }

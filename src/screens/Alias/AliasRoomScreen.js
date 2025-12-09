@@ -24,7 +24,7 @@ export default function AliasRoomScreen({ navigation }) {
   };
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="brightBlue">
       <ScrollView 
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
@@ -36,7 +36,7 @@ export default function AliasRoomScreen({ navigation }) {
         <GradientButton
           title="מזמין שחקנים"
           onPress={handleInvitePlayers}
-          variant="orange"
+          variant="brightBlue"
           style={styles.inviteButton}
         />
 

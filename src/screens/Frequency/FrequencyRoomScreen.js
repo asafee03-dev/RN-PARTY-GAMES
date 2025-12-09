@@ -6,16 +6,9 @@ import FrequencyGauge from '../../components/frequency/FrequencyGauge';
 import ScoreBoard from '../../components/frequency/ScoreBoard';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
-
-// Storage helper
-const storage = {
-  async getItem(key) {
-    return null;
-  },
-  async setItem(key, value) {
-    // In a real app, use AsyncStorage
-  }
-};
+import storage from '../../utils/storage';
+import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
+import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 
 const PLAYER_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#10B981", "#3B82F6", "#EC4899", "#F97316", "#14B8A6"];
 const waveIcons = ["📻", "📡", "🎚️", "🎛️"];
@@ -35,138 +28,162 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const isSubmittingGuess = useRef(false);
   const unsubscribeRef = useRef(null);
 
-  const loadRoom = useCallback(async (playerName, retryCount = 0) => {
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY = 1000;
-
+  const loadRoom = async () => {
     try {
-      console.log(`🔵 Loading Frequency room with code: ${roomCode}${retryCount > 0 ? ` (retry ${retryCount}/${MAX_RETRIES})` : ''}`);
+      setIsLoading(true);
+      console.log('🔵 Loading Frequency room with code:', roomCode);
       
       await waitForFirestoreReady();
       
       const roomRef = doc(db, 'FrequencyRoom', roomCode);
-      let snapshot = await getDoc(roomRef);
+      const roomSnap = await getDoc(roomRef);
       
-      if (!snapshot.exists()) {
-        const q = query(collection(db, 'FrequencyRoom'), where('room_code', '==', roomCode));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          const docData = querySnapshot.docs[0];
-          snapshot = { exists: () => true, id: docData.id, data: () => docData.data() };
-        }
-      }
-
-      if (!snapshot.exists()) {
-        console.warn('❌ Room not found with code:', roomCode, '- redirecting to home');
-        navigation.navigate('FrequencyHome');
-        return false;
+      if (!roomSnap.exists()) {
+        console.warn('❌ Room not found with code:', roomCode);
+        await clearCurrentRoom();
+        Alert.alert('שגיאה', 'החדר לא נמצא');
+        navigation.goBack();
+        return;
       }
       
-      const existingRoom = { id: snapshot.id, ...snapshot.data() };
-      console.log('✅ Room loaded successfully:', existingRoom.id, 'with code:', existingRoom.room_code);
+      const roomData = { id: roomSnap.id, ...roomSnap.data() };
+      console.log('✅ Room loaded successfully:', roomData.id, 'with code:', roomData.room_code);
 
-      const playerExists = existingRoom.players?.some(p => p.name === playerName) || false;
-      if (!playerExists) {
-        if (existingRoom.game_status === 'lobby') {
-          const playerColor = PLAYER_COLORS[existingRoom.players?.length % PLAYER_COLORS.length || 0];
-          const updatedPlayers = [...(existingRoom.players || []), { name: playerName, score: 0, has_guessed: false, color: playerColor }];
-          try {
-            await updateDoc(roomRef, { players: updatedPlayers });
-            const updatedSnapshot = await getDoc(roomRef);
-            if (updatedSnapshot.exists()) {
-              const updatedRoom = { id: updatedSnapshot.id, ...updatedSnapshot.data() };
-              setRoom(updatedRoom);
-              return true;
-            }
-          } catch (updateErr) {
-            if (retryCount < MAX_RETRIES) {
-              console.warn(`⚠️ Error adding player, retrying (${retryCount + 1}/${MAX_RETRIES})`);
-              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
-              return loadRoom(playerName, retryCount + 1);
-            }
-            throw updateErr;
-          }
-        } else {
-          console.warn('❌ Cannot join room - game already started or finished');
-          setError('לא ניתן להצטרף לחדר - המשחק כבר התחיל או הסתיים');
-          setTimeout(() => {
-            navigation.navigate('FrequencyHome');
-          }, 2000);
-          return false;
-        }
-      } else {
-        setRoom(existingRoom);
-        return true;
-      }
-    } catch (err) {
-      if (retryCount >= MAX_RETRIES) {
-        console.error('❌ Failed to load room after retries:', err);
-        throw err;
-      }
-      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
-      return loadRoom(playerName, retryCount + 1);
-    }
-  }, [roomCode, navigation]);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const initializeRoom = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-
-        if (!roomCode) {
-          if (isMounted) {
-            setIsLoading(false);
-            navigation.navigate('FrequencyHome');
-          }
-          return;
-        }
-
-        const playerName = await storage.getItem('playerName');
-        if (!playerName) {
-          if (isMounted) {
-            setIsLoading(false);
-            navigation.navigate('FrequencyHome');
-          }
-          return;
-        }
-
+      // Get player name from storage
+      const playerName = currentPlayerName || (await storage.getItem('playerName')) || '';
+      if (playerName) {
         setCurrentPlayerName(playerName);
-        
+      }
+
+      // Add player if not already in room
+      const playerExists = roomData.players && Array.isArray(roomData.players) && roomData.players.some(p => p && p.name === playerName);
+      if (!playerExists && roomData.game_status === 'lobby' && playerName) {
+        const playerColor = PLAYER_COLORS[roomData.players?.length % PLAYER_COLORS.length || 0];
+        const updatedPlayers = [...(roomData.players || []), { name: playerName, score: 0, has_guessed: false, color: playerColor }];
+        console.log('🔵 Adding player to Frequency room:', playerName);
+        try {
+          await updateDoc(roomRef, { players: updatedPlayers });
+          const updatedSnapshot = await getDoc(roomRef);
+          if (updatedSnapshot.exists()) {
+            const updatedRoom = { id: updatedSnapshot.id, ...updatedSnapshot.data() };
+            setRoom(updatedRoom);
+            return;
+          }
+        } catch (updateErr) {
+          console.error('❌ Error adding player:', updateErr);
+        }
+      }
+      setRoom(roomData);
+    } catch (error) {
+      console.error('❌ Error loading room:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לטעון את החדר');
+      navigation.goBack();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load player name on mount (like Alias does)
+  useEffect(() => {
+    const loadPlayerName = async () => {
+      try {
+        const savedName = await storage.getItem('playerName');
+        if (savedName) {
+          setCurrentPlayerName(savedName);
+        }
         const savedMode = await storage.getItem('drinkingMode');
         if (savedMode) {
           setDrinkingMode(savedMode === 'true');
         }
-
-        const loaded = await loadRoom(playerName);
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      } catch (err) {
-        console.error('Error initializing room:', err);
-        if (isMounted) {
-          setError(err);
-          setIsLoading(false);
-        }
+      } catch (e) {
+        console.warn('Could not load player name:', e);
       }
     };
+    loadPlayerName();
+  }, []);
 
-    initializeRoom();
+  // Save room state for reconnection on refresh
+  useEffect(() => {
+    if (roomCode) {
+      saveCurrentRoom('frequency', roomCode, {});
+    }
+  }, [roomCode]);
+
+  // Initialize room and set up listener (like Alias does)
+  useEffect(() => {
+    if (!roomCode) {
+      // Try to restore from saved state on refresh
+      const restoreRoom = async () => {
+        try {
+          const savedRoom = await loadCurrentRoom();
+          if (savedRoom && savedRoom.gameType === 'frequency' && savedRoom.roomCode) {
+            // Navigate to saved room
+            navigation.replace('FrequencyRoom', { roomCode: savedRoom.roomCode });
+            return;
+          } else {
+            Alert.alert('שגיאה', 'קוד חדר חסר');
+            await clearCurrentRoom();
+            navigation.goBack();
+            return;
+          }
+        } catch (error) {
+          console.warn('⚠️ Error restoring room:', error);
+          Alert.alert('שגיאה', 'קוד חדר חסר');
+          navigation.goBack();
+          return;
+        }
+      };
+      restoreRoom();
+      return;
+    }
+
+    // Cleanup any existing listener before setting up new one
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    if (needleUpdateTimeout.current) {
+      clearTimeout(needleUpdateTimeout.current);
+      needleUpdateTimeout.current = null;
+    }
+
+    loadRoom();
+    setupRealtimeListener();
 
     return () => {
-      isMounted = false;
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+      if (needleUpdateTimeout.current) {
+        clearTimeout(needleUpdateTimeout.current);
+        needleUpdateTimeout.current = null;
+      }
+    };
+  }, [roomCode]);
+
+  // Cleanup timers/listeners on navigation away
+  useEffect(() => {
+    const unsubscribeNav = navigation.addListener('beforeRemove', () => {
       if (needleUpdateTimeout.current) {
         clearTimeout(needleUpdateTimeout.current);
       }
-    };
-  }, [roomCode, navigation, loadRoom]);
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+      }
+    });
+    return unsubscribeNav;
+  }, [navigation]);
 
-  useEffect(() => {
-    if (!room || !room.id) return;
+  const setupRealtimeListener = () => {
+    // Prevent duplicate listeners
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
 
-    const roomRef = doc(db, 'FrequencyRoom', room.id);
+    const roomRef = doc(db, 'FrequencyRoom', roomCode);
+    
     unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const newRoom = { id: snapshot.id, ...snapshot.data() };
@@ -176,15 +193,14 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           }
           return prevRoom;
         });
+      } else {
+        Alert.alert('שגיאה', 'החדר נמחק');
+        navigation.goBack();
       }
+    }, (error) => {
+      console.error('Error in realtime listener:', error);
     });
-
-    return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-      }
-    };
-  }, [room, roomCode]);
+  };
 
   const calculateSectors = () => {
     const twoPointWidth = 10;
@@ -271,7 +287,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           current_topic: { left_side: randomTopic.left, right_side: randomTopic.right },
           target_position: randomTarget,
           current_round_sectors: sectors,
-          turn_phase: 'clue',
+          turn_phase: 'guessing', // Automatically start in guessing phase
           guess_submitted_names: {}
         };
         await updateDoc(roomRef, updates);
@@ -285,21 +301,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     } catch (error) {
       console.error('Error starting game:', error);
       Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');
-    }
-  };
-
-  const handleStartGuessing = async () => {
-    if (!room || !isMyTurn()) return;
-    if (!room?.id) return;
-
-    try {
-      const roomRef = doc(db, 'FrequencyRoom', room.id);
-      await updateDoc(roomRef, {
-        turn_phase: 'guessing'
-      });
-    } catch (error) {
-      console.error('Error starting guessing phase:', error);
-      Alert.alert('שגיאה', 'שגיאה בהתחלת שלב הניחושים. נסה שוב.');
     }
   };
 
@@ -552,13 +553,19 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     }
   };
 
-  const copyRoomCode = () => {
-    Alert.alert('קוד חדר', roomCode, [{ text: 'אישור' }]);
+  const handleCopyRoomCode = async () => {
+    await copyRoomCode(roomCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleCopyRoomLink = async () => {
+    await copyRoomLink(roomCode, 'frequency');
+  };
+
   const goBack = async () => {
+    // Clear saved room state when leaving
+    await clearCurrentRoom();
     navigation.navigate('FrequencyHome');
   };
 
@@ -579,7 +586,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
 
   if (error) {
     return (
-      <GradientBackground variant="purple">
+      <GradientBackground variant="red">
         <View style={styles.errorContainer}>
           <Text style={styles.errorTitle}>שגיאה בטעינת החדר</Text>
           <Text style={styles.errorMessage}>לא הצלחנו לטעון את חדר המשחק</Text>
@@ -590,7 +597,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
               setIsLoading(true);
               navigation.navigate('FrequencyHome');
             }}
-            variant="purple"
+            variant="red"
             style={styles.errorButton}
           />
         </View>
@@ -600,7 +607,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
 
   if (isLoading || !room) {
     return (
-      <GradientBackground variant="purple">
+      <GradientBackground variant="red">
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#FFFFFF" />
           <Text style={styles.loadingText}>טוען חדר משחק...</Text>
@@ -612,7 +619,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const isHost = room.host_name === currentPlayerName;
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="red">
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -629,13 +636,17 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                 <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה</Text>
               </View>
             )}
-            <View style={styles.roomCodeContainer}>
+            <Pressable onPress={handleCopyRoomCode} style={styles.roomCodeContainer}>
               <Text style={styles.roomCodeLabel}>קוד:</Text>
               <Text style={styles.roomCodeText}>{roomCode}</Text>
-              <TouchableOpacity onPress={copyRoomCode} style={styles.copyButton}>
-                <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
-              </TouchableOpacity>
-            </View>
+              <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
+            </Pressable>
+            <GradientButton
+              title="📋 העתק קישור"
+              onPress={handleCopyRoomLink}
+              variant="ghost"
+              style={styles.copyLinkButton}
+            />
           </View>
         </View>
 
@@ -673,16 +684,21 @@ export default function FrequencyRoomScreen({ navigation, route }) {
               ) : null}
 
               <View style={styles.playersSection}>
-                <Text style={styles.playersTitle}>שחקנים בחדר ({room.players.length}):</Text>
+                <Text style={styles.playersTitle}>שחקנים בחדר ({room?.players && Array.isArray(room.players) ? room.players.length : 0}):</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.playersList}>
-                  {room.players.map((player, idx) => (
-                    <View key={idx} style={styles.playerCard}>
-                      <Text style={styles.playerCardName}>{player.name}</Text>
-                      {player.name === room.host_name && (
-                        <Text style={styles.crownIconSmall}>👑</Text>
-                      )}
-                    </View>
-                  ))}
+                  {room.players && Array.isArray(room.players) && room.players
+                    .filter((player) => player != null && player.name != null)
+                    .map((player, idx) => {
+                      const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
+                      return (
+                        <View key={`player-${idx}`} style={styles.playerCard}>
+                          <Text style={styles.playerCardName}>{playerName}</Text>
+                          {playerName === room.host_name && (
+                            <Text style={styles.crownIconSmall}>👑</Text>
+                          )}
+                        </View>
+                      );
+                    })}
                 </ScrollView>
               </View>
 
@@ -690,7 +706,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                 <GradientButton
                   title="▶ התחל משחק!"
                   onPress={startGame}
-                  variant="purple"
+                  variant="red"
                   style={styles.startButton}
                   disabled={room.players.length < 2}
                 />
@@ -758,7 +774,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                 <GradientButton
                   title={isAdvancingTurn ? 'מעביר תור...' : 'המשך לסיבוב הבא'}
                   onPress={handleRoundSummaryContinue}
-                  variant="purple"
+                  variant="red"
                   style={styles.continueButton}
                   disabled={isAdvancingTurn}
                 />
@@ -825,20 +841,12 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                       <Text style={styles.turnBadgeText}>🎮 התור שלך!</Text>
                     </View>
                     <Text style={styles.turnMessage}>תן רמז לשחקנים האחרים - השחקנים מנחשים...</Text>
-                    {room.turn_phase === 'clue' && (
-                      <GradientButton
-                        title="התחל ניחושים"
-                        onPress={handleStartGuessing}
-                        variant="purple"
-                        style={styles.startGuessingButton}
-                      />
-                    )}
                   </>
                 ) : (
                   <>
                     <Text style={styles.turnMessage}>התור של {getCurrentPlayerName()}</Text>
                     {!hasPlayerSubmittedGuess(room, currentPlayerName) && (
-                      <Text style={styles.guessHint}>הזז את המחוגן למיקום הנכון ולחץ שלח ניחוש</Text>
+                      <Text style={styles.guessHint}>גע או גרור את המחוגן למיקום הנכון ולחץ שלח ניחוש</Text>
                     )}
                     {hasPlayerSubmittedGuess(room, currentPlayerName) && (
                       <View style={styles.submittedBadge}>
@@ -856,7 +864,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                   targetPosition={room.target_position}
                   showTarget={isMyTurn()}
                   needlePosition={room.needle_positions[currentPlayerName] || 90}
-                  canMove={!isMyTurn() && !hasPlayerSubmittedGuess(room, currentPlayerName)}
+                  canMove={!isMyTurn() && !hasPlayerSubmittedGuess(room, currentPlayerName) && room.game_status === 'playing'}
                   showAllNeedles={isMyTurn() || allPlayersGuessed()}
                   allNeedles={room.needle_positions}
                   sectors={room.current_round_sectors}
@@ -976,7 +984,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                     <GradientButton
                       title="משחק חדש"
                       onPress={resetGame}
-                      variant="purple"
+                      variant="red"
                       style={styles.resetButton}
                     />
                   )}
@@ -1235,9 +1243,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
-  },
-  startGuessingButton: {
-    marginTop: 8,
   },
   gaugeContainer: {
     alignItems: 'center',

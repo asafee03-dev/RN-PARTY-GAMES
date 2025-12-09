@@ -3,8 +3,10 @@ import { View, StyleSheet, Dimensions, PanResponder } from 'react-native';
 import Svg, { Path, G } from 'react-native-svg';
 
 const { width, height } = Dimensions.get('window');
-const CANVAS_WIDTH = width - 40;
-const CANVAS_HEIGHT = height * 0.6;
+// Make canvas square and centered - use smaller dimension minus padding
+const CANVAS_SIZE = Math.min(width - 40, height * 0.6, 500); // Max 500px, responsive
+const CANVAS_WIDTH = CANVAS_SIZE;
+const CANVAS_HEIGHT = CANVAS_SIZE;
 
 /**
  * Draw Canvas component using react-native-svg
@@ -165,19 +167,19 @@ const DrawCanvas = forwardRef(({
         
         setCurrentPoints(prev => {
           const newPoints = [...prev, point];
-          const limitedPoints = newPoints.slice(-50);
+          // Don't limit points - allow full line drawing
           
           const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
           const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
           
-          const pathString = pointsToSmoothPath(limitedPoints);
+          const pathString = pointsToSmoothPath(newPoints);
           setCurrentPath({
             pathString,
             color: strokeColor,
             width: strokeWidth,
           });
           
-          return limitedPoints;
+          return newPoints;
         });
       },
       onPanResponderRelease: () => {
@@ -198,7 +200,8 @@ const DrawCanvas = forwardRef(({
             pathString: finalPathString,
             color: strokeColor,
             width: strokeWidth,
-            points: prevPoints,
+            // Save as path string only to save space, not points
+            points: [],
           };
           
           // Update paths state
@@ -211,7 +214,8 @@ const DrawCanvas = forwardRef(({
                 path: finalPathString,
                 color: strokeColor,
                 width: strokeWidth,
-                points: prevPoints,
+                // Save as path string only to save space
+                points: [],
               });
             }
             
@@ -221,7 +225,8 @@ const DrawCanvas = forwardRef(({
                 path: p.pathString,
                 color: p.color,
                 width: p.width,
-                points: p.points,
+                // Save as path string only to save space
+                points: [],
               }));
               onDrawingChange(strokeData);
             }

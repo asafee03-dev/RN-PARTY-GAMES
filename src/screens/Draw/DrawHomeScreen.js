@@ -4,17 +4,7 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
-
-// Using a simple storage helper - can be replaced with AsyncStorage later
-const storage = {
-  async getItem(key) {
-    // In a real app, use AsyncStorage or similar
-    return null;
-  },
-  async setItem(key, value) {
-    // In a real app, use AsyncStorage or similar
-  }
-};
+import storage from '../../utils/storage';
 
 const drawIcons = ["🎨", "✏️", "🖌️", "🖍️", "✨"];
 
@@ -111,13 +101,59 @@ export default function DrawHomeScreen({ navigation }) {
       console.log('✅ [DRAW] Firestore confirmed online, proceeding with write');
       
       const roomRef = doc(db, 'DrawRoom', code);
-      await setDoc(roomRef, roomData);
-      console.log('✅ [DRAW] Room created successfully with code:', code);
+      console.log('🔵 [DRAW] Calling setDoc with room code:', code);
+      console.log('🔵 [DRAW] Room data:', JSON.stringify(roomData, null, 2));
       
+      try {
+        await setDoc(roomRef, roomData);
+        console.log('✅ [DRAW] setDoc completed successfully');
+      } catch (setDocError) {
+        console.error('❌ [DRAW] setDoc failed:', setDocError);
+        console.error('❌ [DRAW] Error code:', setDocError.code);
+        console.error('❌ [DRAW] Error message:', setDocError.message);
+        throw setDocError;
+      }
+      
+      // Verify the document was actually created
+      console.log('🔵 [DRAW] Verifying document exists...');
+      try {
+        const verifySnapshot = await getDoc(roomRef);
+        console.log('🔵 [DRAW] Verification snapshot:', verifySnapshot.exists() ? 'EXISTS' : 'NOT FOUND');
+        if (!verifySnapshot.exists()) {
+          console.error('❌ [DRAW] Document not found after write!');
+          console.error('❌ [DRAW] Room code:', code);
+          console.error('❌ [DRAW] Collection: DrawRoom');
+          throw new Error('Document was not created - check Firestore Rules');
+        }
+        console.log('✅ [DRAW] Document verified successfully');
+      } catch (verifyError) {
+        console.error('❌ [DRAW] Verification failed:', verifyError);
+        throw verifyError;
+      }
+      
+      console.log('✅ [DRAW] Room created and verified successfully with code:', code);
+      
+      // Save player name before navigation
+      try {
+        await storage.setItem('playerName', playerName);
+      } catch (e) {
+        console.warn('⚠️ [DRAW] Could not save player name:', e);
+      }
+      
+      // Navigate immediately after successful write (like old project)
+      console.log('🔵 [DRAW] Navigating to room...');
       navigation.navigate('DrawRoom', { roomCode: code });
     } catch (error) {
       console.error('❌ [DRAW] Error creating room:', error);
-      setError('שגיאה ביצירת החדר. נסה שוב.');
+      let errorMessage = 'שגיאה ביצירת החדר. נסה שוב.';
+      if (error.message?.includes('Firestore Rules')) {
+        errorMessage = 'שגיאה: החדר לא נוצר. אנא בדוק את כללי Firestore.';
+      } else if (error.code === 'permission-denied') {
+        errorMessage = 'אין הרשאה ליצור חדר. אנא בדוק את כללי Firestore.';
+      } else if (error.code === 'unavailable') {
+        errorMessage = 'Firestore לא זמין. אנא בדוק את החיבור לאינטרנט.';
+      }
+      setError(errorMessage);
     } finally {
       setIsCreating(false);
       setTimeout(() => {

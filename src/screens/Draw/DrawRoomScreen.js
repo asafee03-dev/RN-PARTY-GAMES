@@ -8,18 +8,11 @@ import DrawingTools from '../../components/draw/DrawingTools';
 import Timer from '../../components/game/Timer';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
+import storage from '../../utils/storage';
+import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
+import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 
-// Storage helper
-const storage = {
-  async getItem(key) {
-    return null;
-  },
-  async setItem(key, value) {
-    // In a real app, use AsyncStorage
-  }
-};
-
-const WINNING_SCORE = 7;
+const WINNING_SCORE = 12;
 
 const getAllGuesses = (roomData) => {
   if (!roomData) return [];
@@ -48,72 +41,184 @@ export default function DrawRoomScreen({ navigation, route }) {
   const timerCheckInterval = useRef(null);
   const unsubscribeRef = useRef(null);
   const roomRef = useRef(room);
+  const currentPlayerNameRef = useRef(currentPlayerName);
 
   useEffect(() => {
     roomRef.current = room;
   }, [room]);
 
   useEffect(() => {
-    const initializeRoom = async () => {
+    currentPlayerNameRef.current = currentPlayerName;
+  }, [currentPlayerName]);
+
+  // Load player name on mount (like Alias does)
+  useEffect(() => {
+    const loadPlayerName = async () => {
       try {
-        setIsLoading(true);
-        setError(null);
-
-        if (!roomCode) {
-          navigation.navigate('DrawHome');
-          return;
+        const savedName = await storage.getItem('playerName');
+        if (savedName) {
+          setCurrentPlayerName(savedName);
         }
-
-        const playerName = await storage.getItem('playerName');
-        if (!playerName) {
-          navigation.navigate('DrawHome');
-          return;
-        }
-
-        setCurrentPlayerName(playerName);
-
         const savedMode = await storage.getItem('drinkingMode');
         if (savedMode) {
           setDrinkingMode(savedMode === 'true');
         }
-
-        await loadRoom(playerName);
-        setIsLoading(false);
-      } catch (err) {
-        console.error('Error initializing room:', err);
-        setError(err);
-        setIsLoading(false);
+      } catch (e) {
+        console.warn('Could not load player name:', e);
       }
     };
+    loadPlayerName();
+  }, []);
 
-    initializeRoom();
-  }, [roomCode, navigation]);
-
+  // Save room state for reconnection on refresh
   useEffect(() => {
-    if (!room || !room.id) return;
+    if (roomCode) {
+      saveCurrentRoom('draw', roomCode, {});
+    }
+  }, [roomCode]);
 
-    const roomRef = doc(db, 'DrawRoom', room.id);
-    unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const newRoom = { id: snapshot.id, ...snapshot.data() };
-        setRoom(prevRoom => {
-          if (JSON.stringify(prevRoom) !== JSON.stringify(newRoom)) {
-            return newRoom;
+  // Initialize room and set up listener (like Alias does)
+  useEffect(() => {
+    if (!roomCode) {
+      // Try to restore from saved state on refresh
+      const restoreRoom = async () => {
+        try {
+          const savedRoom = await loadCurrentRoom();
+          if (savedRoom && savedRoom.gameType === 'draw' && savedRoom.roomCode) {
+            navigation.replace('DrawRoom', { roomCode: savedRoom.roomCode });
+            return;
+          } else {
+            await clearCurrentRoom();
+            Alert.alert('שגיאה', 'קוד חדר חסר');
+            navigation.goBack();
+            return;
           }
-          return prevRoom;
-        });
+        } catch (error) {
+          console.warn('⚠️ Error restoring room:', error);
+          await clearCurrentRoom();
+          Alert.alert('שגיאה', 'קוד חדר חסר');
+          navigation.goBack();
+          return;
+        }
+      };
+      restoreRoom();
+      return;
+    }
+
+    // Cleanup any existing listener before setting up new one
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    if (timerCheckInterval.current) {
+      clearInterval(timerCheckInterval.current);
+      timerCheckInterval.current = null;
+    }
+
+    loadRoom();
+    setupRealtimeListener();
+
+    return () => {
+      // Cleanup on unmount
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+      if (timerCheckInterval.current) {
+        clearInterval(timerCheckInterval.current);
+        timerCheckInterval.current = null;
+      }
+    };
+  }, [roomCode]);
+
+  // Cleanup on navigation away
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      // Cleanup timers and listeners when navigating away
+      if (timerCheckInterval.current) {
+        clearInterval(timerCheckInterval.current);
+        timerCheckInterval.current = null;
+      }
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
       }
     });
 
-    return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
+    return unsubscribe;
+  }, [navigation]);
+
+  const setupRealtimeListener = () => {
+    // Prevent duplicate listeners
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
+    const roomRef = doc(db, 'DrawRoom', roomCode);
+    
+    unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const newRoom = { id: snapshot.id, ...snapshot.data() };
+        
+        // Check if current player is still in the room
+        const playerName = currentPlayerNameRef.current || '';
+        const isPlayerInRoom = newRoom.players && Array.isArray(newRoom.players) && 
+          newRoom.players.some(p => p && p.name === playerName);
+        
+        // If player left the room, don't process updates or show popups
+        if (!isPlayerInRoom && playerName) {
+          console.log('⚠️ Player left room, ignoring updates');
+          // Cleanup and navigate away
+          if (timerCheckInterval.current) {
+            clearInterval(timerCheckInterval.current);
+            timerCheckInterval.current = null;
+          }
+          if (unsubscribeRef.current) {
+            unsubscribeRef.current();
+            unsubscribeRef.current = null;
+          }
+          return;
+        }
+        
+        // Always update room so strokes propagate to all players
+        setRoom(newRoom);
+        // Update local strokes from snapshot (source of truth)
+        if (newRoom.drawing_data) {
+          try {
+            const strokes = typeof newRoom.drawing_data === 'string'
+              ? JSON.parse(newRoom.drawing_data)
+              : newRoom.drawing_data;
+            setLocalStrokes(Array.isArray(strokes) ? strokes : []);
+          } catch (error) {
+            console.error('Error parsing strokes from listener:', error);
+          }
+        }
+      } else {
+        // Room deleted - cleanup everything
+        if (timerCheckInterval.current) {
+          clearInterval(timerCheckInterval.current);
+          timerCheckInterval.current = null;
+        }
+        if (unsubscribeRef.current) {
+          unsubscribeRef.current();
+          unsubscribeRef.current = null;
+        }
+        Alert.alert('שגיאה', 'החדר נמחק');
+        navigation.goBack();
       }
-    };
-  }, [room, roomCode]);
+    }, (error) => {
+      console.error('Error in realtime listener:', error);
+      // Cleanup on error
+      if (timerCheckInterval.current) {
+        clearInterval(timerCheckInterval.current);
+        timerCheckInterval.current = null;
+      }
+    });
+  };
 
   useEffect(() => {
-    // Update local strokes when room data changes
+    // Update local strokes when room data changes - source of truth is room.drawing_data
     if (room?.drawing_data) {
       try {
         const strokes = typeof room.drawing_data === 'string' 
@@ -129,9 +234,10 @@ export default function DrawRoomScreen({ navigation, route }) {
     }
   }, [room?.drawing_data, room?.game_status]);
 
-  // Timer management
+  // Timer management - with proper cleanup
   useEffect(() => {
-    if (!room || room.game_status !== 'playing' || !room.turn_start_time) {
+    // Cleanup on unmount or when conditions change
+    if (!room || room.game_status !== 'playing' || !room.turn_start_time || room.game_status === 'finished') {
       if (timerCheckInterval.current) {
         clearInterval(timerCheckInterval.current);
         timerCheckInterval.current = null;
@@ -141,7 +247,12 @@ export default function DrawRoomScreen({ navigation, route }) {
 
     const updateTimer = () => {
       const currentRoom = roomRef.current;
-      if (!currentRoom || currentRoom.game_status !== 'playing' || !currentRoom.turn_start_time) {
+      // Check if room still exists and is in playing state
+      if (!currentRoom || !currentRoom.id || currentRoom.game_status !== 'playing' || !currentRoom.turn_start_time || currentRoom.game_status === 'finished') {
+        if (timerCheckInterval.current) {
+          clearInterval(timerCheckInterval.current);
+          timerCheckInterval.current = null;
+        }
         return;
       }
 
@@ -163,7 +274,7 @@ export default function DrawRoomScreen({ navigation, route }) {
         timerCheckInterval.current = null;
       }
     };
-  }, [room?.game_status, room?.turn_start_time, room?.show_round_summary]);
+  }, [room?.game_status, room?.turn_start_time, room?.show_round_summary, room?.id]);
 
   const handleTimerExpiration = async () => {
     const currentRoom = roomRef.current;
@@ -175,12 +286,25 @@ export default function DrawRoomScreen({ navigation, route }) {
     let firstWinner = null;
     const drinkingPlayersList = [];
 
+    // Calculate points based on time - 3 points for first 20s, 2 for 21-40s, 1 for 41-60s
+    const calculatePointsByTime = (timestamp, turnStartTime) => {
+      if (!timestamp || !turnStartTime) return 1;
+      const elapsed = Math.floor((timestamp - turnStartTime) / 1000);
+      if (elapsed <= 20) return 3;
+      if (elapsed <= 40) return 2;
+      return 1;
+    };
+
     const allGuesses = getAllGuesses(currentRoom);
     
-    const correctGuessers = new Set();
+    const correctGuessers = new Map(); // Map of playerName -> points earned
     allGuesses.forEach(g => {
-      if (g.isCorrect) {
-        correctGuessers.add(g.playerName);
+      if (g.isCorrect && g.timestamp) {
+        const points = calculatePointsByTime(g.timestamp, currentRoom.turn_start_time);
+        // If player already guessed correctly, take the highest points
+        if (!correctGuessers.has(g.playerName) || correctGuessers.get(g.playerName) < points) {
+          correctGuessers.set(g.playerName, points);
+        }
         if (!firstWinner) {
           firstWinner = g.playerName;
         }
@@ -198,7 +322,8 @@ export default function DrawRoomScreen({ navigation, route }) {
       }
 
       if (correctGuessers.has(player.name)) {
-        return { ...player, score: player.score + 1 };
+        const pointsEarned = correctGuessers.get(player.name);
+        return { ...player, score: player.score + pointsEarned };
       }
 
       if (drinkingModeActive && !correctGuessers.has(player.name)) {
@@ -222,51 +347,56 @@ export default function DrawRoomScreen({ navigation, route }) {
     }
   };
 
-  const loadRoom = async (playerName) => {
+  const loadRoom = async () => {
     console.log('🔵 Loading Draw room with code:', roomCode);
     try {
+      setIsLoading(true);
       await waitForFirestoreReady();
       
       const roomRef = doc(db, 'DrawRoom', roomCode);
-      let snapshot = await getDoc(roomRef);
+      const roomSnap = await getDoc(roomRef);
       
-      if (!snapshot.exists()) {
-        const q = query(collection(db, 'DrawRoom'), where('room_code', '==', roomCode));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          const docData = querySnapshot.docs[0];
-          snapshot = { exists: () => true, id: docData.id, data: () => docData.data() };
-        }
-      }
-      
-      if (!snapshot.exists()) {
-        console.warn('❌ Room not found with code:', roomCode, '- redirecting to home');
-        navigation.navigate('DrawHome');
+      if (!roomSnap.exists()) {
+        console.warn('❌ Room not found with code:', roomCode);
+        await clearCurrentRoom();
+        Alert.alert('שגיאה', 'החדר לא נמצא');
+        navigation.goBack();
         return;
       }
       
-      const existingRoom = { id: snapshot.id, ...snapshot.data() };
-      console.log('✅ Room loaded successfully:', existingRoom.id, 'with code:', existingRoom.room_code);
+      const roomData = { id: roomSnap.id, ...roomSnap.data() };
+      console.log('✅ Room loaded successfully:', roomData.id, 'with code:', roomData.room_code);
 
-      const playerExists = existingRoom.players.some(p => p.name === playerName);
-      if (!playerExists && existingRoom.game_status === 'lobby') {
-        const updatedPlayers = [...existingRoom.players, { name: playerName, score: 0 }];
+      // Get player name from storage
+      const playerName = currentPlayerName || (await storage.getItem('playerName')) || '';
+      if (playerName) {
+        setCurrentPlayerName(playerName);
+      }
+
+      // Add player if not already in room
+      const playerExists = roomData.players && Array.isArray(roomData.players) && roomData.players.some(p => p && p.name === playerName);
+      if (!playerExists && roomData.game_status === 'lobby' && playerName) {
+        const updatedPlayers = [...(roomData.players || []), { name: playerName, score: 0 }];
+        console.log('🔵 Adding player to Draw room:', playerName);
         try {
           await updateDoc(roomRef, { players: updatedPlayers });
           const updatedSnapshot = await getDoc(roomRef);
           if (updatedSnapshot.exists()) {
-            setRoom({ id: updatedSnapshot.id, ...updatedSnapshot.data() });
+            const updatedRoom = { id: updatedSnapshot.id, ...updatedSnapshot.data() };
+            setRoom(updatedRoom);
+            return;
           }
-        } catch (error) {
-          console.error('❌ Error updating players:', error);
+        } catch (updateErr) {
+          console.error('❌ Error adding player:', updateErr);
         }
-      } else {
-        setRoom(existingRoom);
       }
+      setRoom(roomData);
     } catch (error) {
       console.error('❌ Error loading room:', error);
-      navigation.navigate('DrawHome');
-      return;
+      Alert.alert('שגיאה', 'לא הצלחנו לטעון את החדר');
+      navigation.goBack();
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -332,18 +462,38 @@ export default function DrawRoomScreen({ navigation, route }) {
   };
 
   const handleStrokeComplete = async (stroke) => {
-    if (!isMyTurn()) return;
-
-    const updatedStrokes = [...localStrokes, stroke];
-    setLocalStrokes(updatedStrokes);
+    if (!isMyTurn() || !roomRef.current || !roomRef.current.id) return;
 
     try {
-      const roomRef = doc(db, 'DrawRoom', room.id);
-      await updateDoc(roomRef, {
+      // Get current strokes from latest snapshot and append
+      let currentStrokes = roomRef.current.drawing_data 
+        ? (typeof roomRef.current.drawing_data === 'string' ? JSON.parse(roomRef.current.drawing_data) : roomRef.current.drawing_data)
+        : [];
+      
+      if (!Array.isArray(currentStrokes)) {
+        console.warn('Current strokes is not an array, resetting');
+        currentStrokes = [];
+      }
+
+      const updatedStrokes = [...currentStrokes, stroke];
+      
+      // Update local state immediately for responsive UI
+      setLocalStrokes(updatedStrokes);
+
+      // Save to Firestore (append full strokes array)
+      const roomDocRef = doc(db, 'DrawRoom', roomRef.current.id);
+      await updateDoc(roomDocRef, {
         drawing_data: JSON.stringify(updatedStrokes)
       });
+      
+      console.log('✅ Stroke saved successfully, total strokes:', updatedStrokes.length);
     } catch (error) {
-      console.error('Error saving stroke:', error);
+      console.error('❌ Error saving stroke:', error);
+      // Revert local state on error
+      const currentStrokes = roomRef.current?.drawing_data 
+        ? (typeof roomRef.current.drawing_data === 'string' ? JSON.parse(roomRef.current.drawing_data) : roomRef.current.drawing_data)
+        : [];
+      setLocalStrokes(Array.isArray(currentStrokes) ? currentStrokes : []);
     }
   };
 
@@ -414,10 +564,23 @@ export default function DrawRoomScreen({ navigation, route }) {
       const drinkingPlayersList = [];
       let hasCorrectGuess = false;
 
-      const correctGuessers = new Set();
+      // Calculate points based on time - 3 points for first 20s, 2 for 21-40s, 1 for 41-60s
+      const calculatePointsByTime = (timestamp, turnStartTime) => {
+        if (!timestamp || !turnStartTime) return 1;
+        const elapsed = Math.floor((timestamp - turnStartTime) / 1000);
+        if (elapsed <= 20) return 3;
+        if (elapsed <= 40) return 2;
+        return 1;
+      };
+
+      const correctGuessers = new Map(); // Map of playerName -> points earned
       updatedGuesses.forEach(g => {
-        if (g.isCorrect) {
-          correctGuessers.add(g.playerName);
+        if (g.isCorrect && g.timestamp) {
+          const points = calculatePointsByTime(g.timestamp, room.turn_start_time);
+          // If player already guessed correctly, take the highest points
+          if (!correctGuessers.has(g.playerName) || correctGuessers.get(g.playerName) < points) {
+            correctGuessers.set(g.playerName, points);
+          }
           if (!firstWinner) {
             firstWinner = g.playerName;
           }
@@ -434,7 +597,8 @@ export default function DrawRoomScreen({ navigation, route }) {
         }
 
         if (correctGuessers.has(player.name)) {
-          return { ...player, score: player.score + 1 };
+          const pointsEarned = correctGuessers.get(player.name);
+          return { ...player, score: player.score + pointsEarned };
         }
 
         if (drinkingModeActive && !correctGuessers.has(player.name)) {
@@ -535,10 +699,14 @@ export default function DrawRoomScreen({ navigation, route }) {
     }
   };
 
-  const copyRoomCode = () => {
-    Alert.alert('קוד חדר', roomCode, [{ text: 'אישור' }]);
+  const handleCopyRoomCode = async () => {
+    await copyRoomCode(roomCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyRoomLink = async () => {
+    await copyRoomLink(roomCode, 'draw');
   };
 
   const resetGame = async () => {
@@ -568,6 +736,7 @@ export default function DrawRoomScreen({ navigation, route }) {
   };
 
   const goBack = async () => {
+    await clearCurrentRoom();
     navigation.navigate('DrawHome');
   };
 
@@ -636,13 +805,17 @@ export default function DrawRoomScreen({ navigation, route }) {
           </TouchableOpacity>
 
           <View style={styles.headerRight}>
-            <View style={styles.roomCodeContainer}>
+            <Pressable onPress={handleCopyRoomCode} style={styles.roomCodeContainer}>
               <Text style={styles.roomCodeLabel}>קוד:</Text>
               <Text style={styles.roomCodeText}>{roomCode}</Text>
-              <TouchableOpacity onPress={copyRoomCode} style={styles.copyButton}>
-                <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
-              </TouchableOpacity>
-            </View>
+              <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
+            </Pressable>
+            <GradientButton
+              title="📋 העתק קישור"
+              onPress={handleCopyRoomLink}
+              variant="ghost"
+              style={styles.copyLinkButton}
+            />
           </View>
         </View>
 
@@ -682,16 +855,21 @@ export default function DrawRoomScreen({ navigation, route }) {
               )}
 
               <View style={styles.playersSection}>
-                <Text style={styles.playersTitle}>שחקנים בחדר ({room.players.length}):</Text>
+                <Text style={styles.playersTitle}>שחקנים בחדר ({room?.players && Array.isArray(room.players) ? room.players.length : 0}):</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.playersList}>
-                  {room.players.map((player, idx) => (
-                    <View key={idx} style={styles.playerCard}>
-                      <Text style={styles.playerCardName}>{player.name}</Text>
-                      {player.name === room.host_name && (
-                        <Text style={styles.crownIconSmall}>👑</Text>
-                      )}
-                    </View>
-                  ))}
+                  {room.players && Array.isArray(room.players) && room.players
+                    .filter((player) => player != null && player.name != null)
+                    .map((player, idx) => {
+                      const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
+                      return (
+                        <View key={`player-${idx}`} style={styles.playerCard}>
+                          <Text style={styles.playerCardName}>{playerName}</Text>
+                          {playerName === room.host_name && (
+                            <Text style={styles.crownIconSmall}>👑</Text>
+                          )}
+                        </View>
+                      );
+                    })}
                 </ScrollView>
               </View>
 
@@ -902,7 +1080,9 @@ export default function DrawRoomScreen({ navigation, route }) {
         )}
 
         {/* Drinking Mode Modal */}
-        {room.drinking_players && room.drinking_players.length > 0 && (
+        {room.drinking_players && room.drinking_players.length > 0 && 
+         room.players && Array.isArray(room.players) && 
+         room.players.some(p => p && p.name === currentPlayerName) && (
           <Modal
             visible={true}
             transparent={true}
@@ -917,11 +1097,16 @@ export default function DrawRoomScreen({ navigation, route }) {
                   {room.drinking_players.length === 1 ? 'לא ניחשת נכון!' : 'לא ניחשתם נכון!'}
                 </Text>
                 <View style={styles.drinkingPlayersList}>
-                  {room.drinking_players.map((name, idx) => (
-                    <View key={idx} style={styles.drinkingPlayerBadge}>
-                      <Text style={styles.drinkingPlayerName}>{name}</Text>
-                    </View>
-                  ))}
+                  {room.drinking_players && Array.isArray(room.drinking_players) && room.drinking_players
+                    .filter((name) => name != null)
+                    .map((name, idx) => {
+                      const playerName = typeof name === 'string' ? name : String(name || '');
+                      return (
+                        <View key={`drinking-${idx}`} style={styles.drinkingPlayerBadge}>
+                          <Text style={styles.drinkingPlayerName}>{playerName}</Text>
+                        </View>
+                      );
+                    })}
                 </View>
                 <Text style={styles.drinkingEmoji}>🍻</Text>
                 <Text style={styles.drinkingAction}>
@@ -948,7 +1133,9 @@ export default function DrawRoomScreen({ navigation, route }) {
         )}
 
         {/* Round Summary Modal */}
-        {room.show_round_summary && !room.drinking_players && (
+        {room.show_round_summary && !room.drinking_players && 
+         room.players && Array.isArray(room.players) && 
+         room.players.some(p => p && p.name === currentPlayerName) && (
           <Modal
             visible={true}
             transparent={true}
@@ -999,7 +1186,21 @@ export default function DrawRoomScreen({ navigation, route }) {
                     <Text style={styles.drawingSectionTitle}>הציור:</Text>
                     <View style={styles.drawingDisplay}>
                       <DrawCanvas
-                        strokes={localStrokes}
+                        strokes={(() => {
+                          // Use room.drawing_data as source of truth for summary
+                          if (room?.drawing_data) {
+                            try {
+                              const strokes = typeof room.drawing_data === 'string' 
+                                ? JSON.parse(room.drawing_data) 
+                                : room.drawing_data;
+                              return Array.isArray(strokes) ? strokes : [];
+                            } catch (error) {
+                              console.error('Error parsing strokes for summary:', error);
+                              return localStrokes;
+                            }
+                          }
+                          return localStrokes;
+                        })()}
                         onStrokeComplete={() => {}}
                         canDraw={false}
                         color={selectedColor}
@@ -1076,7 +1277,9 @@ export default function DrawRoomScreen({ navigation, route }) {
         )}
 
         {/* Finished State Modal */}
-        {room.game_status === 'finished' && (
+        {room.game_status === 'finished' && 
+         room.players && Array.isArray(room.players) && 
+         room.players.some(p => p && p.name === currentPlayerName) && (
           <Modal
             visible={true}
             transparent={true}
@@ -1352,11 +1555,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 16,
     flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'flex-start',
   },
   gameMain: {
     flex: 1,
     minWidth: 300,
+    maxWidth: 600,
     gap: 16,
+    alignItems: 'center',
   },
   statusCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
@@ -1465,6 +1672,8 @@ const styles = StyleSheet.create({
   },
   canvasContainer: {
     alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
   },
   sidebar: {
     width: 300,

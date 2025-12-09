@@ -1,18 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Switch, Clipboard } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
-
-// Storage helper
-const storage = {
-  async getItem(key) {
-    return null;
-  },
-  async setItem(key, value) {
-    // In a real app, use AsyncStorage
-  }
-};
+import storage from '../../utils/storage';
+import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 
 export default function CodenamesSetupScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -23,10 +15,40 @@ export default function CodenamesSetupScreen({ navigation, route }) {
   const [copied, setCopied] = useState(false);
   const [drinkingMode, setDrinkingMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const unsubscribeRef = useRef(null);
+
+  // Save room state for reconnection on refresh
+  useEffect(() => {
+    if (roomCode) {
+      saveCurrentRoom('codenames', roomCode, { gameMode });
+    }
+  }, [roomCode, gameMode]);
 
   useEffect(() => {
     if (!roomCode) {
-      navigation.navigate('CodenamesHome');
+      // Try to restore from saved state on refresh
+      const restoreRoom = async () => {
+        try {
+          const savedRoom = await loadCurrentRoom();
+          if (savedRoom && savedRoom.gameType === 'codenames' && savedRoom.roomCode) {
+            navigation.replace('CodenamesSetup', { 
+              roomCode: savedRoom.roomCode,
+              gameMode: savedRoom.params?.gameMode || 'friends'
+            });
+            return;
+          } else {
+            await clearCurrentRoom();
+            navigation.navigate('CodenamesHome');
+            return;
+          }
+        } catch (error) {
+          console.warn('⚠️ Error restoring room:', error);
+          await clearCurrentRoom();
+          navigation.navigate('CodenamesHome');
+          return;
+        }
+      };
+      restoreRoom();
       return;
     }
 
@@ -77,6 +99,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
       
       if (!snapshot.exists()) {
         console.warn('❌ Room not found with code:', roomCode, '- redirecting to home');
+        await clearCurrentRoom();
         navigation.navigate('CodenamesHome');
         return;
       }
@@ -123,10 +146,16 @@ export default function CodenamesSetupScreen({ navigation, route }) {
   };
 
   useEffect(() => {
-    if (!room || !room.id) return;
+    if (!roomCode) return;
 
-    const roomRef = doc(db, 'CodenamesRoom', room.id);
-    const unsubscribe = onSnapshot(roomRef, (snapshot) => {
+    // Cleanup any existing listener before setting up new one
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
+    const roomRef = doc(db, 'CodenamesRoom', roomCode);
+    unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const updatedRoom = { id: snapshot.id, ...snapshot.data() };
         setRoom(updatedRoom);
@@ -139,9 +168,23 @@ export default function CodenamesSetupScreen({ navigation, route }) {
     });
 
     return () => {
-      unsubscribe();
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
     };
-  }, [room, roomCode, navigation, currentPlayerName]);
+  }, [roomCode, navigation, currentPlayerName]);
+
+  // Cleanup timers/listeners on navigation away
+  useEffect(() => {
+    const unsubscribeNav = navigation.addListener('beforeRemove', () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    });
+    return unsubscribeNav;
+  }, [navigation]);
 
   const joinTeam = async (team, role) => {
     if (!currentPlayerName || !room) return;
@@ -442,7 +485,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
                       <View style={styles.roleDisplay}>
                         {room.red_team.spymaster ? (
                           <View style={styles.playerRow}>
-                            <Text style={styles.playerName}>{room.red_team.spymaster}</Text>
+                            <Text style={styles.playerName}>{typeof room.red_team.spymaster === 'string' ? room.red_team.spymaster : String(room.red_team.spymaster || '')}</Text>
                             {playerRole?.team === 'red' && playerRole?.role === 'spymaster' && (
                               <View style={styles.youBadge}>
                                 <Text style={styles.youBadgeText}>אתה כאן</Text>
@@ -468,16 +511,21 @@ export default function CodenamesSetupScreen({ navigation, route }) {
                       <Text style={styles.roleLabel}>👥 מנחשים ({room.red_team.guessers.length})</Text>
                       <View style={styles.roleDisplay}>
                         {room.red_team.guessers.length > 0 ? (
-                          room.red_team.guessers.map((player, idx) => (
-                            <View key={idx} style={styles.playerRow}>
-                              <Text style={styles.playerName}>{player}</Text>
-                              {player === currentPlayerName && (
-                                <View style={styles.youBadge}>
-                                  <Text style={styles.youBadgeText}>אתה כאן</Text>
+                          room.red_team.guessers
+                            .filter((player) => player != null)
+                            .map((player, idx) => {
+                              const playerName = typeof player === 'string' ? player : String(player || '');
+                              return (
+                                <View key={`red-guesser-${idx}`} style={styles.playerRow}>
+                                  <Text style={styles.playerName}>{playerName}</Text>
+                                  {playerName === currentPlayerName && (
+                                    <View style={styles.youBadge}>
+                                      <Text style={styles.youBadgeText}>אתה כאן</Text>
+                                    </View>
+                                  )}
                                 </View>
-                              )}
-                            </View>
-                          ))
+                              );
+                            })
                         ) : (
                           <Text style={styles.waitingText}>ממתין למנחשים...</Text>
                         )}
@@ -505,7 +553,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
                       <View style={styles.roleDisplay}>
                         {room.blue_team.spymaster ? (
                           <View style={styles.playerRow}>
-                            <Text style={styles.playerName}>{room.blue_team.spymaster}</Text>
+                            <Text style={styles.playerName}>{typeof room.blue_team.spymaster === 'string' ? room.blue_team.spymaster : String(room.blue_team.spymaster || '')}</Text>
                             {playerRole?.team === 'blue' && playerRole?.role === 'spymaster' && (
                               <View style={styles.youBadge}>
                                 <Text style={styles.youBadgeText}>אתה כאן</Text>
@@ -531,16 +579,21 @@ export default function CodenamesSetupScreen({ navigation, route }) {
                       <Text style={styles.roleLabel}>👥 מנחשים ({room.blue_team.guessers.length})</Text>
                       <View style={styles.roleDisplay}>
                         {room.blue_team.guessers.length > 0 ? (
-                          room.blue_team.guessers.map((player, idx) => (
-                            <View key={idx} style={styles.playerRow}>
-                              <Text style={styles.playerName}>{player}</Text>
-                              {player === currentPlayerName && (
-                                <View style={styles.youBadge}>
-                                  <Text style={styles.youBadgeText}>אתה כאן</Text>
+                          room.blue_team.guessers
+                            .filter((player) => player != null)
+                            .map((player, idx) => {
+                              const playerName = typeof player === 'string' ? player : String(player || '');
+                              return (
+                                <View key={`blue-guesser-${idx}`} style={styles.playerRow}>
+                                  <Text style={styles.playerName}>{playerName}</Text>
+                                  {playerName === currentPlayerName && (
+                                    <View style={styles.youBadge}>
+                                      <Text style={styles.youBadgeText}>אתה כאן</Text>
+                                    </View>
+                                  )}
                                 </View>
-                              )}
-                            </View>
-                          ))
+                              );
+                            })
                         ) : (
                           <Text style={styles.waitingText}>ממתין למנחשים...</Text>
                         )}

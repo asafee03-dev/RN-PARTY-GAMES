@@ -4,7 +4,7 @@
  * No JSX, DOM, CSS, window, or document dependencies
  */
 
-const WINNING_SCORE = 7;
+const WINNING_SCORE = 12;
 const ROUND_DURATION = 60; // seconds
 
 /**
@@ -128,6 +128,29 @@ export function submitGuess(gameState, playerName, guess) {
 }
 
 /**
+ * Calculate points based on time elapsed
+ * @param {number} timestamp - Timestamp of the guess
+ * @param {number} turnStartTime - Timestamp when turn started
+ * @returns {number} Points earned (3, 2, or 1)
+ */
+export function calculatePointsByTime(timestamp, turnStartTime) {
+  if (!timestamp || !turnStartTime) return 1;
+  
+  const elapsed = Math.floor((timestamp - turnStartTime) / 1000);
+  
+  // First 20 seconds: 3 points
+  if (elapsed <= 20) {
+    return 3;
+  }
+  // Second 20 seconds (21-40): 2 points
+  if (elapsed <= 40) {
+    return 2;
+  }
+  // Last 20 seconds (41-60): 1 point
+  return 1;
+}
+
+/**
  * Calculate round end and scores
  * @param {Object} gameState - Current game state
  * @param {Array} guesses - All guesses for the round
@@ -138,13 +161,17 @@ export function submitGuess(gameState, playerName, guess) {
 export function calculateRoundEnd(gameState, guesses, currentDrawer, options = {}) {
   const { drinkingMode = false } = options;
 
-  // Find all players who guessed correctly
-  const correctGuessers = new Set();
+  // Find all players who guessed correctly and calculate their points
+  const correctGuessers = new Map(); // Map of playerName -> points earned
   let firstWinner = null;
 
   guesses.forEach(g => {
-    if (g.isCorrect) {
-      correctGuessers.add(g.playerName);
+    if (g.isCorrect && g.timestamp) {
+      const points = calculatePointsByTime(g.timestamp, gameState.turnStartTime);
+      // If player already guessed correctly, take the highest points
+      if (!correctGuessers.has(g.playerName) || correctGuessers.get(g.playerName) < points) {
+        correctGuessers.set(g.playerName, points);
+      }
       if (!firstWinner) {
         firstWinner = g.playerName;
       }
@@ -164,9 +191,10 @@ export function calculateRoundEnd(gameState, guesses, currentDrawer, options = {
       };
     }
 
-    // Check if this player has any correct guesses
+    // Check if this player has any correct guesses and add points based on time
     if (correctGuessers.has(player.name)) {
-      return { ...player, score: player.score + 1 };
+      const pointsEarned = correctGuessers.get(player.name);
+      return { ...player, score: player.score + pointsEarned };
     }
 
     if (drinkingMode && !correctGuessers.has(player.name)) {

@@ -1,19 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, TouchableOpacity, Dimensions } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import GradientBackground from '../../components/codenames/GradientBackground';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
 
-// Using a simple storage helper - can be replaced with AsyncStorage later
-const storage = {
-  async getItem(key) {
-    // In a real app, use AsyncStorage or similar
-    return null;
-  },
-  async setItem(key, value) {
-    // In a real app, use AsyncStorage or similar
-  }
-};
+import storage from '../../utils/storage';
 
 const agentIcons = ["🕵️", "🔍", "🎯", "📋", "🗂️", "💼", "🕶️", "🎩", "🔐", "📡"];
 
@@ -133,11 +124,27 @@ export default function CodenamesHomeScreen({ navigation }) {
       let writeCompleted = false;
       try {
         console.log('🔵 [CODENAMES] setDoc() call initiated - execution checkpoint 2');
+        console.log('🔵 [CODENAMES] Room code:', newRoomCode);
+        console.log('🔵 [CODENAMES] Room data:', JSON.stringify(roomData, null, 2));
         await setDoc(roomRef, roomData);
         writeCompleted = true;
         console.log('✅ [CODENAMES] setDoc() write completed successfully! - execution checkpoint 3');
+        
+        // Verify the document was actually created
+        console.log('🔵 [CODENAMES] Verifying document exists...');
+        const verifySnapshot = await getDoc(roomRef);
+        console.log('🔵 [CODENAMES] Verification snapshot:', verifySnapshot.exists() ? 'EXISTS' : 'NOT FOUND');
+        if (!verifySnapshot.exists()) {
+          console.error('❌ [CODENAMES] Document not found after write!');
+          console.error('❌ [CODENAMES] Room code:', newRoomCode);
+          console.error('❌ [CODENAMES] Collection: CodenamesRoom');
+          throw new Error('Document was not created - check Firestore Rules');
+        }
+        console.log('✅ [CODENAMES] Document verified in Firestore!');
       } catch (writeError) {
         console.error('❌ [CODENAMES] Error during setDoc:', writeError);
+        console.error('❌ [CODENAMES] Error code:', writeError.code);
+        console.error('❌ [CODENAMES] Error message:', writeError.message);
         isCreatingRoomRef.current = false;
         throw writeError;
       }
@@ -148,14 +155,22 @@ export default function CodenamesHomeScreen({ navigation }) {
         throw new Error('Firestore write did not complete');
       }
       
-      console.log('✅ [CODENAMES] Room created successfully with code:', newRoomCode);
+      console.log('✅ [CODENAMES] Room created and verified successfully with code:', newRoomCode);
       console.log('🔵 [CODENAMES] About to navigate - execution checkpoint 4');
       navigation.navigate('CodenamesSetup', { roomCode: newRoomCode, gameMode });
       console.log('✅ [CODENAMES] Navigation initiated - execution checkpoint 5');
     } catch (error) {
       console.error('❌ [CODENAMES] Error creating room:', error);
       isCreatingRoomRef.current = false;
-      setError('שגיאה ביצירת החדר. נסה שוב.');
+      let errorMessage = 'שגיאה ביצירת החדר. נסה שוב.';
+      if (error.message?.includes('Firestore Rules')) {
+        errorMessage = 'שגיאה: החדר לא נוצר. אנא בדוק את כללי Firestore.';
+      } else if (error.code === 'permission-denied') {
+        errorMessage = 'אין הרשאה ליצור חדר. אנא בדוק את כללי Firestore.';
+      } else if (error.code === 'unavailable') {
+        errorMessage = 'Firestore לא זמין. אנא בדוק את החיבור לאינטרנט.';
+      }
+      setError(errorMessage);
     } finally {
       setIsCreating(false);
       setTimeout(() => {
@@ -188,10 +203,7 @@ export default function CodenamesHomeScreen({ navigation }) {
   };
 
   return (
-    <LinearGradient
-      colors={['#60A5FA', '#06B6D4', '#14B8A6']}
-      style={styles.container}
-    >
+    <GradientBackground variant="beige">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
@@ -311,7 +323,7 @@ export default function CodenamesHomeScreen({ navigation }) {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </LinearGradient>
+    </GradientBackground>
   );
 }
 
@@ -332,7 +344,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   backButtonText: {
-    color: '#FFFFFF',
+    color: '#2C3E50',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -360,13 +372,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 48,
     fontWeight: '900',
-    color: '#FFFFFF',
+    color: '#2C3E50',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 20,
-    color: '#FFFFFF',
-    opacity: 0.9,
+    color: '#2C3E50',
+    opacity: 0.8,
   },
   card: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
@@ -425,8 +437,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modeButtonActive: {
-    backgroundColor: '#3B82F6',
-    borderColor: '#2563EB',
+    backgroundColor: '#D4A574',
+    borderColor: '#B8956A',
   },
   modeIcon: {
     fontSize: 40,
@@ -439,7 +451,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   modeTextActive: {
-    color: '#FFFFFF',
+    color: '#2C3E50',
   },
   modeSubtext: {
     fontSize: 14,
@@ -447,11 +459,11 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   modeSubtextActive: {
-    color: '#FFFFFF',
+    color: '#2C3E50',
     opacity: 0.9,
   },
   createButton: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#D4A574',
     borderRadius: 16,
     padding: 20,
     flexDirection: 'row',
@@ -472,7 +484,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   createButtonText: {
-    color: '#FFFFFF',
+    color: '#2C3E50',
     fontSize: 20,
     fontWeight: 'bold',
   },
@@ -495,7 +507,7 @@ const styles = StyleSheet.create({
   joinButton: {
     backgroundColor: 'transparent',
     borderWidth: 3,
-    borderColor: '#06B6D4',
+    borderColor: '#D4A574',
     borderRadius: 16,
     padding: 20,
     flexDirection: 'row',
@@ -507,7 +519,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   joinButtonText: {
-    color: '#06B6D4',
+    color: '#D4A574',
     fontSize: 20,
     fontWeight: 'bold',
   },

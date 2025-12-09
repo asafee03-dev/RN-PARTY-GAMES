@@ -30,7 +30,7 @@ export default function CodenamesRoomScreen({ navigation }) {
   );
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="beige">
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>חדר המשחק</Text>
@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#2C3E50',
     marginBottom: 16,
   },
   roomCodeContainer: {
@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
   roomCode: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#9C27B0',
+    color: '#D4A574',
     letterSpacing: 4,
   },
   teamsSection: {

@@ -4,16 +4,9 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
-
-// Storage helper
-const storage = {
-  async getItem(key) {
-    return null;
-  },
-  async setItem(key, value) {
-    // In a real app, use AsyncStorage
-  }
-};
+import storage from '../../utils/storage';
+import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
+import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 
 export default function SpyRoomScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -29,47 +22,99 @@ export default function SpyRoomScreen({ navigation, route }) {
   const timerInterval = useRef(null);
   const unsubscribeRef = useRef(null);
 
+  // Load player name on mount (like Alias does)
   useEffect(() => {
-    const initializeRoom = async () => {
+    const loadPlayerName = async () => {
       try {
-        setIsLoading(true);
-        setError(null);
-
-        if (!roomCode) {
-          navigation.navigate('SpyHome');
-          return;
+        const savedName = await storage.getItem('playerName');
+        if (savedName) {
+          setCurrentPlayerName(savedName);
         }
-
-        const playerName = await storage.getItem('playerName');
-        if (!playerName) {
-          navigation.navigate('SpyHome');
-          return;
-        }
-
-        setCurrentPlayerName(playerName);
-
         const savedMode = await storage.getItem('drinkingMode');
         if (savedMode) {
           setDrinkingMode(savedMode === 'true');
         }
-
-        await loadRoom(playerName);
-        setIsLoading(false);
-      } catch (err) {
-        console.error('Error initializing room:', err);
-        setError(err);
-        setIsLoading(false);
+      } catch (e) {
+        console.warn('Could not load player name:', e);
       }
     };
+    loadPlayerName();
+  }, []);
 
-    initializeRoom();
+  // Save room state for reconnection on refresh
+  useEffect(() => {
+    if (roomCode) {
+      saveCurrentRoom('spy', roomCode, {});
+    }
+  }, [roomCode]);
+
+  // Initialize room and set up listener (like Alias does)
+  useEffect(() => {
+    if (!roomCode) {
+      // Try to restore from saved state on refresh
+      const restoreRoom = async () => {
+        try {
+          const savedRoom = await loadCurrentRoom();
+          if (savedRoom && savedRoom.gameType === 'spy' && savedRoom.roomCode) {
+            navigation.replace('SpyRoom', { roomCode: savedRoom.roomCode });
+            return;
+          } else {
+            await clearCurrentRoom();
+            Alert.alert('שגיאה', 'קוד חדר חסר');
+            navigation.goBack();
+            return;
+          }
+        } catch (error) {
+          console.warn('⚠️ Error restoring room:', error);
+          await clearCurrentRoom();
+          Alert.alert('שגיאה', 'קוד חדר חסר');
+          navigation.goBack();
+          return;
+        }
+      };
+      restoreRoom();
+      return;
+    }
+
+    // Cleanup any existing listener before setting up new one
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    if (timerInterval.current) {
+      clearInterval(timerInterval.current);
+      timerInterval.current = null;
+    }
+
+    loadRoom();
+    setupRealtimeListener();
 
     return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
       if (timerInterval.current) {
         clearInterval(timerInterval.current);
+        timerInterval.current = null;
       }
     };
-  }, [roomCode, navigation]);
+  }, [roomCode]);
+
+  // Cleanup timers/listeners on navigation away
+  useEffect(() => {
+    const unsubscribeNav = navigation.addListener('beforeRemove', () => {
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
+        timerInterval.current = null;
+      }
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    });
+    return unsubscribeNav;
+  }, [navigation]);
 
   useEffect(() => {
     // Start timer when game starts
@@ -99,39 +144,41 @@ export default function SpyRoomScreen({ navigation, route }) {
     return () => {
       if (timerInterval.current) {
         clearInterval(timerInterval.current);
+        timerInterval.current = null;
       }
     };
   }, [room?.game_status, room?.game_start_time, room?.id]);
 
-  const loadRoom = async (playerName) => {
+  const loadRoom = async () => {
     console.log('🔵 Loading Spy room with code:', roomCode);
     try {
+      setIsLoading(true);
       await waitForFirestoreReady();
       
       const roomRef = doc(db, 'SpyRoom', roomCode);
-      let snapshot = await getDoc(roomRef);
+      const roomSnap = await getDoc(roomRef);
       
-      if (!snapshot.exists()) {
-        const q = query(collection(db, 'SpyRoom'), where('room_code', '==', roomCode));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          const docData = querySnapshot.docs[0];
-          snapshot = { exists: () => true, id: docData.id, data: () => docData.data() };
-        }
-      }
-      
-      if (!snapshot.exists()) {
-        console.warn('❌ Room not found with code:', roomCode, '- redirecting to home');
-        navigation.navigate('SpyHome');
+      if (!roomSnap.exists()) {
+        console.warn('❌ Room not found with code:', roomCode);
+        await clearCurrentRoom();
+        Alert.alert('שגיאה', 'החדר לא נמצא');
+        navigation.goBack();
         return;
       }
       
-      const existingRoom = { id: snapshot.id, ...snapshot.data() };
-      console.log('✅ Room loaded successfully:', existingRoom.id, 'with code:', existingRoom.room_code);
+      const roomData = { id: roomSnap.id, ...roomSnap.data() };
+      console.log('✅ Room loaded successfully:', roomData.id, 'with code:', roomData.room_code);
+
+      // Get player name from storage
+      const playerName = currentPlayerName || (await storage.getItem('playerName')) || '';
+      if (playerName) {
+        setCurrentPlayerName(playerName);
+      }
 
       // Add player if not already in room
-      if (!existingRoom.players.find(p => p.name === playerName)) {
-        const updatedPlayers = [...existingRoom.players, { name: playerName }];
+      const playerExists = roomData.players && Array.isArray(roomData.players) && roomData.players.some(p => p && p.name === playerName);
+      if (!playerExists && roomData.game_status === 'lobby' && playerName) {
+        const updatedPlayers = [...(roomData.players || []), { name: playerName }];
         console.log('🔵 Adding player to Spy room:', playerName);
         try {
           await updateDoc(roomRef, { players: updatedPlayers });
@@ -145,18 +192,25 @@ export default function SpyRoomScreen({ navigation, route }) {
           console.error('❌ Error adding player:', updateError);
         }
       }
-      setRoom(existingRoom);
+      setRoom(roomData);
     } catch (error) {
       console.error('❌ Error loading room:', error);
-      navigation.navigate('SpyHome');
-      return;
+      Alert.alert('שגיאה', 'לא הצלחנו לטעון את החדר');
+      navigation.goBack();
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (!room || !room.id) return;
+  const setupRealtimeListener = () => {
+    // Prevent duplicate listeners
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
 
-    const roomRef = doc(db, 'SpyRoom', room.id);
+    const roomRef = doc(db, 'SpyRoom', roomCode);
+    
     unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const newRoom = { id: snapshot.id, ...snapshot.data() };
@@ -185,15 +239,14 @@ export default function SpyRoomScreen({ navigation, route }) {
           }
           return prevRoom;
         });
+      } else {
+        Alert.alert('שגיאה', 'החדר נמחק');
+        navigation.goBack();
       }
+    }, (error) => {
+      console.error('Error in realtime listener:', error);
     });
-
-    return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-      }
-    };
-  }, [room, roomCode]);
+  };
 
   // Watch for all_votes_submitted and trigger endGame
   useEffect(() => {
@@ -205,7 +258,7 @@ export default function SpyRoomScreen({ navigation, route }) {
   }, [room?.all_votes_submitted, room?.game_status, room?.id]);
 
   const startGame = async () => {
-    if (!room || room.players.length < 3) {
+    if (!room || !room.players || !Array.isArray(room.players) || room.players.length < 3) {
       Alert.alert('שגיאה', 'נדרשים לפחות 3 שחקנים!');
       return;
     }
@@ -383,7 +436,7 @@ export default function SpyRoomScreen({ navigation, route }) {
   };
 
   const resetGame = async () => {
-    if (!room || !room.id) return;
+    if (!room || !room.id || !room.players || !Array.isArray(room.players)) return;
     
     const resetPlayers = room.players.map(p => ({ name: p.name }));
     
@@ -405,13 +458,18 @@ export default function SpyRoomScreen({ navigation, route }) {
     }
   };
 
-  const copyRoomCode = () => {
-    Alert.alert('קוד חדר', roomCode, [{ text: 'אישור' }]);
+  const handleCopyRoomCode = async () => {
+    await copyRoomCode(roomCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleCopyRoomLink = async () => {
+    await copyRoomLink(roomCode, 'spy');
+  };
+
   const goBack = async () => {
+    await clearCurrentRoom();
     navigation.navigate('SpyHome');
   };
 
@@ -453,10 +511,11 @@ export default function SpyRoomScreen({ navigation, route }) {
     );
   }
 
-  const isHost = room.host_name === currentPlayerName;
-  const currentPlayer = room.players.find(p => p.name === currentPlayerName);
+  const isHost = room?.host_name === currentPlayerName;
+  const players = room?.players && Array.isArray(room.players) ? room.players : [];
+  const currentPlayer = players.find(p => p && p.name === currentPlayerName);
   const isSpy = currentPlayer?.is_spy || false;
-  const myVote = room.players.find(p => p.name === currentPlayerName)?.vote;
+  const myVote = currentPlayer?.vote;
 
   return (
     <GradientBackground variant="green">
@@ -471,13 +530,17 @@ export default function SpyRoomScreen({ navigation, route }) {
           </TouchableOpacity>
 
           <View style={styles.headerRight}>
-            <View style={styles.roomCodeContainer}>
+            <Pressable onPress={handleCopyRoomCode} style={styles.roomCodeContainer}>
               <Text style={styles.roomCodeLabel}>קוד חדר:</Text>
               <Text style={styles.roomCodeText}>{roomCode}</Text>
-              <TouchableOpacity onPress={copyRoomCode} style={styles.copyButton}>
-                <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
-              </TouchableOpacity>
-            </View>
+              <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
+            </Pressable>
+            <GradientButton
+              title="📋 העתק קישור"
+              onPress={handleCopyRoomLink}
+              variant="ghost"
+              style={styles.copyLinkButton}
+            />
           </View>
         </View>
 
@@ -521,31 +584,36 @@ export default function SpyRoomScreen({ navigation, route }) {
               </View>
 
               <View style={styles.playersSection}>
-                <Text style={styles.playersTitle}>שחקנים בחדר ({room.players.length})</Text>
+                <Text style={styles.playersTitle}>שחקנים בחדר ({players.length})</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.playersList}>
-                  {room.players.map((player, idx) => (
-                    <View key={idx} style={styles.playerCard}>
-                      <View style={styles.playerDot} />
-                      <Text style={styles.playerCardName}>{player.name}</Text>
-                      {player.name === room.host_name && (
-                        <Text style={styles.crownIconSmall}>👑</Text>
-                      )}
-                    </View>
-                  ))}
+                  {players
+                    .filter((player) => player != null && player.name != null)
+                    .map((player, idx) => {
+                      const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
+                      return (
+                        <View key={`player-${idx}`} style={styles.playerCard}>
+                          <View style={styles.playerDot} />
+                          <Text style={styles.playerCardName}>{playerName}</Text>
+                          {playerName === room?.host_name && (
+                            <Text style={styles.crownIconSmall}>👑</Text>
+                          )}
+                        </View>
+                      );
+                    })}
                 </ScrollView>
               </View>
 
               {isHost && (
-        <GradientButton
+                <GradientButton
                   title="▶ התחל משחק!"
                   onPress={startGame}
                   variant="green"
                   style={styles.startButton}
-                  disabled={room.players.length < 3}
+                  disabled={players.length < 3}
                 />
               )}
 
-              {room.players.length < 3 && (
+              {players.length < 3 && (
                 <View style={styles.warningCard}>
                   <Text style={styles.warningText}>נדרשים לפחות 3 שחקנים להתחלת המשחק</Text>
                 </View>
@@ -613,15 +681,18 @@ export default function SpyRoomScreen({ navigation, route }) {
                 </View>
                 <View style={styles.votingContent}>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.votingPlayersList}>
-                    {room.players.map((player, idx) => {
-                      const votesForPlayer = room.players.filter(p => p.vote === player.name).length;
-                      const isMyVote = myVote === player.name;
-                      const isMe = player.name === currentPlayerName;
+                    {players
+                      .filter((player) => player != null && player.name != null)
+                      .map((player, idx) => {
+                      const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
+                      const votesForPlayer = players.filter(p => p && p.name && (typeof p.name === 'string' ? p.name : String(p.name || '')) === playerName).length;
+                      const isMyVote = myVote === playerName;
+                      const isMe = playerName === currentPlayerName;
 
                       return (
                         <Pressable
-                          key={idx}
-                          onPress={() => !isMe && voteForPlayer(player.name)}
+                          key={`voting-player-${idx}`}
+                          onPress={() => !isMe && voteForPlayer(playerName)}
                           disabled={isMe}
                           style={[
                             styles.votingPlayerCard,
@@ -629,8 +700,8 @@ export default function SpyRoomScreen({ navigation, route }) {
                             isMe && styles.votingPlayerCardDisabled
                           ]}
                         >
-                          <Text style={styles.votingPlayerName}>{player.name}</Text>
-                          {player.name === room.host_name && (
+                          <Text style={styles.votingPlayerName}>{playerName}</Text>
+                          {playerName === room.host_name && (
                             <Text style={styles.crownIconSmall}>👑</Text>
                           )}
                           {votesForPlayer > 0 && (
@@ -659,8 +730,8 @@ export default function SpyRoomScreen({ navigation, route }) {
                     </Text>
                     <View style={styles.votingProgress}>
                       <Text style={styles.votingProgressText}>
-                        {room.players.filter(p => p.vote !== null && p.vote !== undefined).length} / {room.players.length}
-          </Text>
+                        {players.filter(p => p && p.vote !== null && p.vote !== undefined).length} / {players.length}
+                      </Text>
                       <Text style={styles.votingProgressLabel}>שחקנים הצביעו</Text>
                     </View>
                   </View>
@@ -743,9 +814,9 @@ export default function SpyRoomScreen({ navigation, route }) {
               <View style={styles.votingResultsCard}>
                 <Text style={styles.votingResultsTitle}>תוצאות ההצבעה:</Text>
                 {(() => {
-                  const voteCounts = room.players.map(player => {
-                    const votes = room.players.filter(p => p.vote === player.name).length;
-                    const wasSpy = player.name === room.spy_name;
+                  const voteCounts = players.map(player => {
+                    const votes = players.filter(p => p && p.vote === player.name).length;
+                    const wasSpy = player.name === room?.spy_name;
                     return { player, votes, wasSpy };
                   });
                   

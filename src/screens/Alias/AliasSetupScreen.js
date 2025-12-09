@@ -1,23 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, TextInput, Switch } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import PlayerCard from '../../components/shared/PlayerCard';
 import HostStatusCard from '../../components/shared/HostStatusCard';
 import { db } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
+import storage from '../../utils/storage';
+import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
+import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
-
-// Storage helper
-const storage = {
-  async getItem(key) {
-    return null;
-  },
-  async setItem(key, value) {
-    // In a real app, use AsyncStorage
-  }
-};
 
 export default function AliasSetupScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -27,6 +20,7 @@ export default function AliasSetupScreen({ navigation, route }) {
   const [isHost, setIsHost] = useState(false);
   const [isJoiningTeam, setIsJoiningTeam] = useState(false);
   const [isStartingGame, setIsStartingGame] = useState(false);
+  const [drinkingMode, setDrinkingMode] = useState(false);
   const unsubscribeRef = useRef(null);
 
   useEffect(() => {
@@ -36,6 +30,10 @@ export default function AliasSetupScreen({ navigation, route }) {
         if (savedName) {
           setPlayerName(savedName);
         }
+        const savedMode = await storage.getItem('drinkingMode');
+        if (savedMode) {
+          setDrinkingMode(savedMode === 'true');
+        }
       } catch (e) {
         console.warn('Could not load player name:', e);
       }
@@ -43,11 +41,44 @@ export default function AliasSetupScreen({ navigation, route }) {
     loadPlayerName();
   }, []);
 
+  // Save room state for reconnection on refresh
+  useEffect(() => {
+    if (roomCode) {
+      saveCurrentRoom('alias', roomCode, {});
+    }
+  }, [roomCode]);
+
   useEffect(() => {
     if (!roomCode) {
-      Alert.alert('שגיאה', 'קוד חדר חסר');
-      navigation.goBack();
+      // Try to restore from saved state on refresh
+      const restoreRoom = async () => {
+        try {
+          const savedRoom = await loadCurrentRoom();
+          if (savedRoom && savedRoom.gameType === 'alias' && savedRoom.roomCode) {
+            navigation.replace('AliasSetup', { roomCode: savedRoom.roomCode });
+            return;
+          } else {
+            await clearCurrentRoom();
+            Alert.alert('שגיאה', 'קוד חדר חסר');
+            navigation.goBack();
+            return;
+          }
+        } catch (error) {
+          console.warn('⚠️ Error restoring room:', error);
+          await clearCurrentRoom();
+          Alert.alert('שגיאה', 'קוד חדר חסר');
+          navigation.goBack();
+          return;
+        }
+      };
+      restoreRoom();
       return;
+    }
+
+    // Cleanup any existing listener before setting up new one
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
     }
 
     loadRoom();
@@ -56,9 +87,21 @@ export default function AliasSetupScreen({ navigation, route }) {
     return () => {
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
+        unsubscribeRef.current = null;
       }
     };
   }, [roomCode]);
+
+  // Cleanup timers/listeners on navigation away
+  useEffect(() => {
+    const unsubscribeNav = navigation.addListener('beforeRemove', () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    });
+    return unsubscribeNav;
+  }, [navigation]);
 
   // Auto-navigate when game starts
   useEffect(() => {
@@ -75,6 +118,7 @@ export default function AliasSetupScreen({ navigation, route }) {
       const roomSnap = await getDoc(roomRef);
 
       if (!roomSnap.exists()) {
+        await clearCurrentRoom();
         Alert.alert('שגיאה', 'החדר לא נמצא');
         navigation.goBack();
         return;
@@ -96,6 +140,12 @@ export default function AliasSetupScreen({ navigation, route }) {
   };
 
   const setupRealtimeListener = () => {
+    // Prevent duplicate listeners
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
     const roomRef = doc(db, 'GameRoom', roomCode);
     
     unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
@@ -153,6 +203,11 @@ export default function AliasSetupScreen({ navigation, route }) {
         team.players.push(playerName);
       }
 
+      // Update team name to player's name if team is empty or has one player
+      if (team.players.length === 1) {
+        team.name = `הקבוצה של ${playerName}`;
+      }
+
       const roomRef = doc(db, 'GameRoom', roomCode);
       await updateDoc(roomRef, {
         teams: updatedTeams
@@ -179,9 +234,15 @@ export default function AliasSetupScreen({ navigation, route }) {
       const updatedTeams = [...room.teams];
       
       // Remove player from all teams
-      updatedTeams.forEach(t => {
+      updatedTeams.forEach((t, index) => {
         if (t.players && Array.isArray(t.players)) {
+          const beforeCount = t.players.length;
           t.players = t.players.filter(p => p !== playerName);
+          
+          // If team becomes empty and name was personalized, reset to default
+          if (t.players.length === 0 && beforeCount > 0 && t.name && t.name.startsWith('הקבוצה של ')) {
+            t.name = `קבוצה ${index + 1}`;
+          }
         } else {
           t.players = [];
         }
@@ -212,6 +273,66 @@ export default function AliasSetupScreen({ navigation, route }) {
     } catch (error) {
       console.error('Error toggling golden rounds:', error);
       Alert.alert('שגיאה', 'לא הצלחנו לעדכן את ההגדרות');
+    }
+  };
+
+  const handleToggleDrinkingMode = async () => {
+    const newValue = !drinkingMode;
+    setDrinkingMode(newValue);
+    try {
+      await storage.setItem('drinkingMode', newValue.toString());
+    } catch (error) {
+      console.error('Error saving drinking mode:', error);
+      setDrinkingMode(!newValue); // Revert on error
+    }
+  };
+
+  const handleAddTeam = async () => {
+    if (!isHost || !room) return;
+
+    try {
+      const updatedTeams = [...room.teams];
+      const newTeamIndex = updatedTeams.length;
+      const newTeam = {
+        name: `קבוצה ${newTeamIndex + 1}`,
+        color: TEAM_COLORS[newTeamIndex % TEAM_COLORS.length],
+        players: []
+      };
+      updatedTeams.push(newTeam);
+
+      const roomRef = doc(db, 'GameRoom', roomCode);
+      await updateDoc(roomRef, {
+        teams: updatedTeams
+      });
+    } catch (error) {
+      console.error('Error adding team:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו להוסיף קבוצה');
+    }
+  };
+
+  const handleRemoveTeam = async (teamIndex) => {
+    if (!isHost || !room) return;
+
+    const team = room.teams[teamIndex];
+    if (team && team.players && team.players.length > 0) {
+      Alert.alert('שגיאה', 'לא ניתן למחוק קבוצה עם שחקנים');
+      return;
+    }
+
+    if (room.teams.length <= 2) {
+      Alert.alert('שגיאה', 'חייבות להיות לפחות 2 קבוצות');
+      return;
+    }
+
+    try {
+      const updatedTeams = room.teams.filter((_, index) => index !== teamIndex);
+      const roomRef = doc(db, 'GameRoom', roomCode);
+      await updateDoc(roomRef, {
+        teams: updatedTeams
+      });
+    } catch (error) {
+      console.error('Error removing team:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו למחוק קבוצה');
     }
   };
 
@@ -267,9 +388,12 @@ export default function AliasSetupScreen({ navigation, route }) {
     }
   };
 
-  const handleCopyRoomCode = () => {
-    // In React Native, we'd use Clipboard API
-    Alert.alert('קוד חדר', roomCode, [{ text: 'אישור' }]);
+  const handleCopyRoomCode = async () => {
+    await copyRoomCode(roomCode);
+  };
+
+  const handleCopyRoomLink = async () => {
+    await copyRoomLink(roomCode, 'alias');
   };
 
   const getPlayerTeam = () => {
@@ -286,7 +410,7 @@ export default function AliasSetupScreen({ navigation, route }) {
 
   if (isLoading || !room) {
     return (
-      <GradientBackground variant="purple">
+      <GradientBackground variant="brightBlue">
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#FFFFFF" />
           <Text style={styles.loadingText}>טוען חדר...</Text>
@@ -296,7 +420,7 @@ export default function AliasSetupScreen({ navigation, route }) {
   }
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="brightBlue">
       <ScrollView
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
@@ -309,63 +433,79 @@ export default function AliasSetupScreen({ navigation, route }) {
             variant="ghost"
             style={styles.backButton}
           />
-          <Pressable onPress={handleCopyRoomCode} style={styles.roomCodeContainer}>
-            <Text style={styles.roomCodeLabel}>קוד חדר:</Text>
-            <Text style={styles.roomCode}>{roomCode}</Text>
-          </Pressable>
-        </View>
-
-        {/* Player Name Input (if not set) */}
-        {!playerName && (
-          <View style={styles.playerNameContainer}>
-            <Text style={styles.label}>השם שלך</Text>
-            <TextInput
-              value={playerName}
-              onChangeText={setPlayerName}
-              placeholder="הכנס שם..."
-              placeholderTextColor="#999"
-              style={styles.input}
-              autoCapitalize="none"
-            />
+          <View style={styles.roomCodeContainer}>
+            <Pressable onPress={handleCopyRoomCode} style={styles.roomCodePressable}>
+              <Text style={styles.roomCodeLabel}>קוד חדר:</Text>
+              <Text style={styles.roomCode}>{roomCode}</Text>
+            </Pressable>
             <GradientButton
-              title="שמור שם"
-              onPress={async () => {
-                await storage.setItem('playerName', playerName);
-              }}
-              variant="primary"
-              style={styles.saveNameButton}
+              title="📋 העתק קישור"
+              onPress={handleCopyRoomLink}
+              variant="ghost"
+              style={styles.copyLinkButton}
             />
           </View>
-        )}
+        </View>
+
 
         {/* Host Status Card */}
         <HostStatusCard hostName={room.host_name} gameMode="normal" />
 
         {/* Teams Section */}
         <View style={styles.teamsSection}>
-          <Text style={styles.sectionTitle}>קבוצות</Text>
-          {room.teams.map((team, index) => {
-            const isPlayerInTeam = team.players && team.players.includes(playerName);
-            const teamColor = team.color || TEAM_COLORS[index % TEAM_COLORS.length];
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>קבוצות</Text>
+            {isHost && (
+              <GradientButton
+                title="+ הוסף קבוצה"
+                onPress={handleAddTeam}
+                variant="ghost"
+                style={styles.addTeamButton}
+              />
+            )}
+          </View>
+          {room.teams && Array.isArray(room.teams) && room.teams
+            .filter((team) => team != null && typeof team === 'object')
+            .map((team, index) => {
+            if (!team || typeof team !== 'object') {
+              return null;
+            }
+            const isPlayerInTeam = team.players && Array.isArray(team.players) && team.players.includes(playerName);
+            const teamColor = (team.color && typeof team.color === 'string') ? team.color : TEAM_COLORS[index % TEAM_COLORS.length];
+            const teamName = (team.name && typeof team.name === 'string') ? team.name : `קבוצה ${index + 1}`;
+            const playerCount = (team.players && Array.isArray(team.players)) ? team.players.length : 0;
 
             return (
-              <View key={index} style={[styles.teamCard, { borderColor: teamColor }]}>
+              <View key={`team-${index}`} style={[styles.teamCard, { borderColor: teamColor }]}>
                 <View style={[styles.teamHeader, { backgroundColor: teamColor }]}>
-                  <Text style={styles.teamName}>{team.name}</Text>
-                  <Text style={styles.teamPlayerCount}>
-                    {team.players ? team.players.length : 0} שחקנים
-                  </Text>
+                  <View style={styles.teamHeaderLeft}>
+                    <Text style={styles.teamName}>{teamName}</Text>
+                    <Text style={styles.teamPlayerCount}>
+                      {playerCount} שחקנים
+                    </Text>
+                  </View>
+                  {isHost && playerCount === 0 && (
+                    <Pressable
+                      onPress={() => handleRemoveTeam(index)}
+                      style={styles.removeTeamButton}
+                    >
+                      <Text style={styles.removeTeamIcon}>🗑️</Text>
+                    </Pressable>
+                  )}
                 </View>
 
                 <View style={styles.playersContainer}>
-                  {team.players && team.players.length > 0 ? (
-                    team.players.map((player, playerIndex) => (
-                      <PlayerCard
-                        key={playerIndex}
-                        playerName={player}
-                        isHost={player === room.host_name}
-                      />
-                    ))
+                  {team.players && Array.isArray(team.players) && team.players.length > 0 ? (
+                    team.players.map((player, playerIndex) => {
+                      const playerNameStr = typeof player === 'string' ? player : String(player || '');
+                      return (
+                        <PlayerCard
+                          key={playerIndex}
+                          playerName={playerNameStr}
+                          isHost={playerNameStr === room.host_name}
+                        />
+                      );
+                    })
                   ) : (
                     <Text style={styles.emptyTeamText}>אין שחקנים בקבוצה</Text>
                   )}
@@ -397,7 +537,7 @@ export default function AliasSetupScreen({ navigation, route }) {
           })}
         </View>
 
-        {/* Golden Rounds Toggle (Host Only) */}
+        {/* Options Section (Host Only) */}
         {isHost && (
           <View style={styles.optionsSection}>
             <Pressable
@@ -417,6 +557,20 @@ export default function AliasSetupScreen({ navigation, route }) {
           </View>
         )}
 
+        {/* Drinking Mode Toggle (All Players) */}
+        <View style={styles.optionsSection}>
+          <View style={styles.drinkingToggleContainer}>
+            <Text style={styles.drinkingToggleLabel}>🔞 מצב משחקי שתייה</Text>
+            <Switch
+              value={drinkingMode}
+              onValueChange={handleToggleDrinkingMode}
+              trackColor={{ false: '#D1D5DB', true: '#F97316' }}
+              thumbColor={drinkingMode ? '#FFFFFF' : '#9CA3AF'}
+            />
+            <Text style={styles.drinkingToggleLabel}>🍺</Text>
+          </View>
+        </View>
+
         {/* Start Game Button (Host Only) */}
         {isHost && (
           <View style={styles.startGameContainer}>
@@ -426,9 +580,12 @@ export default function AliasSetupScreen({ navigation, route }) {
               variant="green"
               style={styles.startButton}
               disabled={isStartingGame || room.game_status !== 'setup'}
-            >
-              {isStartingGame && <ActivityIndicator color="#FFFFFF" style={{ marginLeft: 8 }} />}
-            </GradientButton>
+            />
+            {isStartingGame && (
+              <View style={styles.loadingIndicatorContainer}>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              </View>
+            )}
           </View>
         )}
 
@@ -471,12 +628,21 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   roomCodeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  roomCodePressable: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: 16,
     padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flex: 1,
+  },
+  copyLinkButton: {
+    paddingHorizontal: 12,
   },
   roomCodeLabel: {
     color: '#FFFFFF',
@@ -518,12 +684,20 @@ const styles = StyleSheet.create({
   teamsSection: {
     marginBottom: 24,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   sectionTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 16,
     textAlign: 'right',
+  },
+  addTeamButton: {
+    paddingHorizontal: 12,
   },
   teamCard: {
     backgroundColor: '#FFFFFF',
@@ -542,6 +716,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  teamHeaderLeft: {
+    flex: 1,
+  },
+  removeTeamButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  removeTeamIcon: {
+    fontSize: 20,
   },
   teamName: {
     fontSize: 20,
@@ -597,11 +781,28 @@ const styles = StyleSheet.create({
   goldenToggleTextActive: {
     color: '#2C3E50',
   },
+  drinkingToggleContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  drinkingToggleLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
   startGameContainer: {
     marginBottom: 24,
   },
   startButton: {
     width: '100%',
+  },
+  loadingIndicatorContainer: {
+    marginTop: 8,
+    alignItems: 'center',
   },
   waitingContainer: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',

@@ -4,17 +4,7 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
-
-// Using a simple storage helper - can be replaced with AsyncStorage later
-const storage = {
-  async getItem(key) {
-    // In a real app, use AsyncStorage or similar
-    return null;
-  },
-  async setItem(key, value) {
-    // In a real app, use AsyncStorage or similar
-  }
-};
+import storage from '../../utils/storage';
 
 const spyIcons = ["❓", "🕵️", "🔍", "🎭", "👁️", "🗝️", "🔐", "🎩", "💼", "📍"];
 
@@ -112,13 +102,43 @@ export default function SpyHomeScreen({ navigation }) {
       console.log('✅ [SPY] Firestore confirmed online, proceeding with write');
 
       const roomRef = doc(db, 'SpyRoom', newRoomCode);
-      await setDoc(roomRef, roomData);
+      console.log('🔵 [SPY] Calling setDoc with room code:', newRoomCode);
+      console.log('🔵 [SPY] Room data:', JSON.stringify(roomData, null, 2));
+      
+      try {
+        await setDoc(roomRef, roomData);
+        console.log('✅ [SPY] setDoc completed successfully');
+      } catch (setDocError) {
+        console.error('❌ [SPY] setDoc failed:', setDocError);
+        console.error('❌ [SPY] Error code:', setDocError.code);
+        console.error('❌ [SPY] Error message:', setDocError.message);
+        throw setDocError;
+      }
+      
       console.log('✅ [SPY] Room created successfully with code:', newRoomCode);
-
+      
+      // Save player name BEFORE navigation (like Alias does)
+      try {
+        await storage.setItem('playerName', playerName);
+        console.log('✅ [SPY] Player name saved to storage');
+      } catch (e) {
+        console.warn('⚠️ [SPY] Could not save player name:', e);
+      }
+      
+      // Navigate immediately after successful write
+      console.log('🔵 [SPY] Navigating to room...');
       navigation.navigate('SpyRoom', { roomCode: newRoomCode });
     } catch (error) {
       console.error('❌ [SPY] Error creating room:', error);
-      setError('שגיאה ביצירת החדר. נסה שוב.');
+      let errorMessage = 'שגיאה ביצירת החדר. נסה שוב.';
+      if (error.message?.includes('Firestore Rules')) {
+        errorMessage = 'שגיאה: החדר לא נוצר. אנא בדוק את כללי Firestore.';
+      } else if (error.code === 'permission-denied') {
+        errorMessage = 'אין הרשאה ליצור חדר. אנא בדוק את כללי Firestore.';
+      } else if (error.code === 'unavailable') {
+        errorMessage = 'Firestore לא זמין. אנא בדוק את החיבור לאינטרנט.';
+      }
+      setError(errorMessage);
     } finally {
       setIsCreating(false);
       setTimeout(() => {

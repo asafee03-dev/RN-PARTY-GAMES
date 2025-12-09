@@ -14,6 +14,10 @@ export default function GradientButton({
         return styles.greenButton;
       case 'blue':
         return styles.blueButton;
+      case 'brightBlue':
+        return styles.brightBlueButton; // Alias - כחול בהיר
+      case 'beige':
+        return styles.beigeButton; // Codenames - בז'
       case 'red':
         return styles.redButton;
       case 'orange':
@@ -39,7 +43,8 @@ export default function GradientButton({
     >
       <Text style={[
         styles.buttonText,
-        variant === 'green' && styles.lightText
+        (variant === 'green' || variant === 'brightBlue' || variant === 'red' || variant === 'primary') && styles.lightText,
+        variant === 'beige' && styles.darkText
       ]}>
         {title}
       </Text>
@@ -84,6 +89,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF69B4',
     shadowColor: '#FF69B4',
   },
+  brightBlueButton: {
+    backgroundColor: '#1E90FF', // Alias - כחול בהיר
+    shadowColor: '#1E90FF',
+  },
+  beigeButton: {
+    backgroundColor: '#D4A574', // Codenames - בז' כהה יותר לנראות
+    shadowColor: '#D4A574',
+  },
   buttonDisabled: {
     opacity: 0.5,
   },
@@ -98,6 +111,9 @@ const styles = StyleSheet.create({
   },
   lightText: {
     color: '#FFFFFF',
+  },
+  darkText: {
+    color: '#2C3E50',
   },
 });
 

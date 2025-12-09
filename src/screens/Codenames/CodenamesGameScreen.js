@@ -8,16 +8,8 @@ import ClueInput from '../../components/codenames/ClueInput';
 import TeamInfo from '../../components/codenames/TeamInfo';
 import RivalsTimer from '../../components/codenames/RivalsTimer';
 import TeamWordsPanel from '../../components/codenames/TeamWordsPanel';
-
-// Storage helper
-const storage = {
-  async getItem(key) {
-    return null;
-  },
-  async setItem(key, value) {
-    // In a real app, use AsyncStorage
-  }
-};
+import storage from '../../utils/storage';
+import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 
 export default function CodenamesGameScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -61,6 +53,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
     return () => {
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
+        unsubscribeRef.current = null;
       }
     };
   }, [roomCode, navigation]);
@@ -82,6 +75,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
       }
       
       if (!snapshot.exists()) {
+        await clearCurrentRoom();
         navigation.navigate('CodenamesHome');
         return;
       }
@@ -95,9 +89,15 @@ export default function CodenamesGameScreen({ navigation, route }) {
   };
 
   useEffect(() => {
-    if (!room || !room.id) return;
+    if (!roomCode) return;
 
-    const roomRef = doc(db, 'CodenamesRoom', room.id);
+    // Cleanup any existing listener before setting up new one
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
+    const roomRef = doc(db, 'CodenamesRoom', roomCode);
     const unsubscribe = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const updatedRoom = { id: snapshot.id, ...snapshot.data() };
@@ -140,11 +140,23 @@ export default function CodenamesGameScreen({ navigation, route }) {
     unsubscribeRef.current = unsubscribe;
 
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
       }
     };
-  }, [room, roomCode, navigation]);
+  }, [roomCode, navigation]);
+
+  // Cleanup timers/listeners on navigation away
+  useEffect(() => {
+    const unsubscribeNav = navigation.addListener('beforeRemove', () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    });
+    return unsubscribeNav;
+  }, [navigation]);
 
   const getPlayerRole = () => {
     if (!room || !currentPlayerName) return null;

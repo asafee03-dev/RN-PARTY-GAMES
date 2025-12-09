@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, Dimensions } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
-import Timer from '../../components/shared/Timer';
+import AliasTimer from '../../components/alias/AliasTimer';
+import GameBoard from '../../components/alias/GameBoard';
+import TimeUpPopup from '../../components/alias/TimeUpPopup';
+import GoldenWordPopup from '../../components/alias/GoldenWordPopup';
+import GoldenRoundCard from '../../components/alias/GoldenRoundCard';
+import RoundSummary from '../../components/alias/RoundSummary';
 import { db } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, collection, getDocs } from 'firebase/firestore';
-import { generateCards, freezeWordOnTimeUp } from '../../logic/alias';
-
-// Storage helper
-const storage = {
-  async getItem(key) {
-    return null;
-  }
-};
+import { generateCards } from '../../logic/alias';
+import storage from '../../utils/storage';
+import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899"];
 
@@ -25,6 +25,7 @@ export default function AliasGameScreen({ navigation, route }) {
   const [isLoading, setIsLoading] = useState(true);
   const [timeIsUp, setTimeIsUp] = useState(false);
   const [timerKey, setTimerKey] = useState(0);
+  const [showGoldenPopup, setShowGoldenPopup] = useState(false);
   const unsubscribeRef = useRef(null);
 
   useEffect(() => {
@@ -48,14 +49,32 @@ export default function AliasGameScreen({ navigation, route }) {
       return;
     }
 
+    // Cleanup any existing listener before setting up new one
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
     initializeRoom();
 
     return () => {
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
+        unsubscribeRef.current = null;
       }
     };
   }, [roomCode]);
+
+  // Cleanup timers/listeners on navigation away
+  useEffect(() => {
+    const unsubscribeNav = navigation.addListener('beforeRemove', () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    });
+    return unsubscribeNav;
+  }, [navigation]);
 
   // Redirect to setup if game is still in setup phase
   useEffect(() => {
@@ -107,6 +126,7 @@ export default function AliasGameScreen({ navigation, route }) {
       const roomSnap = await getDoc(roomRef);
 
       if (!roomSnap.exists()) {
+        await clearCurrentRoom();
         Alert.alert('שגיאה', 'החדר לא נמצא');
         navigation.goBack();
         return;
@@ -121,20 +141,27 @@ export default function AliasGameScreen({ navigation, route }) {
   };
 
   const setupRealtimeListener = () => {
+    // Prevent duplicate listeners
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
     const roomRef = doc(db, 'GameRoom', roomCode);
     
     unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const roomData = { id: snapshot.id, ...snapshot.data() };
         
-        // Handle state updates
+        // Handle state updates - match old version's exact logic
         setRoom(prevRoom => {
-          // Restore timeIsUp if last_word_on_time_up exists
+          // Restore timeIsUp state if last_word_on_time_up exists (after refresh)
           if (!prevRoom && roomData.round_active && roomData.last_word_on_time_up) {
+            console.log('🔵 [RESTORE] Restoring timeIsUp state from Firestore');
             setTimeIsUp(true);
           }
           
-          // Reset timer when new round starts
+          // Reset timer and timeIsUp when a new round starts
           if (!prevRoom?.round_active && roomData.round_active) {
             setTimerKey(prev => prev + 1);
             setTimeIsUp(false);
@@ -142,15 +169,43 @@ export default function AliasGameScreen({ navigation, route }) {
           
           // Restore timeIsUp if last_word_on_time_up is set during active round
           if (roomData.round_active && roomData.last_word_on_time_up && !timeIsUp) {
+            console.log('🔵 [RESTORE] Timer expired - restoring timeIsUp state');
             setTimeIsUp(true);
           }
           
-          // Reset timeIsUp when round ends
+          // Reset timeIsUp when round ends (summary is shown or round becomes inactive)
           if (prevRoom?.round_active && !roomData.round_active) {
             setTimeIsUp(false);
           }
           
-          return roomData;
+          // Show golden word popup automatically for non-playing players
+          if (roomData.current_word_is_golden && !isMyTurn() && roomData.round_active && !timeIsUp) {
+            setShowGoldenPopup(true);
+          } else if (!roomData.current_word_is_golden || !roomData.round_active) {
+            setShowGoldenPopup(false);
+          }
+          
+          // Prevent automatic turn changes during active round without summary
+          // This ensures turns only change after the summary is properly shown
+          if (prevRoom?.round_active && !prevRoom?.show_round_summary && prevRoom?.current_turn !== roomData?.current_turn) {
+            console.warn('⚠️ Preventing automatic turn change during active round - must show summary first');
+            return prevRoom;
+          }
+          
+          // Allow turn changes when round is not active (after summary or when transitioning)
+          // This ensures the next team can see the start button
+          if (!prevRoom?.round_active && !roomData?.round_active && prevRoom?.current_turn !== roomData?.current_turn) {
+            // This is a legitimate turn change after round finished
+            console.log('✅ Turn changed from', prevRoom?.current_turn, 'to', roomData?.current_turn, '- resetting timer');
+            setTimerKey(prev => prev + 1);
+            setTimeIsUp(false);
+          }
+          
+          // Always accept the update if it's different
+          if (JSON.stringify(prevRoom) !== JSON.stringify(roomData)) {
+            return roomData;
+          }
+          return prevRoom;
         });
       } else {
         Alert.alert('שגיאה', 'החדר נמחק');
@@ -240,34 +295,49 @@ export default function AliasGameScreen({ navigation, route }) {
     }
   };
 
-  const handleTimeUp = async () => {
+  const handleTimeUpWrapper = async () => {
+    // CRITICAL: Freeze the word IMMEDIATELY when timer hits zero
+    // This must happen synchronously before any async operations or state updates
+    // Match the old version's exact logic
+    
     if (!room || !room.round_active) return;
-
-    // Freeze the current word
+    
+    // Check if word is already frozen (prevents double-freezing)
+    if (room.last_word_on_time_up) {
+      console.log('🔵 [TIMER] Word already frozen, using existing:', room.last_word_on_time_up);
+      setTimeIsUp(true);
+      return;
+    }
+    
+    // CRITICAL: Calculate word synchronously using captured state
+    // This ensures we get the exact word that was on screen when timer expired
     const currentCardIndex = room.used_cards?.length || 0;
     let wordToFreeze = null;
     
     if (cards[currentCardIndex]) {
-      wordToFreeze = cards[currentCardIndex];
-    } else if (room.last_word_on_time_up) {
-      wordToFreeze = room.last_word_on_time_up;
+      // For single-word cards, just use the word directly
+      wordToFreeze = typeof cards[currentCardIndex] === 'string' 
+        ? cards[currentCardIndex] 
+        : (Array.isArray(cards[currentCardIndex]) ? cards[currentCardIndex][0] : String(cards[currentCardIndex]));
+      console.log('🔵 [TIMER] Freezing word at index', currentCardIndex, 'word:', wordToFreeze);
     }
-
+    
+    // Immediately update the database with the frozen word BEFORE setting timeIsUp
+    // This ensures the word is locked in Firestore before any other state changes
     if (wordToFreeze && room.id) {
       try {
+        // Use direct Firestore update for maximum speed and reliability
         const roomRef = doc(db, 'GameRoom', room.id);
-        await updateDoc(roomRef, { 
-          last_word_on_time_up: wordToFreeze 
-        });
-        console.log('✅ [TIMER] Word frozen in Firestore:', wordToFreeze);
-        setTimeIsUp(true);
+        await updateDoc(roomRef, { last_word_on_time_up: wordToFreeze });
+        console.log('✅ [TIMER] Word frozen in Firestore as string:', wordToFreeze);
       } catch (error) {
         console.error('❌ Error freezing last word:', error);
-        setTimeIsUp(true);
+        // If update fails, still set local state so UI works
       }
-    } else {
-      setTimeIsUp(true);
     }
+    
+    // Now set timeIsUp state
+    setTimeIsUp(true);
   };
 
   const handleCorrect = async (teamIndex = null) => {
@@ -285,8 +355,9 @@ export default function AliasGameScreen({ navigation, route }) {
     // Golden word - any team can guess
     if (room.current_word_is_golden && !timeIsUp) {
       const wordToUse = cards[currentCardIndex];
+      // For single-word cards, store as string in words field (matching old version structure)
       const currentCard = {
-        word: wordToUse,
+        words: typeof wordToUse === 'string' ? wordToUse : (Array.isArray(wordToUse) ? wordToUse[0] : String(wordToUse)),
         status: 'correct',
         cardNumber: currentCardIndex + 1,
         isLastWord: false,
@@ -333,9 +404,19 @@ export default function AliasGameScreen({ navigation, route }) {
 
     // Time up case
     if (timeIsUp) {
-      const wordToUse = room.last_word_on_time_up || cards[currentCardIndex];
+      // CRITICAL: Always use the frozen word from Firestore - never recalculate
+      // The word was frozen at the exact moment the timer expired
+      let wordToUse = room.last_word_on_time_up;
+      if (!wordToUse) {
+        // If word is not frozen, this is an error state - log and use fallback
+        console.error('⚠️ [TIMER] last_word_on_time_up is missing but timeIsUp is true - using fallback');
+        wordToUse = cards[currentCardIndex];
+      }
+      // Ensure words is always a string for single-word cards
+      const wordsString = typeof wordToUse === 'string' ? wordToUse : (Array.isArray(wordToUse) ? wordToUse[0] : String(wordToUse));
+      
       const currentCard = {
-        word: wordToUse,
+        words: wordsString,
         status: 'correct',
         cardNumber: currentCardIndex + 1,
         isLastWord: true,
@@ -386,8 +467,9 @@ export default function AliasGameScreen({ navigation, route }) {
     }
 
     const wordToUse = cards[currentCardIndex];
+    // For single-word cards, store as string in words field
     const currentCard = {
-      word: wordToUse,
+      words: typeof wordToUse === 'string' ? wordToUse : (Array.isArray(wordToUse) ? wordToUse[0] : String(wordToUse)),
       status: 'correct',
       cardNumber: currentCardIndex + 1,
       isLastWord: false,
@@ -438,9 +520,16 @@ export default function AliasGameScreen({ navigation, route }) {
 
     // Time up case
     if (timeIsUp) {
-      const wordToUse = room.last_word_on_time_up || cards[currentCardIndex];
+      // CRITICAL: Always use the frozen word from Firestore - never recalculate
+      let wordToUse = room.last_word_on_time_up;
+      if (!wordToUse) {
+        console.error('⚠️ [TIMER] last_word_on_time_up is missing but timeIsUp is true - using fallback');
+        wordToUse = cards[currentCardIndex];
+      }
+      const wordsString = typeof wordToUse === 'string' ? wordToUse : (Array.isArray(wordToUse) ? wordToUse[0] : String(wordToUse));
+      
       const currentCard = {
-        word: wordToUse,
+        words: wordsString,
         status: 'skipped',
         cardNumber: currentCardIndex + 1,
         isLastWord: true,
@@ -477,7 +566,7 @@ export default function AliasGameScreen({ navigation, route }) {
     // Normal case
     const wordToUse = cards[currentCardIndex];
     const currentCard = {
-      word: wordToUse,
+      words: typeof wordToUse === 'string' ? wordToUse : (Array.isArray(wordToUse) ? wordToUse[0] : String(wordToUse)),
       status: 'skipped',
       cardNumber: currentCardIndex + 1,
       isLastWord: false
@@ -538,6 +627,121 @@ export default function AliasGameScreen({ navigation, route }) {
     }
   };
 
+  const toggleCardStatus = async (cardIndex) => {
+    if (!room || !room.used_cards) return;
+    
+    const updatedUsedCards = [...room.used_cards];
+    const card = updatedUsedCards[cardIndex];
+    
+    // אם זה מילה אחרונה או מילה זהב - לא לאפשר toggle פשוט
+    if (card.isLastWord || card.isGoldenWord) return;
+    
+    const newStatus = card.status === 'correct' ? 'skipped' : 'correct';
+    updatedUsedCards[cardIndex].status = newStatus;
+    
+    const updatedTeams = [...room.teams];
+    const teamIndexForThisRound = room.current_turn; 
+    const currentTeamForThisRound = updatedTeams[teamIndexForThisRound];
+
+    // Restore position based on original status and then apply new status
+    if (card.status === 'correct') {
+      currentTeamForThisRound.position = Math.max(0, currentTeamForThisRound.position - 1);
+    } else {
+      currentTeamForThisRound.position = Math.min(59, currentTeamForThisRound.position + 1);
+    }
+
+    const correctCount = updatedUsedCards.filter(c => c.status === 'correct' && (!c.isLastWord || c.teamThatGuessed === teamIndexForThisRound)).length;
+    
+    try {
+      const roomRef = doc(db, 'GameRoom', room.id);
+      await updateDoc(roomRef, {
+        used_cards: updatedUsedCards,
+        teams: updatedTeams,
+        current_round_score: correctCount
+      });
+    } catch (error) {
+      console.error('❌ Error updating room:', error);
+    }
+  };
+
+  const handleChangeLastWordTeam = async (cardIndex, newTeamIndex) => {
+    if (!room || !room.used_cards) return;
+    
+    const updatedUsedCards = [...room.used_cards];
+    const card = updatedUsedCards[cardIndex];
+    
+    const updatedTeams = [...room.teams];
+    
+    // החזר נקודה מהקבוצה הקודמת (אם יש)
+    if (card.teamThatGuessed !== null && card.teamThatGuessed !== undefined) {
+      updatedTeams[card.teamThatGuessed].position = Math.max(0, updatedTeams[card.teamThatGuessed].position - 1);
+    }
+    
+    // תן נקודה לקבוצה החדשה
+    if (newTeamIndex !== null) {
+      updatedTeams[newTeamIndex].position = Math.min(59, updatedTeams[newTeamIndex].position + 1);
+    }
+    
+    // עדכן את הקלף
+    updatedUsedCards[cardIndex] = {
+      ...card,
+      status: newTeamIndex !== null ? 'correct' : 'skipped',
+      teamThatGuessed: newTeamIndex
+    };
+    
+    const correctCount = updatedUsedCards.filter(c => c.status === 'correct').length;
+    
+    try {
+      const roomRef = doc(db, 'GameRoom', room.id);
+      await updateDoc(roomRef, {
+        used_cards: updatedUsedCards,
+        teams: updatedTeams,
+        current_round_score: correctCount
+      });
+    } catch (error) {
+      console.error('❌ Error updating room:', error);
+    }
+  };
+
+  const handleChangeGoldenRoundTeam = async (cardIndex, newTeamIndex) => {
+    if (!room || !room.used_cards) return;
+    
+    const updatedUsedCards = [...room.used_cards];
+    const card = updatedUsedCards[cardIndex];
+    
+    const updatedTeams = [...room.teams];
+    
+    // החזר נקודה מהקבוצה הקודמת (אם יש)
+    if (card.teamThatGuessed !== null && card.teamThatGuessed !== undefined) {
+      updatedTeams[card.teamThatGuessed].position = Math.max(0, updatedTeams[card.teamThatGuessed].position - 1);
+    }
+    
+    // תן נקודה לקבוצה החדשה (או null אם לא ניחשו)
+    if (newTeamIndex !== null) {
+      updatedTeams[newTeamIndex].position = Math.min(59, updatedTeams[newTeamIndex].position + 1);
+    }
+    
+    // עדכן את הקלף
+    updatedUsedCards[cardIndex] = {
+      ...card,
+      status: newTeamIndex !== null ? 'correct' : 'skipped',
+      teamThatGuessed: newTeamIndex
+    };
+    
+    const correctCount = updatedUsedCards.filter(c => c.status === 'correct').length;
+    
+    try {
+      const roomRef = doc(db, 'GameRoom', room.id);
+      await updateDoc(roomRef, {
+        used_cards: updatedUsedCards,
+        teams: updatedTeams,
+        current_round_score: correctCount
+      });
+    } catch (error) {
+      console.error('❌ Error updating room:', error);
+    }
+  };
+
   const isMyTurn = () => {
     if (!room || !room.teams || !playerName) return false;
     const currentTeam = room.teams[room.current_turn];
@@ -562,7 +766,7 @@ export default function AliasGameScreen({ navigation, route }) {
 
   if (isLoading || !room) {
     return (
-      <GradientBackground variant="purple">
+      <GradientBackground variant="brightBlue">
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#FFFFFF" />
           <Text style={styles.loadingText}>טוען משחק...</Text>
@@ -574,7 +778,7 @@ export default function AliasGameScreen({ navigation, route }) {
   // Winner screen
   if (room.game_status === 'finished') {
     return (
-      <GradientBackground variant="purple">
+      <GradientBackground variant="brightBlue">
         <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.winnerContainer}>
             <Text style={styles.winnerEmoji}>🎉</Text>
@@ -596,41 +800,19 @@ export default function AliasGameScreen({ navigation, route }) {
   // Round summary
   if (room.show_round_summary) {
     const currentTeam = getCurrentTeam();
-    const progress = calculateProgress();
     
     return (
-      <GradientBackground variant="purple">
+      <GradientBackground variant="brightBlue">
         <ScrollView contentContainerStyle={styles.container}>
-          <View style={styles.summaryContainer}>
-            <Text style={styles.summaryTitle}>סיכום סיבוב</Text>
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryTeamName}>{currentTeam?.name}</Text>
-              <Text style={styles.summaryScore}>
-                {room.current_round_score} מילים נמצאו
-              </Text>
-              <Text style={styles.summaryPosition}>
-                מיקום: {currentTeam?.position}/59
-              </Text>
-              <Text style={styles.summaryProgress}>
-                התקדמות: {progress.moved >= 0 ? '+' : ''}{progress.moved}
-              </Text>
-            </View>
-            
-            {isMyTurn() && (
-            <GradientButton
-              title="הבא →"
-                onPress={finishRound}
-              variant="green"
-              style={styles.nextButton}
-            />
-            )}
-            
-            {!isMyTurn() && (
-              <Text style={styles.waitingSummaryText}>
-                ממתינים ל{currentTeam?.name} לסיים...
-              </Text>
-            )}
-          </View>
+          <RoundSummary
+            room={room}
+            currentTeam={currentTeam}
+            isMyTurn={isMyTurn()}
+            onToggleCardStatus={toggleCardStatus}
+            onChangeLastWordTeam={handleChangeLastWordTeam}
+            onChangeGoldenRoundTeam={handleChangeGoldenRoundTeam}
+            onFinishRound={finishRound}
+          />
         </ScrollView>
       </GradientBackground>
     );
@@ -639,10 +821,18 @@ export default function AliasGameScreen({ navigation, route }) {
   const currentTeam = getCurrentTeam();
   const progress = calculateProgress();
   const currentCardIndex = room.used_cards?.length || 0;
-  const currentWord = cards[currentCardIndex] || room.last_word_on_time_up || '';
+  // Get current word - handle both string and array formats
+  let currentWord = '';
+  if (timeIsUp && room.last_word_on_time_up) {
+    currentWord = room.last_word_on_time_up;
+  } else if (cards[currentCardIndex]) {
+    currentWord = typeof cards[currentCardIndex] === 'string' 
+      ? cards[currentCardIndex] 
+      : (Array.isArray(cards[currentCardIndex]) ? cards[currentCardIndex][0] : String(cards[currentCardIndex]));
+  }
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="brightBlue">
       <ScrollView 
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
@@ -651,7 +841,19 @@ export default function AliasGameScreen({ navigation, route }) {
         <View style={styles.header}>
           <GradientButton
             title="← יציאה"
-            onPress={() => navigation.navigate('AliasHome')}
+            onPress={async () => {
+              // Cleanup room state
+              await clearCurrentRoom();
+              // Navigate to main home screen
+              // Try to navigate to Home through parent navigator
+              const parent = navigation.getParent();
+              if (parent) {
+                parent.navigate('Home');
+              } else {
+                // Fallback: navigate to AliasHome
+                navigation.navigate('AliasHome');
+              }
+            }}
             variant="ghost"
             style={styles.backButton}
           />
@@ -663,87 +865,74 @@ export default function AliasGameScreen({ navigation, route }) {
 
         {/* Team Info */}
         <View style={styles.teamInfo}>
-          <Text style={styles.teamName}>{currentTeam?.name}</Text>
-          <View style={styles.progressBar}>
-            <View 
-              style={[
-                styles.progressFill, 
-                { width: `${(currentTeam?.position / 59) * 100}%` }
-              ]} 
-            />
-          </View>
-          <Text style={styles.progressText}>
-            {currentTeam?.position} / 59
+          <Text style={styles.teamName}>
+            {isMyTurn() ? 'התור שלך!' : `התור של ${currentTeam?.name}`}
           </Text>
         </View>
+
+        {/* Game Board */}
+        <GameBoard teams={room.teams} goldenSquares={room.golden_squares || []} />
 
         {/* Game Content */}
         {room.round_active ? (
           <View style={styles.gameContent}>
             {/* Timer */}
             <View style={styles.timerContainer}>
-              <Timer
+              <AliasTimer
                 key={timerKey}
-                initialTime={60}
-                onFinish={handleTimeUp}
-                paused={!room.round_active}
+                duration={60}
+                startTime={room.round_start_time}
+                onTimeUp={handleTimeUpWrapper}
+                compact={false}
               />
             </View>
 
             {/* Time Up Popup */}
-            {timeIsUp && isMyTurn() && (
-              <View style={styles.timeUpContainer}>
-                <Text style={styles.timeUpTitle}>הזמן נגמר!</Text>
-                <Text style={styles.timeUpText}>בחר מי ניחש את המילה האחרונה:</Text>
-                <View style={styles.teamButtonsContainer}>
-                  {room.teams.map((team, index) => (
-                    <GradientButton
-                      key={index}
-                      title={team.name}
-                      onPress={() => handleCorrect(index)}
-                      variant={index === room.current_turn ? 'primary' : 'blue'}
-                      style={styles.teamButton}
-                    />
-                  ))}
-                  <GradientButton
-                    title="דלג"
-                    onPress={handleSkip}
-                    variant="red"
-                    style={styles.teamButton}
+            {timeIsUp && (
+              <TimeUpPopup
+                isMyTurn={isMyTurn()}
+                room={room}
+                onCorrect={handleCorrect}
+                onSkip={handleSkip}
+              />
+            )}
+
+            {/* Golden Word - Show GoldenRoundCard for current player */}
+            {room.current_word_is_golden && isMyTurn() && !timeIsUp && (
+              <GoldenRoundCard
+                word={currentWord}
+                teams={room.teams}
+                onTeamGuess={handleCorrect}
+                canInteract={true}
+                showWord={true}
+                startTime={room.round_start_time}
+                onTimeUp={handleTimeUpWrapper}
+                timerComponent={
+                  <AliasTimer
+                    key={timerKey}
+                    duration={60}
+                    startTime={room.round_start_time}
+                    onTimeUp={handleTimeUpWrapper}
+                    compact={false}
                   />
-                </View>
-              </View>
+                }
+              />
             )}
 
-            {/* Golden Word Popup */}
+            {/* Golden Word Popup for non-playing players */}
             {room.current_word_is_golden && !isMyTurn() && !timeIsUp && (
-              <View style={styles.goldenPopup}>
-                <Text style={styles.goldenText}>✨ מילה זהב! ✨</Text>
-                <Text style={styles.goldenSubtext}>כל הקבוצות יכולות לנחש!</Text>
-              </View>
+              <GoldenWordPopup 
+                visible={showGoldenPopup} 
+                onClose={() => setShowGoldenPopup(false)} 
+              />
             )}
 
-        {/* Word Card */}
-            {!timeIsUp && (
-        <View style={[
-          styles.wordCard,
-                room.current_word_is_golden && styles.wordCardGolden
-        ]}>
-                {room.current_word_is_golden && (
-            <View style={styles.goldenBadge}>
-                    <Text style={styles.goldenBadgeText}>✨ זהב ✨</Text>
-            </View>
-          )}
-          <Text style={[
-            styles.wordText,
-                  room.current_word_is_golden && styles.wordTextGolden
-          ]}>
-                  {currentWord}
-          </Text>
-          <Text style={styles.cardNumber}>
-                  מילה {currentCardIndex + 1}
-          </Text>
-        </View>
+            {/* Regular Word Card - only if not golden word */}
+            {!room.current_word_is_golden && !timeIsUp && (
+              <View style={styles.wordCard}>
+                <Text style={styles.wordText}>{currentWord}</Text>
+                <Text style={styles.cardNumber}>מילה {currentCardIndex + 1}</Text>
+              </View>
             )}
 
             {/* Frozen Word (Time Up) */}
@@ -754,49 +943,56 @@ export default function AliasGameScreen({ navigation, route }) {
               </View>
             )}
 
-        {/* Action Buttons */}
-            {isMyTurn() && !timeIsUp && (
-          <View style={styles.actionsContainer}>
-            <GradientButton
-              title="נכון ✓"
+            {/* Action Buttons - only for regular words (not golden) */}
+            {isMyTurn() && !timeIsUp && !room.current_word_is_golden && (
+              <View style={styles.actionsContainer}>
+                <GradientButton
+                  title="נכון ✓"
                   onPress={() => handleCorrect()}
-              variant="green"
-              style={styles.actionButton}
-            />
-            <GradientButton
-              title="דלג"
-              onPress={handleSkip}
-              variant="red"
-              style={styles.actionButton}
-            />
-          </View>
-        )}
-
-            {/* Golden Word - All Teams Can Guess */}
-            {room.current_word_is_golden && !isMyTurn() && !timeIsUp && (
-              <View style={styles.goldenActionsContainer}>
-                <Text style={styles.goldenActionTitle}>בחר מי ניחש:</Text>
-                {room.teams.map((team, index) => (
-                  <GradientButton
-                    key={index}
-                    title={team.name}
-                    onPress={() => handleCorrect(index)}
-                    variant="primary"
-                    style={styles.goldenTeamButton}
-                  />
-                ))}
+                  variant="green"
+                  style={styles.actionButton}
+                />
+                <GradientButton
+                  title="דלג"
+                  onPress={handleSkip}
+                  variant="red"
+                  style={styles.actionButton}
+                />
               </View>
             )}
 
             {/* Waiting Message */}
             {!isMyTurn() && !room.current_word_is_golden && !timeIsUp && (
-          <View style={styles.waitingContainer}>
-            <Text style={styles.waitingText}>
+              <View style={styles.waitingContainer}>
+                <AliasTimer
+                  duration={60}
+                  startTime={room.round_start_time}
+                  onTimeUp={() => {}}
+                  compact={false}
+                />
+                <Text style={styles.waitingText}>
                   {currentTeam?.name} משחקת כעת
                 </Text>
                 <Text style={styles.waitingSubtext}>
                   ממתינים עד שהתור שלהם יסתיים...
                 </Text>
+                
+                {/* ריבוע תשובות נכונות */}
+                <View style={styles.scoreBox}>
+                  <Text style={styles.scoreBoxText}>
+                    תשובות נכונות: {room.current_round_score}
+                  </Text>
+                </View>
+
+                {/* ריבוע התקדמות */}
+                <View style={styles.progressBox}>
+                  <Text style={styles.progressBoxText}>
+                    התקדמות: {progress.moved >= 0 ? '+' : ''}{progress.moved}
+                  </Text>
+                  <Text style={styles.progressBoxSubtext}>
+                    {progress.currentPos + 1}/60
+                  </Text>
+                </View>
               </View>
             )}
           </View>
@@ -950,11 +1146,12 @@ const styles = StyleSheet.create({
   },
   wordCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 24,
+    borderRadius: 20,
     padding: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 300,
+    width: Math.min(Dimensions.get('window').width - 80, 400),
+    height: Math.min(Dimensions.get('window').width - 80, 400),
     marginVertical: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
@@ -962,22 +1159,7 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
     position: 'relative',
-  },
-  wordCardGolden: {
-    backgroundColor: '#FFD700',
-  },
-  goldenBadge: {
-    position: 'absolute',
-    top: 16,
-    backgroundColor: '#FFA000',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  goldenBadgeText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    alignSelf: 'center',
   },
   wordText: {
     fontSize: 48,
@@ -1010,23 +1192,6 @@ const styles = StyleSheet.create({
   actionButton: {
     flex: 1,
     minWidth: 120,
-  },
-  goldenActionsContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 20,
-  },
-  goldenActionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  goldenTeamButton: {
-    width: '100%',
-    marginBottom: 12,
   },
   waitingContainer: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
@@ -1152,5 +1317,53 @@ const styles = StyleSheet.create({
   winnerButton: {
     width: '100%',
     maxWidth: 300,
+  },
+  goldenPopupTrigger: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#F59E0B',
+  },
+  goldenPopupTriggerText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#92400E',
+  },
+  scoreBox: {
+    backgroundColor: '#D1FAE5',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 2,
+    borderColor: '#10B981',
+  },
+  scoreBoxText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#065F46',
+    textAlign: 'center',
+  },
+  progressBox: {
+    backgroundColor: '#EDE9FE',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 2,
+    borderColor: '#8B5CF6',
+  },
+  progressBoxText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#6D28D9',
+    textAlign: 'center',
+  },
+  progressBoxSubtext: {
+    fontSize: 14,
+    color: '#6D28D9',
+    textAlign: 'center',
+    marginTop: 4,
   },
 });

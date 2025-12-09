@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, PanResponder } from 'react-native';
-import Svg, { Path, Circle, Line, G, Defs, LinearGradient, Stop, Text as SvgText } from 'react-native-svg';
+import React, { useEffect, useState } from 'react';
+import { Dimensions, PanResponder, StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle, Defs, G, Line, LinearGradient, Path, Stop } from 'react-native-svg';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isMobile = SCREEN_WIDTH < 768;
@@ -37,10 +37,13 @@ export default function FrequencyGauge({
   currentPlayerName
 }) {
   const [localNeedle, setLocalNeedle] = useState(needlePosition || 90);
-  const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = React.useRef(false);
 
   useEffect(() => {
-    setLocalNeedle(needlePosition || 90);
+    // Only update from prop if not currently dragging
+    if (!isDraggingRef.current) {
+      setLocalNeedle(needlePosition || 90);
+    }
   }, [needlePosition]);
 
   // Store current needle position globally for submission
@@ -72,21 +75,40 @@ export default function FrequencyGauge({
       onMoveShouldSetPanResponder: () => canMove,
       onPanResponderGrant: (evt) => {
         if (!canMove) return;
-        setIsDragging(true);
+        isDraggingRef.current = true;
         const { locationX, locationY } = evt.nativeEvent;
         const angle = getAngleFromTouch(locationX, locationY);
         setLocalNeedle(angle);
+        // Update global position immediately
+        if (typeof global !== 'undefined') {
+          global.currentNeedlePosition = angle;
+        }
       },
       onPanResponderMove: (evt) => {
-        if (!canMove || !isDragging) return;
+        if (!canMove) return;
         const { locationX, locationY } = evt.nativeEvent;
         const angle = getAngleFromTouch(locationX, locationY);
         setLocalNeedle(angle);
+        // Update global position in real-time
+        if (typeof global !== 'undefined') {
+          global.currentNeedlePosition = angle;
+        }
       },
-      onPanResponderRelease: () => {
-        setIsDragging(false);
-        if (onNeedleMove) {
-          onNeedleMove(localNeedle);
+      onPanResponderRelease: (evt) => {
+        isDraggingRef.current = false;
+        // Get final angle from release position or use current localNeedle
+        let finalAngle = localNeedle;
+        if (evt && evt.nativeEvent) {
+          const { locationX, locationY } = evt.nativeEvent;
+          finalAngle = getAngleFromTouch(locationX, locationY);
+          setLocalNeedle(finalAngle);
+          if (typeof global !== 'undefined') {
+            global.currentNeedlePosition = finalAngle;
+          }
+        }
+        // Just update position, don't auto-submit
+        if (onNeedleMove && canMove) {
+          onNeedleMove(finalAngle);
         }
       },
     })

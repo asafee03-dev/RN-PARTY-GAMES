@@ -4,16 +4,7 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, setDoc, collection } from 'firebase/firestore';
-// Using a simple storage helper - can be replaced with AsyncStorage later
-const storage = {
-  async getItem(key) {
-    // In a real app, use AsyncStorage or similar
-    return null;
-  },
-  async setItem(key, value) {
-    // In a real app, use AsyncStorage or similar
-  }
-};
+import storage from '../../utils/storage';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
 
@@ -165,7 +156,7 @@ export default function AliasHomeScreen({ navigation }) {
     }
 
     try {
-      await AsyncStorage.setItem('playerName', playerName);
+      await storage.setItem('playerName', playerName);
       navigation.navigate('AliasSetup', { roomCode: roomCode.toUpperCase() });
     } catch (e) {
       console.warn('Could not save player name:', e);
@@ -178,7 +169,7 @@ export default function AliasHomeScreen({ navigation }) {
   };
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="brightBlue">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
@@ -200,6 +191,9 @@ export default function AliasHomeScreen({ navigation }) {
           <View style={styles.cardContainer}>
             <View style={styles.card}>
               <View style={styles.cardHeader}>
+                <View style={styles.iconContainer}>
+                  <Text style={styles.iconEmoji}>💬</Text>
+                </View>
                 <Text style={styles.cardTitle}>אליאב</Text>
                 <Text style={styles.cardSubtitle}>משחק ההסברות המהיר!</Text>
               </View>
@@ -229,7 +223,7 @@ export default function AliasHomeScreen({ navigation }) {
                 <GradientButton
                   title={isCreating ? 'יוצר חדר...' : 'צור משחק חדש'}
                   onPress={createRoom}
-                  variant="primary"
+                  variant="brightBlue"
                   style={styles.createButton}
                   disabled={isCreating}
                 >
@@ -327,10 +321,29 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   cardHeader: {
-    backgroundColor: '#9C27B0',
+    backgroundColor: '#1E90FF',
     padding: 24,
-    paddingBottom: 40,
+    paddingBottom: 60,
     alignItems: 'center',
+    position: 'relative',
+  },
+  iconContainer: {
+    position: 'absolute',
+    bottom: -30,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 50,
+    width: 80,
+    height: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  iconEmoji: {
+    fontSize: 48,
   },
   cardTitle: {
     fontSize: 48,

@@ -15,7 +15,7 @@ export default function AliasEndScreen({ navigation, route }) {
   };
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="brightBlue">
       <View style={styles.container}>
         <View style={styles.content}>
           <View style={styles.celebration}>

@@ -1,20 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
-
-// Using a simple storage helper - can be replaced with AsyncStorage later
-const storage = {
-  async getItem(key) {
-    // In a real app, use AsyncStorage or similar
-    return null;
-  },
-  async setItem(key, value) {
-    // In a real app, use AsyncStorage or similar
-  }
-};
+import storage from '../../utils/storage';
 
 const PLAYER_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#10B981", "#3B82F6", "#EC4899", "#F97316", "#14B8A6"];
 
@@ -123,13 +113,43 @@ export default function FrequencyHomeScreen({ navigation }) {
       console.log('✅ [FREQUENCY] Firestore confirmed online, proceeding with write');
 
       const roomRef = doc(db, 'FrequencyRoom', newRoomCode);
-      await setDoc(roomRef, roomData);
+      console.log('🔵 [FREQUENCY] Calling setDoc with room code:', newRoomCode);
+      console.log('🔵 [FREQUENCY] Room data:', JSON.stringify(roomData, null, 2));
+      
+      try {
+        await setDoc(roomRef, roomData);
+        console.log('✅ [FREQUENCY] setDoc completed successfully');
+      } catch (setDocError) {
+        console.error('❌ [FREQUENCY] setDoc failed:', setDocError);
+        console.error('❌ [FREQUENCY] Error code:', setDocError.code);
+        console.error('❌ [FREQUENCY] Error message:', setDocError.message);
+        throw setDocError;
+      }
+      
       console.log('✅ [FREQUENCY] Room created successfully with code:', newRoomCode);
-
+      
+      // Save player name BEFORE navigation (like Alias does)
+      try {
+        await storage.setItem('playerName', playerName);
+        console.log('✅ [FREQUENCY] Player name saved to storage');
+      } catch (e) {
+        console.warn('⚠️ [FREQUENCY] Could not save player name:', e);
+      }
+      
+      // Navigate immediately after successful write
+      console.log('🔵 [FREQUENCY] Navigating to room...');
       navigation.navigate('FrequencyRoom', { roomCode: newRoomCode });
     } catch (error) {
       console.error('❌ [FREQUENCY] Error creating room:', error);
-      setError('שגיאה ביצירת החדר. נסה שוב.');
+      let errorMessage = 'שגיאה ביצירת החדר. נסה שוב.';
+      if (error.message?.includes('Firestore Rules')) {
+        errorMessage = 'שגיאה: החדר לא נוצר. אנא בדוק את כללי Firestore.';
+      } else if (error.code === 'permission-denied') {
+        errorMessage = 'אין הרשאה ליצור חדר. אנא בדוק את כללי Firestore.';
+      } else if (error.code === 'unavailable') {
+        errorMessage = 'Firestore לא זמין. אנא בדוק את החיבור לאינטרנט.';
+      }
+      setError(errorMessage);
     } finally {
       isCreatingRoomRef.current = false;
       setIsCreating(false);
@@ -160,7 +180,7 @@ export default function FrequencyHomeScreen({ navigation }) {
   };
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="red">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
@@ -211,7 +231,7 @@ export default function FrequencyHomeScreen({ navigation }) {
           <GradientButton
             title="➕ צור משחק חדש"
             onPress={createRoom}
-            variant="purple"
+            variant="red"
             style={styles.button}
             disabled={isCreating}
           />

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, Modal, Switch, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, Modal, Switch, TouchableOpacity, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
@@ -7,9 +8,11 @@ import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs }
 import storage from '../../utils/storage';
 import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
+import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
 export default function SpyRoomScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
+  const insets = useSafeAreaInsets();
   const [room, setRoom] = useState(null);
   const [currentPlayerName, setCurrentPlayerName] = useState('');
   const [copied, setCopied] = useState(false);
@@ -21,6 +24,7 @@ export default function SpyRoomScreen({ navigation, route }) {
 
   const timerInterval = useRef(null);
   const unsubscribeRef = useRef(null);
+  const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
 
   // Load player name on mount (like Alias does)
   useEffect(() => {
@@ -177,6 +181,15 @@ export default function SpyRoomScreen({ navigation, route }) {
 
       // Add player if not already in room
       const playerExists = roomData.players && Array.isArray(roomData.players) && roomData.players.some(p => p && p.name === playerName);
+      
+      // If game is already playing and player is not in room, show error
+      if (!playerExists && (roomData.game_status === 'playing' || roomData.game_status === 'finished') && playerName) {
+        console.warn('⚠️ Player tried to join game that is already in progress');
+        Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+        navigation.goBack();
+        return;
+      }
+      
       if (!playerExists && roomData.game_status === 'lobby' && playerName) {
         const updatedPlayers = [...(roomData.players || []), { name: playerName }];
         console.log('🔵 Adding player to Spy room:', playerName);
@@ -240,13 +253,80 @@ export default function SpyRoomScreen({ navigation, route }) {
           return prevRoom;
         });
       } else {
-        Alert.alert('שגיאה', 'החדר נמחק');
-        navigation.goBack();
+        // Room deleted - cleanup and redirect
+        if (unsubscribeRef.current) {
+          unsubscribeRef.current();
+          unsubscribeRef.current = null;
+        }
+        if (autoDeletionCleanupRef.current.cancelGameEnd) {
+          autoDeletionCleanupRef.current.cancelGameEnd();
+        }
+        if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
+          autoDeletionCleanupRef.current.cancelEmptyRoom();
+        }
+        if (autoDeletionCleanupRef.current.cancelAge) {
+          autoDeletionCleanupRef.current.cancelAge();
+        }
+        clearCurrentRoom();
+        // Navigate to main menu
+        const parent = navigation.getParent();
+        if (parent) {
+          parent.reset({
+            index: 0,
+            routes: [{ name: 'Home' }]
+          });
+        } else {
+          navigation.navigate('Home');
+        }
       }
     }, (error) => {
       console.error('Error in realtime listener:', error);
     });
   };
+
+  // Setup auto-deletion when game ends
+  useEffect(() => {
+    if (room?.game_status === 'finished' && room?.id) {
+      // Cancel any existing game end timer
+      if (autoDeletionCleanupRef.current.cancelGameEnd) {
+        autoDeletionCleanupRef.current.cancelGameEnd();
+      }
+      
+      // Setup new auto-deletion timer (5 minute grace period)
+      autoDeletionCleanupRef.current.cancelGameEnd = setupGameEndDeletion('SpyRoom', room.id, 5 * 60 * 1000);
+      
+      return () => {
+        if (autoDeletionCleanupRef.current.cancelGameEnd) {
+          autoDeletionCleanupRef.current.cancelGameEnd();
+        }
+      };
+    }
+  }, [room?.game_status, room?.id]);
+
+  // Setup auto-deletion for empty rooms and age-based deletion
+  useEffect(() => {
+    if (room?.id) {
+      // Cancel existing auto-deletions
+      if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
+        autoDeletionCleanupRef.current.cancelEmptyRoom();
+      }
+      if (autoDeletionCleanupRef.current.cancelAge) {
+        autoDeletionCleanupRef.current.cancelAge();
+      }
+      
+      // Setup all auto-deletions
+      const cleanup = setupAllAutoDeletions('SpyRoom', room.id, {
+        createdAt: room.created_at
+      });
+      autoDeletionCleanupRef.current.cancelEmptyRoom = cleanup.cancelEmptyRoom;
+      autoDeletionCleanupRef.current.cancelAge = cleanup.cancelAge;
+      
+      return () => {
+        if (cleanup.cancelEmptyRoom) cleanup.cancelEmptyRoom();
+        if (cleanup.cancelAge) cleanup.cancelAge();
+      };
+    }
+  }, [room?.id, room?.created_at]);
 
   // Watch for all_votes_submitted and trigger endGame
   useEffect(() => {
@@ -436,7 +516,19 @@ export default function SpyRoomScreen({ navigation, route }) {
   };
 
   const resetGame = async () => {
-    if (!room || !room.id || !room.players || !Array.isArray(room.players)) return;
+    if (!room || !room.id || !room.players || !Array.isArray(room.players) || !isHost) return;
+    
+    // Cancel game end auto-deletion since we're resetting
+    if (autoDeletionCleanupRef.current.cancelGameEnd) {
+      autoDeletionCleanupRef.current.cancelGameEnd();
+      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
+    }
+    
+    // Cancel timer
+    if (timerInterval.current) {
+      clearInterval(timerInterval.current);
+      timerInterval.current = null;
+    }
     
     const resetPlayers = room.players.map(p => ({ name: p.name }));
     
@@ -455,6 +547,7 @@ export default function SpyRoomScreen({ navigation, route }) {
       console.log('✅ Game reset successfully - all state cleared');
     } catch (error) {
       console.error('❌ Error resetting game:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
     }
   };
 
@@ -469,8 +562,29 @@ export default function SpyRoomScreen({ navigation, route }) {
   };
 
   const goBack = async () => {
+    // Cleanup all listeners and timers
+    if (timerInterval.current) {
+      clearInterval(timerInterval.current);
+      timerInterval.current = null;
+    }
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    
     await clearCurrentRoom();
-    navigation.navigate('SpyHome');
+    
+    // Navigate to main menu using reset to clear the stack
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      // Fallback: navigate to Home
+      navigation.navigate('Home');
+    }
   };
 
   const formatTime = (seconds) => {
@@ -481,7 +595,7 @@ export default function SpyRoomScreen({ navigation, route }) {
 
   if (error) {
     return (
-      <GradientBackground variant="green">
+      <GradientBackground variant="spy">
         <View style={styles.errorContainer}>
           <Text style={styles.errorTitle}>שגיאה בטעינת החדר</Text>
           <Text style={styles.errorMessage}>לא הצלחנו לטעון את חדר המשחק</Text>
@@ -490,9 +604,17 @@ export default function SpyRoomScreen({ navigation, route }) {
             onPress={() => {
               setError(null);
               setIsLoading(true);
-              navigation.navigate('SpyHome');
+              const parent = navigation.getParent();
+              if (parent) {
+                parent.reset({
+                  index: 0,
+                  routes: [{ name: 'Home' }]
+                });
+              } else {
+                navigation.navigate('Home');
+              }
             }}
-            variant="green"
+            variant="spy"
             style={styles.errorButton}
           />
         </View>
@@ -502,7 +624,7 @@ export default function SpyRoomScreen({ navigation, route }) {
 
   if (isLoading || !room) {
     return (
-      <GradientBackground variant="green">
+      <GradientBackground variant="spy">
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#FFFFFF" />
           <Text style={styles.loadingText}>טוען משחק המרגל...</Text>
@@ -518,16 +640,19 @@ export default function SpyRoomScreen({ navigation, route }) {
   const myVote = currentPlayer?.vote;
 
   return (
-    <GradientBackground variant="green">
+    <GradientBackground variant="spy">
       <ScrollView 
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={goBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← יציאה</Text>
-          </TouchableOpacity>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
+          <GradientButton
+            title="← יציאה"
+            onPress={goBack}
+            variant="spy"
+            style={styles.backButton}
+          />
 
           <View style={styles.headerRight}>
             <Pressable onPress={handleCopyRoomCode} style={styles.roomCodeContainer}>
@@ -538,7 +663,7 @@ export default function SpyRoomScreen({ navigation, route }) {
             <GradientButton
               title="📋 העתק קישור"
               onPress={handleCopyRoomLink}
-              variant="ghost"
+              variant="spy"
               style={styles.copyLinkButton}
             />
           </View>
@@ -607,7 +732,7 @@ export default function SpyRoomScreen({ navigation, route }) {
                 <GradientButton
                   title="▶ התחל משחק!"
                   onPress={startGame}
-                  variant="green"
+                  variant="spy"
                   style={styles.startButton}
                   disabled={players.length < 3}
                 />
@@ -742,7 +867,7 @@ export default function SpyRoomScreen({ navigation, route }) {
                 <GradientButton
                   title="סיים משחק"
                   onPress={() => endGame()}
-                  variant="orange"
+                  variant="spy"
                   style={styles.endButton}
                 />
               )}
@@ -867,16 +992,18 @@ export default function SpyRoomScreen({ navigation, route }) {
         </View>
 
             <View style={styles.finishedActions}>
-        {isHost && (
-                <GradientButton
-                  title="משחק חדש"
-                  onPress={resetGame}
-                  variant="green"
-                  style={styles.resetButton}
-                />
+              <GradientButton
+                title="משחק חדש"
+                onPress={resetGame}
+                variant="spy"
+                style={styles.resetButton}
+                disabled={!isHost}
+              />
+              {!isHost && (
+                <Text style={styles.hostOnlyText}>רק המארח יכול להתחיל משחק חדש</Text>
               )}
-            <GradientButton
-                title="יציאה"
+              <GradientButton
+                title="חזרה לתפריט הראשי"
                 onPress={goBack}
                 variant="outline"
                 style={styles.exitButton}
@@ -892,14 +1019,15 @@ export default function SpyRoomScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
-    padding: 16,
-    paddingBottom: 40,
+    padding: 10,
+    paddingBottom: 16,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
+    paddingHorizontal: 4,
   },
   backButton: {
     padding: 8,
@@ -928,7 +1056,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   roomCodeText: {
-    color: '#10B981',
+    color: '#7ED957', // Spy theme color
     fontSize: 14,
     fontWeight: '700',
   },
@@ -980,7 +1108,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   lobbyHeader: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#7ED957', // Spy theme color
     padding: 20,
     alignItems: 'center',
   },
@@ -1082,7 +1210,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#10B981',
+    backgroundColor: '#7ED957', // Spy theme color
   },
   playerCardName: {
     fontSize: 14,
@@ -1096,15 +1224,15 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   warningCard: {
-    backgroundColor: '#FEF3C7',
+    backgroundColor: 'rgba(126, 217, 87, 0.15)', // Spy theme color with transparency
     borderWidth: 1,
-    borderColor: '#F59E0B',
+    borderColor: '#7ED957', // Spy theme color
     borderRadius: 12,
     padding: 12,
   },
   warningText: {
     fontSize: 14,
-    color: '#92400E',
+    color: '#7ED957', // Spy theme color
     textAlign: 'center',
   },
   gameContainer: {
@@ -1132,7 +1260,7 @@ const styles = StyleSheet.create({
   timerText: {
     fontSize: 48,
     fontWeight: '700',
-    color: '#10B981',
+    color: '#7ED957', // Spy theme color
   },
   timerTextUrgent: {
     color: '#DC2626',
@@ -1148,7 +1276,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   playerInfoHeader: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#7ED957', // Spy theme color
     padding: 16,
     alignItems: 'center',
   },
@@ -1217,7 +1345,7 @@ const styles = StyleSheet.create({
   locationText: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#10B981',
+    color: '#7ED957', // Spy theme color
   },
   roleCard: {
     backgroundColor: '#DBEAFE',
@@ -1489,7 +1617,7 @@ const styles = StyleSheet.create({
   locationRevealName: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#10B981',
+    color: '#7ED957', // Spy theme color
   },
   votingResultsCard: {
     backgroundColor: '#DBEAFE',
@@ -1516,9 +1644,9 @@ const styles = StyleSheet.create({
     borderColor: '#EF4444',
   },
   resultCardSpyCaught: {
-    backgroundColor: '#D1FAE5',
+    backgroundColor: 'rgba(126, 217, 87, 0.15)', // Spy theme color with transparency
     borderWidth: 2,
-    borderColor: '#10B981',
+    borderColor: '#7ED957', // Spy theme color
   },
   resultTitle: {
     fontSize: 20,
@@ -1579,11 +1707,22 @@ const styles = StyleSheet.create({
   },
   finishedActions: {
     gap: 12,
+    width: '100%',
+    flexDirection: 'column',
+    alignItems: 'stretch',
   },
   resetButton: {
-    marginBottom: 8,
+    width: '100%',
+    minHeight: 48,
   },
   exitButton: {
-    marginTop: 8,
+    width: '100%',
+    minHeight: 48,
+  },
+  hostOnlyText: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 4,
   },
 });

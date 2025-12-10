@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, Dimensions, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import AliasTimer from '../../components/alias/AliasTimer';
@@ -13,11 +14,13 @@ import { doc, getDoc, updateDoc, onSnapshot, collection, getDocs } from 'firebas
 import { generateCards } from '../../logic/alias';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
+import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899"];
 
 export default function AliasGameScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
+  const insets = useSafeAreaInsets();
   const [room, setRoom] = useState(null);
   const [playerName, setPlayerName] = useState('');
   const [wordCardsDB, setWordCardsDB] = useState([]);
@@ -215,6 +218,49 @@ export default function AliasGameScreen({ navigation, route }) {
       console.error('Error in realtime listener:', error);
     });
   };
+
+  // Setup auto-deletion when game ends
+  useEffect(() => {
+    if (room?.game_status === 'finished' && room?.id) {
+      // Cancel any existing game end timer
+      if (autoDeletionCleanupRef.current.cancelGameEnd) {
+        autoDeletionCleanupRef.current.cancelGameEnd();
+      }
+      
+      // Setup new auto-deletion timer (5 minute grace period)
+      autoDeletionCleanupRef.current.cancelGameEnd = setupGameEndDeletion('GameRoom', room.id, 5 * 60 * 1000);
+      
+      return () => {
+        if (autoDeletionCleanupRef.current.cancelGameEnd) {
+          autoDeletionCleanupRef.current.cancelGameEnd();
+        }
+      };
+    }
+  }, [room?.game_status, room?.id]);
+
+  // Setup auto-deletion for empty rooms and age-based deletion
+  useEffect(() => {
+    if (room?.id) {
+      // Cancel existing auto-deletions
+      if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
+        autoDeletionCleanupRef.current.cancelEmptyRoom();
+      }
+      if (autoDeletionCleanupRef.current.cancelAge) {
+        autoDeletionCleanupRef.current.cancelAge();
+      }
+      
+      // Setup all auto-deletions
+      const cleanup = setupAllAutoDeletions('GameRoom', room.id, {
+        createdAt: room.created_at
+      });
+      autoDeletionCleanupRef.current = cleanup;
+      
+      return () => {
+        if (cleanup.cancelEmptyRoom) cleanup.cancelEmptyRoom();
+        if (cleanup.cancelAge) cleanup.cancelAge();
+      };
+    }
+  }, [room?.id, room?.created_at]);
 
   const loadWordCardsFromDB = async () => {
     try {
@@ -516,6 +562,11 @@ export default function AliasGameScreen({ navigation, route }) {
   const handleSkip = async () => {
     if (!isMyTurn() || !room || !room.round_active || !cards.length) return;
 
+    // Don't allow skipping golden words
+    if (room.current_word_is_golden) {
+      return;
+    }
+
     const currentCardIndex = room.used_cards?.length || 0;
 
     // Time up case
@@ -624,6 +675,49 @@ export default function AliasGameScreen({ navigation, route }) {
       setTimeIsUp(false);
     } catch (error) {
       console.error('❌ Error finishing round:', error);
+    }
+  };
+
+  const resetGame = async () => {
+    if (!room || !room.id) return;
+    const isHost = room.host_name === playerName;
+    if (!isHost) return;
+
+    // Cancel game end auto-deletion since we're resetting
+    if (autoDeletionCleanupRef.current.cancelGameEnd) {
+      autoDeletionCleanupRef.current.cancelGameEnd();
+      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
+    }
+
+    try {
+      const roomRef = doc(db, 'GameRoom', room.id);
+      const resetTeams = room.teams.map(team => ({
+        ...team,
+        position: 0
+      }));
+      
+      await updateDoc(roomRef, {
+        teams: resetTeams,
+        current_turn: 0,
+        game_status: 'waiting',
+        round_active: false,
+        current_round_score: 0,
+        round_start_time: null,
+        round_start_position: null,
+        used_cards: [],
+        show_round_summary: false,
+        last_word_on_time_up: null,
+        current_word_is_golden: false,
+        winner_team: null,
+        drinking_popup: null
+      });
+      
+      setTimerKey(prev => prev + 1);
+      setTimeIsUp(false);
+      console.log('✅ Game reset successfully');
+    } catch (error) {
+      console.error('❌ Error resetting game:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
     }
   };
 
@@ -777,20 +871,51 @@ export default function AliasGameScreen({ navigation, route }) {
 
   // Winner screen
   if (room.game_status === 'finished') {
+    const isHost = room.host_name === playerName;
     return (
       <GradientBackground variant="brightBlue">
-        <ScrollView contentContainerStyle={styles.container}>
+        <ScrollView contentContainerStyle={[styles.container, { paddingTop: Math.max(insets.top, 16) }]}>
           <View style={styles.winnerContainer}>
             <Text style={styles.winnerEmoji}>🎉</Text>
             <Text style={styles.winnerTitle}>{room.winner_team} ניצחה!</Text>
             <Text style={styles.winnerSubtitle}>מזל טוב!</Text>
             
-            <GradientButton
-              title="חזור ללובי"
-              onPress={() => navigation.navigate('AliasHome')}
-              variant="primary"
-              style={styles.winnerButton}
-            />
+            <View style={styles.winnerActions}>
+              <GradientButton
+                title="משחק חדש"
+                onPress={resetGame}
+                variant="primary"
+                style={styles.winnerButton}
+                disabled={!isHost}
+              />
+              {!isHost && (
+                <Text style={styles.hostOnlyText}>רק המארח יכול להתחיל משחק חדש</Text>
+              )}
+              <GradientButton
+                title="חזרה לתפריט הראשי"
+                onPress={async () => {
+                  if (unsubscribeRef.current) {
+                    unsubscribeRef.current();
+                    unsubscribeRef.current = null;
+                  }
+                  await clearCurrentRoom();
+                  
+                  // Navigate to main menu using reset to clear the stack
+                  const parent = navigation.getParent();
+                  if (parent) {
+                    parent.reset({
+                      index: 0,
+                      routes: [{ name: 'Home' }]
+                    });
+                  } else {
+                    // Fallback: navigate to Home
+                    navigation.navigate('Home');
+                  }
+                }}
+                variant="outline"
+                style={styles.winnerButton}
+              />
+            </View>
           </View>
         </ScrollView>
       </GradientBackground>
@@ -838,23 +963,32 @@ export default function AliasGameScreen({ navigation, route }) {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
           <GradientButton
             title="← יציאה"
             onPress={async () => {
+              // Cleanup listeners
+              if (unsubscribeRef.current) {
+                unsubscribeRef.current();
+                unsubscribeRef.current = null;
+              }
+              
               // Cleanup room state
               await clearCurrentRoom();
-              // Navigate to main home screen
-              // Try to navigate to Home through parent navigator
+              
+              // Navigate to main menu using reset to clear the stack
               const parent = navigation.getParent();
               if (parent) {
-                parent.navigate('Home');
+                parent.reset({
+                  index: 0,
+                  routes: [{ name: 'Home' }]
+                });
               } else {
-                // Fallback: navigate to AliasHome
-                navigation.navigate('AliasHome');
+                // Fallback: navigate to Home
+                navigation.navigate('Home');
               }
             }}
-            variant="ghost"
+            variant="alias"
             style={styles.backButton}
           />
           <View style={styles.headerInfo}>
@@ -886,6 +1020,25 @@ export default function AliasGameScreen({ navigation, route }) {
                 compact={false}
               />
             </View>
+
+            {/* Progress Info for Playing Team */}
+            {isMyTurn() && (
+              <View style={styles.playingTeamInfo}>
+                <View style={styles.scoreBox}>
+                  <Text style={styles.scoreBoxText}>
+                    תשובות נכונות: {room.current_round_score}
+                  </Text>
+                </View>
+                <View style={styles.progressBox}>
+                  <Text style={styles.progressBoxText}>
+                    התקדמות: {progress.moved >= 0 ? '+' : ''}{progress.moved}
+                  </Text>
+                  <Text style={styles.progressBoxSubtext}>
+                    {progress.currentPos + 1}/60
+                  </Text>
+                </View>
+              </View>
+            )}
 
             {/* Time Up Popup */}
             {timeIsUp && (
@@ -946,18 +1099,18 @@ export default function AliasGameScreen({ navigation, route }) {
             {/* Action Buttons - only for regular words (not golden) */}
             {isMyTurn() && !timeIsUp && !room.current_word_is_golden && (
               <View style={styles.actionsContainer}>
-                <GradientButton
-                  title="נכון ✓"
+                <Pressable
+                  style={[styles.actionButton, styles.correctButton]}
                   onPress={() => handleCorrect()}
-                  variant="green"
-                  style={styles.actionButton}
-                />
-                <GradientButton
-                  title="דלג"
+                >
+                  <Text style={styles.actionButtonText}>נכון ✓</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.actionButton, styles.skipButton]}
                   onPress={handleSkip}
-                  variant="red"
-                  style={styles.actionButton}
-                />
+                >
+                  <Text style={styles.actionButtonText}>דלג</Text>
+                </Pressable>
               </View>
             )}
 
@@ -1010,7 +1163,7 @@ export default function AliasGameScreen({ navigation, route }) {
                 <GradientButton
                   title="צא לדרך!"
                   onPress={startRound}
-                  variant="primary"
+                  variant="alias"
                   style={styles.startRoundButton}
                 />
               </>
@@ -1046,7 +1199,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 12,
+    paddingHorizontal: 4,
   },
   backButton: {
     alignSelf: 'flex-start',
@@ -1055,26 +1209,28 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   roomCodeText: {
-    color: '#FFFFFF',
+    color: '#4FA8FF', // Alias theme color - כחול בהיר
     fontSize: 14,
     fontWeight: '600',
   },
   scoreText: {
-    color: '#FFFFFF',
+    color: '#4FA8FF', // Alias theme color - כחול בהיר
     fontSize: 18,
     fontWeight: 'bold',
     marginTop: 4,
   },
   teamInfo: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(79, 168, 255, 0.15)', // Alias theme color with transparency - כחול בהיר
     borderRadius: 16,
     padding: 16,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#4FA8FF',
   },
   teamName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#4FA8FF', // Alias theme color - כחול בהיר
     marginBottom: 12,
     textAlign: 'center',
   },
@@ -1087,7 +1243,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#4FA8FF', // Alias theme color
     borderRadius: 10,
   },
   progressText: {
@@ -1111,7 +1267,7 @@ const styles = StyleSheet.create({
   timeUpTitle: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#F44336',
+    color: '#4FA8FF', // Alias theme color
     textAlign: 'center',
     marginBottom: 12,
   },
@@ -1179,7 +1335,7 @@ const styles = StyleSheet.create({
   },
   frozenText: {
     fontSize: 14,
-    color: '#F44336',
+    color: '#4FA8FF', // Alias theme color
     fontWeight: '600',
     marginTop: 8,
   },
@@ -1192,6 +1348,28 @@ const styles = StyleSheet.create({
   actionButton: {
     flex: 1,
     minWidth: 120,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  correctButton: {
+    backgroundColor: '#10B981', // Green
+  },
+  skipButton: {
+    backgroundColor: '#EF4444', // Red
+  },
+  actionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  playingTeamInfo: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+    marginBottom: 8,
   },
   waitingContainer: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
@@ -1221,7 +1399,7 @@ const styles = StyleSheet.create({
   waitingRoundTitle: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#9C27B0',
+    color: '#4FA8FF', // Alias theme color
     marginBottom: 16,
     textAlign: 'center',
   },
@@ -1267,7 +1445,7 @@ const styles = StyleSheet.create({
   },
   summaryScore: {
     fontSize: 24,
-    color: '#4CAF50',
+    color: '#4FA8FF', // Alias theme color
     fontWeight: '700',
     marginBottom: 12,
   },
@@ -1278,7 +1456,7 @@ const styles = StyleSheet.create({
   },
   summaryProgress: {
     fontSize: 18,
-    color: '#9C27B0',
+    color: '#4FA8FF', // Alias theme color
     fontWeight: '600',
   },
   nextButton: {
@@ -1314,55 +1492,67 @@ const styles = StyleSheet.create({
     opacity: 0.9,
     marginBottom: 32,
   },
-  winnerButton: {
+  winnerActions: {
     width: '100%',
     maxWidth: 300,
+    gap: 12,
+  },
+  winnerButton: {
+    width: '100%',
+  },
+  hostOnlyText: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 4,
   },
   goldenPopupTrigger: {
-    backgroundColor: '#FEF3C7',
+    backgroundColor: 'rgba(79, 168, 255, 0.15)', // Alias theme color with transparency
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#F59E0B',
+    borderColor: '#4FA8FF', // Alias theme color
   },
   goldenPopupTriggerText: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#92400E',
+    color: '#4FA8FF', // Alias theme color
   },
   scoreBox: {
-    backgroundColor: '#D1FAE5',
+    backgroundColor: 'rgba(79, 168, 255, 0.15)', // Alias theme color with transparency
     borderRadius: 12,
     padding: 12,
     marginTop: 12,
     borderWidth: 2,
-    borderColor: '#10B981',
+    borderColor: '#4FA8FF', // Alias theme color
+    flex: 1,
   },
   scoreBoxText: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#065F46',
+    color: '#4FA8FF', // Alias theme color
     textAlign: 'center',
   },
   progressBox: {
-    backgroundColor: '#EDE9FE',
+    backgroundColor: 'rgba(79, 168, 255, 0.15)', // Alias theme color with transparency
     borderRadius: 12,
     padding: 12,
     marginTop: 12,
     borderWidth: 2,
-    borderColor: '#8B5CF6',
+    borderColor: '#4FA8FF', // Alias theme color
+    flex: 1,
   },
   progressBoxText: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#6D28D9',
+    color: '#4FA8FF', // Alias theme color
     textAlign: 'center',
   },
   progressBoxSubtext: {
     fontSize: 14,
-    color: '#6D28D9',
+    color: '#4FA8FF', // Alias theme color
     textAlign: 'center',
     marginTop: 4,
   },

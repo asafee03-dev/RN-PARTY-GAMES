@@ -3,8 +3,9 @@ import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Pl
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, query, collection, where, getDocs, onSnapshot } from 'firebase/firestore';
 import storage from '../../utils/storage';
+import { generateUniqueRoomCode } from '../../utils/roomManagement';
 
 const drawIcons = ["🎨", "✏️", "🖌️", "🖍️", "✨"];
 
@@ -14,6 +15,8 @@ export default function DrawHomeScreen({ navigation }) {
   const [error, setError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const isCreatingRoomRef = useRef(false);
+  const joinedRoomCodeRef = useRef(null);
+  const unsubscribeRef = useRef(null);
 
   useEffect(() => {
     const loadSavedName = async () => {
@@ -27,6 +30,16 @@ export default function DrawHomeScreen({ navigation }) {
       }
     };
     loadSavedName();
+  }, []);
+
+  // Cleanup listener on unmount
+  useEffect(() => {
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    };
   }, []);
 
   const generateRoomCode = () => {
@@ -54,35 +67,18 @@ export default function DrawHomeScreen({ navigation }) {
       console.warn('⚠️ [DRAW] Could not save player name:', e);
     }
 
-    let code = generateRoomCode().trim().toUpperCase();
-    const MAX_RETRIES = 5;
-    let retryCount = 0;
-    
     try {
       if (!db) {
         throw new Error('Firestore database is not initialized');
       }
 
-      while (retryCount < MAX_RETRIES) {
-        const roomRef = doc(db, 'DrawRoom', code);
-        const snapshot = await getDoc(roomRef);
-        
-        if (!snapshot.exists()) {
-          const q = query(collection(db, 'DrawRoom'), where('room_code', '==', code));
-          const querySnapshot = await getDocs(q);
-          if (querySnapshot.empty) {
-            break;
-          }
-        }
-        
-        retryCount++;
-        code = generateRoomCode().trim().toUpperCase();
-        console.log(`⚠️ Room code ${code} already exists, generating new code (attempt ${retryCount}/${MAX_RETRIES})`);
-      }
+      // Generate unique room code using utility
+      const code = await generateUniqueRoomCode('DrawRoom', generateRoomCode);
       
-      if (retryCount >= MAX_RETRIES) {
-        console.error('❌ Failed to generate unique room code after retries');
+      if (!code) {
         setError('שגיאה ביצירת קוד חדר ייחודי. נסה שוב.');
+        isCreatingRoomRef.current = false;
+        setIsCreating(false);
         return;
       }
       
@@ -93,7 +89,8 @@ export default function DrawHomeScreen({ navigation }) {
         host_name: playerName,
         players: [{ name: playerName, score: 0 }],
         game_status: 'lobby',
-        current_turn_index: 0
+        current_turn_index: 0,
+        created_at: Date.now() // Store as timestamp for age calculation
       };
       
       console.log('🔵 [DRAW] Ensuring Firestore is ready...');
@@ -185,8 +182,49 @@ export default function DrawHomeScreen({ navigation }) {
         return;
       }
       
+      const joinedRoom = rooms[0];
+      const joinedRoomCode = roomCode.toUpperCase();
+      
+      // Check if game is already playing and player is not in room
+      const playerExists = joinedRoom.players && Array.isArray(joinedRoom.players) && 
+        joinedRoom.players.some(p => p && p.name === playerName);
+      
+      if (!playerExists && joinedRoom.game_status === 'playing') {
+        setError('המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+        return;
+      }
+      
       await storage.setItem('playerName', playerName);
-      navigation.navigate('DrawRoom', { roomCode: roomCode.toUpperCase() });
+      joinedRoomCodeRef.current = joinedRoomCode;
+      
+      // Set up listener to watch for game status changes
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+      
+      // Navigate immediately - DrawRoomScreen will handle the game state
+      navigation.navigate('DrawRoom', { roomCode: joinedRoomCode });
+      
+      // Set up a temporary listener to catch game start if player is still on this screen
+      // This listener will be cleaned up when navigating to DrawRoom
+      const roomRef = doc(db, 'DrawRoom', joinedRoom.id);
+      const tempUnsubscribe = onSnapshot(roomRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const roomData = snapshot.data();
+          
+          // If game status changes to "playing" and we're still on this screen, navigate
+          // This handles the edge case where navigation is delayed
+          if (roomData.game_status === 'playing' && joinedRoomCodeRef.current === joinedRoomCode) {
+            tempUnsubscribe(); // Clean up this listener
+            joinedRoomCodeRef.current = null;
+            navigation.navigate('DrawRoom', { roomCode: joinedRoomCode });
+          }
+        }
+      });
+      
+      // Store the unsubscribe function but it will be cleaned up on navigation
+      unsubscribeRef.current = tempUnsubscribe;
     } catch (fetchError) {
       console.error('❌ Error fetching room:', fetchError);
       setError('שגיאה בחיפוש החדר. נסה שוב.');
@@ -194,11 +232,21 @@ export default function DrawHomeScreen({ navigation }) {
   };
 
   const goBack = () => {
-    navigation.navigate('Home');
+    // Navigate to main menu using reset to clear the stack
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      // Fallback: navigate to Home
+      navigation.navigate('Home');
+    }
   };
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="draw">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
@@ -207,9 +255,12 @@ export default function DrawHomeScreen({ navigation }) {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <TouchableOpacity onPress={goBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← חזרה</Text>
-          </TouchableOpacity>
+          <GradientButton
+            title="← חזרה למשחקים"
+            onPress={goBack}
+            variant="draw"
+            style={styles.backButton}
+          />
 
           <View style={styles.header}>
             <Text style={styles.iconText}>🎨</Text>
@@ -246,7 +297,7 @@ export default function DrawHomeScreen({ navigation }) {
               <GradientButton
                 title="צור חדר חדש"
                 onPress={handleCreateRoom}
-                variant="purple"
+                variant="draw"
                 style={styles.createButton}
                 disabled={isCreating}
               />
@@ -280,7 +331,7 @@ export default function DrawHomeScreen({ navigation }) {
               <GradientButton
                 title="הצטרף לחדר"
                 onPress={handleJoinRoom}
-                variant="outline"
+                variant="draw"
                 style={styles.joinButton}
               />
 
@@ -312,13 +363,7 @@ const styles = StyleSheet.create({
   },
   backButton: {
     alignSelf: 'flex-start',
-    padding: 8,
     marginBottom: 16,
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
   },
   header: {
     alignItems: 'center',
@@ -350,7 +395,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   cardHeader: {
-    backgroundColor: '#9C27B0',
+    backgroundColor: '#C48CFF', // Draw theme color - סגול בהיר
     padding: 20,
     alignItems: 'center',
   },

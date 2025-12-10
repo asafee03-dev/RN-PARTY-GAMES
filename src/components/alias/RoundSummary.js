@@ -2,6 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import GradientButton from '../codenames/GradientButton';
 
+const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899"];
+
 export default function RoundSummary({
   room,
   currentTeam,
@@ -64,20 +66,28 @@ export default function RoundSummary({
                   <Text style={styles.teamSelectorLabel}>מי ניחש:</Text>
                   <View style={styles.teamButtons}>
                     {room.teams.map((team, teamIndex) => (
-                      <GradientButton
+                      <Pressable
                         key={teamIndex}
-                        title={team.name}
+                        style={[
+                          styles.teamSelectButton,
+                          { backgroundColor: team.color },
+                          card.teamThatGuessed === teamIndex && styles.teamSelectButtonActive
+                        ]}
                         onPress={() => onChangeLastWordTeam(index, teamIndex)}
-                        variant={card.teamThatGuessed === teamIndex ? 'primary' : 'ghost'}
-                        style={styles.teamSelectButton}
-                      />
+                      >
+                        <Text style={styles.teamSelectButtonText}>{team.name}</Text>
+                      </Pressable>
                     ))}
-                    <GradientButton
-                      title="דלג"
+                    <Pressable
+                      style={[
+                        styles.teamSelectButton,
+                        styles.skipButton,
+                        card.teamThatGuessed === null && styles.teamSelectButtonActive
+                      ]}
                       onPress={() => onChangeLastWordTeam(index, null)}
-                      variant={card.teamThatGuessed === null ? 'red' : 'ghost'}
-                      style={styles.teamSelectButton}
-                    />
+                    >
+                      <Text style={styles.teamSelectButtonText}>דלג</Text>
+                    </Pressable>
                   </View>
                 </View>
               )}
@@ -88,20 +98,28 @@ export default function RoundSummary({
                   <Text style={styles.teamSelectorLabel}>מי ניחש:</Text>
                   <View style={styles.teamButtons}>
                     {room.teams.map((team, teamIndex) => (
-                      <GradientButton
+                      <Pressable
                         key={teamIndex}
-                        title={team.name}
+                        style={[
+                          styles.teamSelectButton,
+                          { backgroundColor: team.color },
+                          card.teamThatGuessed === teamIndex && styles.teamSelectButtonActive
+                        ]}
                         onPress={() => onChangeGoldenRoundTeam(index, teamIndex)}
-                        variant={card.teamThatGuessed === teamIndex ? 'primary' : 'ghost'}
-                        style={styles.teamSelectButton}
-                      />
+                      >
+                        <Text style={styles.teamSelectButtonText}>{team.name}</Text>
+                      </Pressable>
                     ))}
-                    <GradientButton
-                      title="דלג"
+                    <Pressable
+                      style={[
+                        styles.teamSelectButton,
+                        styles.skipButton,
+                        card.teamThatGuessed === null && styles.teamSelectButtonActive
+                      ]}
                       onPress={() => onChangeGoldenRoundTeam(index, null)}
-                      variant={card.teamThatGuessed === null ? 'red' : 'ghost'}
-                      style={styles.teamSelectButton}
-                    />
+                    >
+                      <Text style={styles.teamSelectButtonText}>דלג</Text>
+                    </Pressable>
                   </View>
                 </View>
               )}
@@ -147,10 +165,10 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   title: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 24,
+    marginBottom: 16,
     textAlign: 'center',
   },
   summaryCard: {
@@ -184,11 +202,11 @@ const styles = StyleSheet.create({
   },
   progress: {
     fontSize: 18,
-    color: '#8B5CF6',
+    color: '#4FA8FF',
     fontWeight: '600',
   },
   cardsList: {
-    maxHeight: 300,
+    maxHeight: 400,
     marginBottom: 20,
   },
   cardItem: {
@@ -253,6 +271,25 @@ const styles = StyleSheet.create({
   teamSelectButton: {
     flex: 1,
     minWidth: 100,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  teamSelectButtonActive: {
+    borderColor: '#FFFFFF',
+    borderWidth: 3,
+  },
+  teamSelectButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  skipButton: {
+    backgroundColor: '#0A1A3A', // Dark blue/black
   },
   toggleButton: {
     padding: 12,

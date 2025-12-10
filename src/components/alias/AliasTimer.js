@@ -62,8 +62,16 @@ export default function AliasTimer({
     );
   }
 
+  const progress = duration > 0 ? (timeLeft / duration) : 0;
+
   return (
     <View style={styles.container}>
+      {/* Progress Bar */}
+      <View style={styles.progressBarContainer}>
+        <View style={styles.progressBar}>
+          <View style={[styles.progressFill, { width: `${progress * 100}%`, backgroundColor: getColor() }]} />
+        </View>
+      </View>
       <Text style={[styles.timeText, { color: getColor() }]}>
         {formatTime(timeLeft)}
       </Text>
@@ -76,6 +84,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
+  },
+  progressBarContainer: {
+    width: '100%',
+    marginBottom: 12,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 4,
   },
   timeText: {
     fontSize: 48,

@@ -38,11 +38,24 @@ export default function FrequencyGauge({
 }) {
   const [localNeedle, setLocalNeedle] = useState(needlePosition || 90);
   const isDraggingRef = React.useRef(false);
+  const canMoveRef = React.useRef(canMove);
+  const onNeedleMoveRef = React.useRef(onNeedleMove);
 
+  // Update refs when props change
   useEffect(() => {
-    // Only update from prop if not currently dragging
-    if (!isDraggingRef.current) {
-      setLocalNeedle(needlePosition || 90);
+    canMoveRef.current = canMove;
+    onNeedleMoveRef.current = onNeedleMove;
+  }, [canMove, onNeedleMove]);
+
+  // Initialize local needle from prop, but only if not dragging and prop is valid
+  useEffect(() => {
+    if (!isDraggingRef.current && needlePosition !== undefined && needlePosition !== null) {
+      // Only update if the prop value is significantly different to avoid unnecessary updates
+      const currentValue = localNeedle;
+      const newValue = needlePosition;
+      if (Math.abs(currentValue - newValue) > 0.1) {
+        setLocalNeedle(newValue);
+      }
     }
   }, [needlePosition]);
 
@@ -54,7 +67,7 @@ export default function FrequencyGauge({
   }, [localNeedle, canMove]);
 
   // Calculate angle from touch coordinates
-  const getAngleFromTouch = (x, y) => {
+  const getAngleFromTouch = React.useCallback((x, y) => {
     const dx = x - centerX;
     const dy = centerY - y; // Flip Y axis
     
@@ -67,15 +80,19 @@ export default function FrequencyGauge({
     }
     angle = Math.max(0, Math.min(180, angle));
     return angle;
-  };
+  }, []);
 
-  const panResponder = React.useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => canMove,
-      onMoveShouldSetPanResponder: () => canMove,
+  // Create PanResponder that always uses current canMove value from ref
+  // Prevents scroll when touching/dragging gauge on mobile
+  const panResponder = React.useMemo(
+    () => PanResponder.create({
+      onStartShouldSetPanResponder: () => canMoveRef.current,
+      onMoveShouldSetPanResponder: () => canMoveRef.current,
       onPanResponderGrant: (evt) => {
-        if (!canMove) return;
+        if (!canMoveRef.current) return;
         isDraggingRef.current = true;
+        // Prevent parent scroll
+        evt.stopPropagation();
         const { locationX, locationY } = evt.nativeEvent;
         const angle = getAngleFromTouch(locationX, locationY);
         setLocalNeedle(angle);
@@ -84,8 +101,10 @@ export default function FrequencyGauge({
           global.currentNeedlePosition = angle;
         }
       },
-      onPanResponderMove: (evt) => {
-        if (!canMove) return;
+      onPanResponderMove: (evt, gestureState) => {
+        if (!canMoveRef.current) return;
+        // Prevent parent scroll
+        evt.stopPropagation();
         const { locationX, locationY } = evt.nativeEvent;
         const angle = getAngleFromTouch(locationX, locationY);
         setLocalNeedle(angle);
@@ -107,12 +126,18 @@ export default function FrequencyGauge({
           }
         }
         // Just update position, don't auto-submit
-        if (onNeedleMove && canMove) {
-          onNeedleMove(finalAngle);
+        if (onNeedleMoveRef.current && canMoveRef.current) {
+          onNeedleMoveRef.current(finalAngle);
         }
       },
-    })
-  ).current;
+      onPanResponderTerminate: () => {
+        isDraggingRef.current = false;
+      },
+      // Prevent scrolling when interacting with gauge
+      onShouldBlockNativeResponder: () => true,
+    }),
+    [getAngleFromTouch]
+  );
 
   // Render arc path
   const arcPath = () => {
@@ -148,23 +173,54 @@ export default function FrequencyGauge({
     return ticks;
   };
 
-  // Render sectors
+  // Render sectors - extend to edge of gauge circle, but only show parts within 0-180 range
   const renderSectors = () => {
     if (!showTarget || !sectors || sectors.length === 0) return null;
 
+    // Calculate outer radius to match the edge of the arc (arc has strokeWidth 30-40)
+    const arcStrokeWidth = isMobile ? 30 : 40;
+    const outerRadius = radius + (arcStrokeWidth / 2);
+
     return sectors.map((sector, i) => {
-      const startPt = angleToPoint(sector.start);
-      const endPt = angleToPoint(sector.end);
+      // Clamp sector to visible range (0-180)
+      // Only show the part of the sector that is within the gauge range
+      const visibleStart = Math.max(0, sector.start);
+      const visibleEnd = Math.min(180, sector.end);
       
-      const path = `M ${centerX} ${centerY} L ${startPt.x} ${startPt.y} A ${radius} ${radius} 0 0 1 ${endPt.x} ${endPt.y} Z`;
+      // Skip if sector is completely outside visible range
+      if (visibleStart >= visibleEnd || visibleStart >= 180 || visibleEnd <= 0) {
+        return null;
+      }
       
-      const color = sector.points === 2 ? "rgba(34,197,94,0.7)" : "rgba(251,191,36,0.7)";
-      const stroke = sector.points === 2 ? "rgba(34,197,94,0.9)" : "rgba(251,191,36,0.9)";
+      // Calculate outer edge points (at the edge of the arc) for visible portion
+      const startOuterRad = (visibleStart + 180) * Math.PI / 180;
+      const endOuterRad = (visibleEnd + 180) * Math.PI / 180;
+      
+      const startOuterPt = {
+        x: centerX + outerRadius * Math.cos(startOuterRad),
+        y: centerY + outerRadius * Math.sin(startOuterRad)
+      };
+      const endOuterPt = {
+        x: centerX + outerRadius * Math.cos(endOuterRad),
+        y: centerY + outerRadius * Math.sin(endOuterRad)
+      };
+      
+      // Create path that extends to the outer edge of the gauge arc
+      // Only show the visible portion (0-180)
+      const path = `M ${centerX} ${centerY} L ${startOuterPt.x} ${startOuterPt.y} A ${outerRadius} ${outerRadius} 0 0 1 ${endOuterPt.x} ${endOuterPt.y} Z`;
+      
+      // 1 point sectors = bright green, 2 points sector = dark green
+      const color = sector.points === 2 
+        ? "rgba(22,163,74,0.8)" // Dark green for 2 points
+        : "rgba(74,222,128,0.8)"; // Bright green for 1 point
+      const stroke = sector.points === 2 
+        ? "rgba(22,163,74,1)" // Dark green stroke
+        : "rgba(74,222,128,1)"; // Bright green stroke
       
       return (
         <Path key={i} d={path} fill={color} stroke={stroke} strokeWidth="2" />
       );
-    });
+    }).filter(Boolean); // Remove null entries
   };
 
   // Render sector numbers as overlay
@@ -221,10 +277,13 @@ export default function FrequencyGauge({
   };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} collapsable={false}>
       <View 
         style={styles.svgContainer}
-        {...(canMove ? panResponder.panHandlers : {})}
+        {...panResponder.panHandlers}
+        onStartShouldSetResponder={() => canMove}
+        onMoveShouldSetResponder={() => canMove}
+        onResponderTerminationRequest={() => false}
       >
         <View style={styles.svgWrapper}>
           <Svg width={GAUGE_WIDTH} height={GAUGE_HEIGHT} viewBox={`0 0 ${GAUGE_WIDTH} ${GAUGE_HEIGHT}`}>
@@ -326,11 +385,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
+    backgroundColor: '#0A1A3A',
+    borderRadius: 16,
   },
   svgContainer: {
     width: GAUGE_WIDTH,
     height: GAUGE_HEIGHT,
     position: 'relative',
+    // Prevent scroll when touching gauge on mobile
+    touchAction: 'none',
   },
   svgWrapper: {
     width: GAUGE_WIDTH,
@@ -359,7 +422,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   labelText: {
-    color: '#7C3AED',
+    color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: isMobile ? 12 : 14,
     textAlign: 'center',
@@ -368,7 +431,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     fontSize: isMobile ? 12 : 14,
-    color: '#6B7280',
+    color: '#E5E7EB',
   },
   legendContainer: {
     flexDirection: 'row',
@@ -394,7 +457,7 @@ const styles = StyleSheet.create({
   legendText: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#374151',
+    color: '#E5E7EB',
   },
   sectorNumber: {
     position: 'absolute',

@@ -15,7 +15,7 @@ export default function SpyEndScreen({ navigation, route }) {
   };
 
   return (
-    <GradientBackground variant={winner === 'spy' ? 'red' : 'green'}>
+    <GradientBackground variant="spy">
       <View style={styles.container}>
         <View style={styles.content}>
           <View style={styles.celebration}>
@@ -34,13 +34,13 @@ export default function SpyEndScreen({ navigation, route }) {
             <GradientButton
               title="שחק שוב"
               onPress={handlePlayAgain}
-              variant="primary"
+              variant="spy"
               style={styles.actionButton}
             />
             <GradientButton
               title="חזור ללובי"
               onPress={handleBackToLobby}
-              variant="blue"
+              variant="spy"
               style={styles.actionButton}
             />
           </View>

@@ -62,13 +62,13 @@ export default function CodenamesEndScreen({ navigation, route }) {
             <GradientButton
               title="שחק שוב"
               onPress={handlePlayAgain}
-              variant="primary"
+              variant="codenames"
               style={styles.actionButton}
             />
             <GradientButton
               title="חזור ללובי"
               onPress={handleBackToLobby}
-              variant={isBlueWinner ? 'blue' : 'red'}
+              variant="codenames"
               style={styles.actionButton}
             />
           </View>

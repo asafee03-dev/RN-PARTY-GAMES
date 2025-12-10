@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, TouchableOpacity, Dimensions } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
+import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
-
 import storage from '../../utils/storage';
+import { generateUniqueRoomCode } from '../../utils/roomManagement';
 
 const agentIcons = ["🕵️", "🔍", "🎯", "📋", "🗂️", "💼", "🕶️", "🎩", "🔐", "📡"];
 
@@ -57,35 +58,18 @@ export default function CodenamesHomeScreen({ navigation }) {
       console.warn('⚠️ [CODENAMES] Could not save player name:', e);
     }
 
-    let newRoomCode = generateRoomCode().trim().toUpperCase();
-    const MAX_RETRIES = 5;
-    let retryCount = 0;
-    
     try {
       if (!db) {
         throw new Error('Firestore database is not initialized');
       }
 
-      while (retryCount < MAX_RETRIES) {
-        const roomRef = doc(db, 'CodenamesRoom', newRoomCode);
-        const snapshot = await getDoc(roomRef);
-        
-        if (!snapshot.exists()) {
-          const q = query(collection(db, 'CodenamesRoom'), where('room_code', '==', newRoomCode));
-          const querySnapshot = await getDocs(q);
-          if (querySnapshot.empty) {
-            break;
-          }
-        }
-        
-        retryCount++;
-        newRoomCode = generateRoomCode().trim().toUpperCase();
-        console.log(`⚠️ Room code ${newRoomCode} already exists, generating new code (attempt ${retryCount}/${MAX_RETRIES})`);
-      }
+      // Generate unique room code using utility
+      const newRoomCode = await generateUniqueRoomCode('CodenamesRoom', generateRoomCode);
       
-      if (retryCount >= MAX_RETRIES) {
-        console.error('❌ Failed to generate unique room code after retries');
+      if (!newRoomCode) {
         setError('שגיאה ביצירת קוד חדר ייחודי. נסה שוב.');
+        isCreatingRoomRef.current = false;
+        setIsCreating(false);
         return;
       }
       
@@ -111,7 +95,8 @@ export default function CodenamesHomeScreen({ navigation }) {
         board_words: [],
         key_map: [],
         guesses_remaining: 0,
-        turn_phase: 'clue'
+        turn_phase: 'clue',
+        created_at: Date.now() // Store as timestamp for age calculation
       };
       
       console.log('🔵 [CODENAMES] About to call setDoc() - execution checkpoint 1');
@@ -199,7 +184,17 @@ export default function CodenamesHomeScreen({ navigation }) {
   };
 
   const goBack = () => {
-    navigation.navigate('Home');
+    // Navigate to main menu using reset to clear the stack
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      // Fallback: navigate to Home
+      navigation.navigate('Home');
+    }
   };
 
   return (
@@ -212,9 +207,12 @@ export default function CodenamesHomeScreen({ navigation }) {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <TouchableOpacity onPress={goBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← חזרה למשחקים</Text>
-          </TouchableOpacity>
+          <GradientButton
+            title="← חזרה למשחקים"
+            onPress={goBack}
+            variant="codenames"
+            style={styles.backButton}
+          />
 
           <View style={styles.header}>
             <View style={styles.iconContainer}>
@@ -340,7 +338,6 @@ const styles = StyleSheet.create({
   },
   backButton: {
     alignSelf: 'flex-start',
-    padding: 12,
     marginBottom: 16,
   },
   backButtonText: {
@@ -437,8 +434,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modeButtonActive: {
-    backgroundColor: '#D4A574',
-    borderColor: '#B8956A',
+    backgroundColor: '#D9C3A5', // Codenames theme color - חום בהיר
+    borderColor: '#C4A574',
   },
   modeIcon: {
     fontSize: 40,
@@ -463,7 +460,7 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   createButton: {
-    backgroundColor: '#D4A574',
+    backgroundColor: '#D9C3A5', // Codenames theme color - חום בהיר
     borderRadius: 16,
     padding: 20,
     flexDirection: 'row',
@@ -484,7 +481,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   createButtonText: {
-    color: '#2C3E50',
+    color: '#2C3E50', // Dark text for light brown background
     fontSize: 20,
     fontWeight: 'bold',
   },
@@ -505,9 +502,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   joinButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 3,
-    borderColor: '#D4A574',
+    backgroundColor: '#D9C3A5', // Codenames theme color - חום בהיר
     borderRadius: 16,
     padding: 20,
     flexDirection: 'row',
@@ -519,7 +514,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   joinButtonText: {
-    color: '#D4A574',
+    color: '#2C3E50', // Dark text for light brown background
     fontSize: 20,
     fontWeight: 'bold',
   },

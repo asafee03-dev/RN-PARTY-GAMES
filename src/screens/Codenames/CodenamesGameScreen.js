@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Modal, Clipboard } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Modal, Clipboard, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
@@ -8,18 +9,23 @@ import ClueInput from '../../components/codenames/ClueInput';
 import TeamInfo from '../../components/codenames/TeamInfo';
 import RivalsTimer from '../../components/codenames/RivalsTimer';
 import TeamWordsPanel from '../../components/codenames/TeamWordsPanel';
+import GradientButton from '../../components/codenames/GradientButton';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
+import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
 export default function CodenamesGameScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
+  const insets = useSafeAreaInsets();
   const [room, setRoom] = useState(null);
   const [currentPlayerName, setCurrentPlayerName] = useState('');
   const [copied, setCopied] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showTeamWords, setShowTeamWords] = useState(false);
+  const [forceCloseModal, setForceCloseModal] = useState(false);
   const unsubscribeRef = useRef(null);
+  const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
 
   useEffect(() => {
     const initializeRoom = async () => {
@@ -157,6 +163,57 @@ export default function CodenamesGameScreen({ navigation, route }) {
     });
     return unsubscribeNav;
   }, [navigation]);
+
+  // Reset force close modal flag when game status changes back to setup
+  useEffect(() => {
+    if (room?.game_status === 'setup' && forceCloseModal) {
+      setForceCloseModal(false);
+    }
+  }, [room?.game_status, forceCloseModal]);
+
+  // Setup auto-deletion when game ends
+  useEffect(() => {
+    if (room?.game_status === 'finished' && room?.id) {
+      // Cancel any existing game end timer
+      if (autoDeletionCleanupRef.current.cancelGameEnd) {
+        autoDeletionCleanupRef.current.cancelGameEnd();
+      }
+      
+      // Setup new auto-deletion timer (5 minute grace period)
+      autoDeletionCleanupRef.current.cancelGameEnd = setupGameEndDeletion('CodenamesRoom', room.id, 5 * 60 * 1000);
+      
+      return () => {
+        if (autoDeletionCleanupRef.current.cancelGameEnd) {
+          autoDeletionCleanupRef.current.cancelGameEnd();
+        }
+      };
+    }
+  }, [room?.game_status, room?.id]);
+
+  // Setup auto-deletion for empty rooms and age-based deletion
+  useEffect(() => {
+    if (room?.id) {
+      // Cancel existing auto-deletions
+      if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
+        autoDeletionCleanupRef.current.cancelEmptyRoom();
+      }
+      if (autoDeletionCleanupRef.current.cancelAge) {
+        autoDeletionCleanupRef.current.cancelAge();
+      }
+      
+      // Setup all auto-deletions
+      const cleanup = setupAllAutoDeletions('CodenamesRoom', room.id, {
+        createdAt: room.created_at
+      });
+      autoDeletionCleanupRef.current.cancelEmptyRoom = cleanup.cancelEmptyRoom;
+      autoDeletionCleanupRef.current.cancelAge = cleanup.cancelAge;
+      
+      return () => {
+        if (cleanup.cancelEmptyRoom) cleanup.cancelEmptyRoom();
+        if (cleanup.cancelAge) cleanup.cancelAge();
+      };
+    }
+  }, [room?.id, room?.created_at]);
 
   const getPlayerRole = () => {
     if (!room || !currentPlayerName) return null;
@@ -605,11 +662,40 @@ export default function CodenamesGameScreen({ navigation, route }) {
   };
 
   const goBack = async () => {
-    navigation.navigate('CodenamesHome');
+    // Cleanup listeners
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    
+    await clearCurrentRoom();
+    
+    // Navigate to main menu using reset to clear the stack
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      // Fallback: navigate to Home
+      navigation.navigate('Home');
+    }
   };
 
   const resetGame = async () => {
     if (!room || !room.id) return;
+    const isHost = room.host_name === currentPlayerName;
+    if (!isHost) return;
+    
+    // Cancel game end auto-deletion since we're resetting
+    if (autoDeletionCleanupRef.current.cancelGameEnd) {
+      autoDeletionCleanupRef.current.cancelGameEnd();
+      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
+    }
+    
+    // Force close modal immediately
+    setForceCloseModal(true);
     
     const resetRedTeam = {
       ...room.red_team,
@@ -640,12 +726,19 @@ export default function CodenamesGameScreen({ navigation, route }) {
       });
       console.log('✅ Game reset successfully - all state cleared');
       
+      // Reset force close flag after a short delay
+      setTimeout(() => {
+        setForceCloseModal(false);
+      }, 100);
+      
       navigation.navigate('CodenamesSetup', { 
         roomCode, 
         gameMode: room.game_mode || 'friends' 
       });
     } catch (error) {
       console.error('❌ Error resetting game:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+      setForceCloseModal(false);
     }
   };
 
@@ -664,7 +757,17 @@ export default function CodenamesGameScreen({ navigation, route }) {
       <LinearGradient colors={['#3B82F6', '#06B6D4', '#14B8A6']} style={styles.errorContainer}>
         <Text style={styles.errorTitle}>שגיאה בטעינת המשחק</Text>
         <Text style={styles.errorMessage}>לא הצלחנו לטעון את משחק שם טוב</Text>
-        <TouchableOpacity style={styles.errorButton} onPress={() => navigation.navigate('CodenamesHome')}>
+        <TouchableOpacity style={styles.errorButton} onPress={() => {
+          const parent = navigation.getParent();
+          if (parent) {
+            parent.reset({
+              index: 0,
+              routes: [{ name: 'Home' }]
+            });
+          } else {
+            navigation.navigate('Home');
+          }
+        }}>
           <Text style={styles.errorButtonText}>חזרה למסך הבית</Text>
         </TouchableOpacity>
       </LinearGradient>
@@ -698,10 +801,13 @@ export default function CodenamesGameScreen({ navigation, route }) {
     <LinearGradient colors={['#3B82F6', '#06B6D4', '#14B8A6']} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={goBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← יציאה</Text>
-          </TouchableOpacity>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
+          <GradientButton
+            title="← יציאה"
+            onPress={goBack}
+            variant="codenames"
+            style={styles.backButton}
+          />
 
           <View style={styles.headerRight}>
             {room.drinking_popup !== null && (
@@ -751,7 +857,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
         )}
 
         {/* Winner Modal */}
-        {room.game_status === 'finished' && (
+        {room.game_status === 'finished' && !forceCloseModal && (
           <Modal
             visible={true}
             transparent={true}
@@ -767,16 +873,38 @@ export default function CodenamesGameScreen({ navigation, route }) {
                 <Text style={styles.winnerSubtitle}>ניצחה! 🎉</Text>
                 <View style={styles.winnerButtons}>
                   <TouchableOpacity
-                    style={styles.winnerButton}
+                    style={[styles.winnerButton, (!room.host_name || room.host_name !== currentPlayerName) && styles.winnerButtonDisabled]}
                     onPress={resetGame}
+                    disabled={!room.host_name || room.host_name !== currentPlayerName}
                   >
-                    <Text style={styles.winnerButtonText}>משחק חדש</Text>
+                    <Text style={[styles.winnerButtonText, (!room.host_name || room.host_name !== currentPlayerName) && styles.winnerButtonTextDisabled]}>משחק חדש</Text>
                   </TouchableOpacity>
+                  {(!room.host_name || room.host_name !== currentPlayerName) && (
+                    <Text style={styles.hostOnlyText}>רק המארח יכול להתחיל משחק חדש</Text>
+                  )}
                   <TouchableOpacity
                     style={[styles.winnerButton, styles.winnerButtonOutline]}
-                    onPress={goBack}
+                    onPress={async () => {
+                      if (unsubscribeRef.current) {
+                        unsubscribeRef.current();
+                        unsubscribeRef.current = null;
+                      }
+                      await clearCurrentRoom();
+                      
+                      // Navigate to main menu using reset to clear the stack
+                      const parent = navigation.getParent();
+                      if (parent) {
+                        parent.reset({
+                          index: 0,
+                          routes: [{ name: 'Home' }]
+                        });
+                      } else {
+                        // Fallback: navigate to Home
+                        navigation.navigate('Home');
+                      }
+                    }}
                   >
-                    <Text style={[styles.winnerButtonText, styles.winnerButtonTextOutline]}>יציאה</Text>
+                    <Text style={[styles.winnerButtonText, styles.winnerButtonTextOutline]}>חזרה לתפריט הראשי</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -941,13 +1069,15 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    padding: 16,
+    padding: 10,
+    paddingBottom: 16,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
+    paddingHorizontal: 4,
   },
   backButton: {
     padding: 8,
@@ -1068,15 +1198,19 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   winnerButtons: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: 12,
     width: '100%',
+    alignItems: 'stretch',
   },
   winnerButton: {
-    flex: 1,
+    width: '100%',
     backgroundColor: '#2563EB',
     borderRadius: 12,
     padding: 16,
+    minHeight: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   winnerButtonOutline: {
     backgroundColor: 'transparent',
@@ -1091,6 +1225,20 @@ const styles = StyleSheet.create({
   },
   winnerButtonTextOutline: {
     color: '#2563EB',
+  },
+  winnerButtonDisabled: {
+    opacity: 0.5,
+    backgroundColor: '#9CA3AF',
+  },
+  winnerButtonTextDisabled: {
+    color: '#FFFFFF',
+  },
+  hostOnlyText: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 4,
+    width: '100%',
   },
   teamWordsSection: {
     marginBottom: 12,

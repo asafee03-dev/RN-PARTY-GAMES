@@ -5,6 +5,7 @@ import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, setDoc, collection } from 'firebase/firestore';
 import storage from '../../utils/storage';
+import { generateUniqueRoomCode } from '../../utils/roomManagement';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
 
@@ -59,16 +60,22 @@ export default function AliasHomeScreen({ navigation }) {
       console.warn('⚠️ Could not save player name:', e);
     }
 
-    let newRoomCode = generateRoomCode().trim().toUpperCase();
-    const MAX_RETRIES = 5;
-    let retryCount = 0;
-
     try {
       if (!db) {
         throw new Error('Firestore database is not initialized');
       }
 
       console.log('🔵 Starting room creation process...');
+
+      // Generate unique room code using utility
+      const newRoomCode = await generateUniqueRoomCode('GameRoom', generateRoomCode);
+      
+      if (!newRoomCode) {
+        setError('שגיאה ביצירת קוד חדר ייחודי. נסה שוב.');
+        isCreatingRoomRef.current = false;
+        setIsCreating(false);
+        return;
+      }
 
       const roomData = {
         room_code: newRoomCode,
@@ -79,7 +86,7 @@ export default function AliasHomeScreen({ navigation }) {
         round_active: false,
         current_round_score: 0,
         golden_rounds_enabled: false,
-        created_at: new Date().toISOString()
+        created_at: Date.now() // Store as timestamp for age calculation
       };
 
       console.log('🔵 Creating room with code:', newRoomCode);
@@ -156,6 +163,27 @@ export default function AliasHomeScreen({ navigation }) {
     }
 
     try {
+      // Check if room exists and if game is already playing
+      const roomRef = doc(db, 'GameRoom', roomCode.toUpperCase());
+      const roomSnap = await getDoc(roomRef);
+      
+      if (roomSnap.exists()) {
+        const roomData = roomSnap.data();
+        
+        // Check if player is already in room (in any team)
+        const playerInRoom = roomData.teams && Array.isArray(roomData.teams) &&
+          roomData.teams.some(team => 
+            team.players && Array.isArray(team.players) && 
+            team.players.some(p => p && p.name === playerName)
+          ) || roomData.host_name === playerName;
+        
+        // If game is playing or finished and player is not in room, show error
+        if ((roomData.game_status === 'playing' || roomData.game_status === 'waiting' || roomData.game_status === 'finished') && !playerInRoom) {
+          setError('המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+          return;
+        }
+      }
+      
       await storage.setItem('playerName', playerName);
       navigation.navigate('AliasSetup', { roomCode: roomCode.toUpperCase() });
     } catch (e) {
@@ -165,7 +193,17 @@ export default function AliasHomeScreen({ navigation }) {
   };
 
   const goBack = () => {
-    navigation.goBack();
+    // Navigate to main menu using reset to clear the stack
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      // Fallback: navigate to Home
+      navigation.navigate('Home');
+    }
   };
 
   return (
@@ -183,7 +221,7 @@ export default function AliasHomeScreen({ navigation }) {
             <GradientButton
               title="← חזרה"
               onPress={goBack}
-              variant="ghost"
+              variant="alias"
               style={styles.backButton}
             />
           </View>
@@ -223,7 +261,7 @@ export default function AliasHomeScreen({ navigation }) {
                 <GradientButton
                   title={isCreating ? 'יוצר חדר...' : 'צור משחק חדש'}
                   onPress={createRoom}
-                  variant="brightBlue"
+                  variant="alias"
                   style={styles.createButton}
                   disabled={isCreating}
                 >
@@ -255,7 +293,7 @@ export default function AliasHomeScreen({ navigation }) {
                 <GradientButton
                   title="הצטרף למשחק"
                   onPress={joinRoom}
-                  variant="outline"
+                  variant="alias"
                   style={styles.joinButton}
                 />
 
@@ -321,7 +359,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   cardHeader: {
-    backgroundColor: '#1E90FF',
+    backgroundColor: '#4FA8FF', // Alias theme color - כחול בהיר
     padding: 24,
     paddingBottom: 60,
     alignItems: 'center',

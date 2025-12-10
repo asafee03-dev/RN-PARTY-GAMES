@@ -8,9 +8,27 @@ export default function DrawSetupScreen({ navigation }) {
     navigation.navigate('DrawGame');
   };
 
+  const goBack = () => {
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      navigation.navigate('Home');
+    }
+  };
+
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="draw">
       <ScrollView contentContainerStyle={styles.container}>
+        <GradientButton
+          title="← חזרה למשחקים"
+          onPress={goBack}
+          variant="draw"
+          style={styles.backButton}
+        />
         <View style={styles.header}>
           <Text style={styles.title}>מוכן להתחיל</Text>
           <Text style={styles.subtitle}>המשחק יתחיל בקרוב</Text>
@@ -31,7 +49,7 @@ export default function DrawSetupScreen({ navigation }) {
         <GradientButton
           title="המשך →"
           onPress={handleContinue}
-          variant="primary"
+          variant="draw"
           style={styles.continueButton}
         />
       </ScrollView>
@@ -76,5 +94,9 @@ const styles = StyleSheet.create({
   },
   continueButton: {
     width: '100%',
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    marginBottom: 16,
   },
 });

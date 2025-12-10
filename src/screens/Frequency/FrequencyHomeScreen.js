@@ -1,10 +1,11 @@
 import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
 import storage from '../../utils/storage';
+import { generateUniqueRoomCode } from '../../utils/roomManagement';
 
 const PLAYER_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#10B981", "#3B82F6", "#EC4899", "#F97316", "#14B8A6"];
 
@@ -57,39 +58,15 @@ export default function FrequencyHomeScreen({ navigation }) {
       console.warn('⚠️ [FREQUENCY] Could not save player name:', e);
     }
 
-    let newRoomCode = generateRoomCode().trim().toUpperCase();
-    const MAX_RETRIES = 5;
-    let retryCount = 0;
-
     try {
       if (!db) {
         throw new Error('Firestore database is not initialized');
       }
 
-      // Check if room code already exists, retry if it does
-      while (retryCount < MAX_RETRIES) {
-        // Try to get by room_code as document ID first
-        const roomRef = doc(db, 'FrequencyRoom', newRoomCode);
-        const snapshot = await getDoc(roomRef);
-
-        // If room doesn't exist, we can use this code
-        if (!snapshot.exists()) {
-          // Also check by room_code field as fallback
-          const q = query(collection(db, 'FrequencyRoom'), where('room_code', '==', newRoomCode));
-          const querySnapshot = await getDocs(q);
-          if (querySnapshot.empty) {
-            break;
-          }
-        }
-
-        // Room exists, generate a new code
-        retryCount++;
-        newRoomCode = generateRoomCode().trim().toUpperCase();
-        console.log(`⚠️ Room code ${newRoomCode} already exists, generating new code (attempt ${retryCount}/${MAX_RETRIES})`);
-      }
-
-      if (retryCount >= MAX_RETRIES) {
-        console.error('❌ Failed to generate unique room code after retries');
+      // Generate unique room code using utility
+      const newRoomCode = await generateUniqueRoomCode('FrequencyRoom', generateRoomCode);
+      
+      if (!newRoomCode) {
         setError('שגיאה ביצירת קוד חדר ייחודי. נסה שוב.');
         isCreatingRoomRef.current = false;
         setIsCreating(false);
@@ -105,7 +82,8 @@ export default function FrequencyHomeScreen({ navigation }) {
         players: [{ name: playerName, score: 0, has_guessed: false, color: PLAYER_COLORS[0] }],
         game_status: 'lobby',
         current_turn_index: 0,
-        needle_positions: {}
+        needle_positions: {},
+        created_at: Date.now() // Store as timestamp for age calculation
       };
 
       console.log('🔵 [FREQUENCY] Ensuring Firestore is ready and online...');
@@ -176,11 +154,21 @@ export default function FrequencyHomeScreen({ navigation }) {
   };
 
   const goBack = () => {
-    navigation.navigate('Home');
+    // Navigate to main menu using reset to clear the stack
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      // Fallback: navigate to Home
+      navigation.navigate('Home');
+    }
   };
 
   return (
-    <GradientBackground variant="red">
+    <GradientBackground variant="frequency">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
@@ -191,9 +179,12 @@ export default function FrequencyHomeScreen({ navigation }) {
           keyboardShouldPersistTaps="handled"
         >
           {/* Back Button */}
-          <TouchableOpacity onPress={goBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← חזרה למשחקים</Text>
-          </TouchableOpacity>
+          <GradientButton
+            title="← חזרה למשחקים"
+            onPress={goBack}
+            variant="frequency"
+            style={styles.backButton}
+          />
 
           {/* Header */}
           <View style={styles.header}>
@@ -228,13 +219,13 @@ export default function FrequencyHomeScreen({ navigation }) {
           </View>
 
           {/* Create Room Button */}
-          <GradientButton
-            title="➕ צור משחק חדש"
+          <Pressable
             onPress={createRoom}
-            variant="red"
-            style={styles.button}
+            style={[styles.whiteButton, isCreating && styles.whiteButtonDisabled]}
             disabled={isCreating}
-          />
+          >
+            <Text style={styles.whiteButtonText}>➕ צור משחק חדש</Text>
+          </Pressable>
           {isCreating && <ActivityIndicator style={styles.loader} />}
 
           {/* Divider */}
@@ -262,12 +253,12 @@ export default function FrequencyHomeScreen({ navigation }) {
           </View>
 
           {/* Join Room Button */}
-          <GradientButton
-            title="🔑 הצטרף למשחק"
+          <Pressable
             onPress={joinRoom}
-            variant="outline"
-            style={styles.button}
-          />
+            style={styles.whiteButton}
+          >
+            <Text style={styles.whiteButtonText}>🔑 הצטרף למשחק</Text>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </GradientBackground>
@@ -285,13 +276,7 @@ const styles = StyleSheet.create({
   },
   backButton: {
     alignSelf: 'flex-start',
-    padding: 12,
     marginBottom: 16,
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
   },
   header: {
     alignItems: 'center',
@@ -336,7 +321,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   errorText: {
-    color: '#991B1B',
+    color: '#0A1A3A', // Frequency theme color
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
@@ -365,6 +350,25 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
     paddingVertical: 18,
+  },
+  whiteButton: {
+    backgroundColor: '#0A1A3A', // Frequency theme color - כחול כהה
+    borderRadius: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 24,
+    marginBottom: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
+  },
+  whiteButtonDisabled: {
+    opacity: 0.5,
+    backgroundColor: '#0A1A3A',
+  },
+  whiteButtonText: {
+    color: '#FFFFFF', // White text for dark blue background
+    fontSize: 18,
+    fontWeight: '600',
   },
   loader: {
     marginTop: 8,

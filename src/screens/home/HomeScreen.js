@@ -11,8 +11,8 @@ const games = [
     name: 'אליאב',
     description: 'משחק ההסברות המהיר! 45 שניות להסביר כמה שיותר מילים',
     icon: '💬',
-    color: ['#A855F7', '#EC4899', '#F97316'], // from-purple-400 via-pink-400 to-rose-400
-    bgColor: ['#FDF4FF', '#FDF2F8'], // from-purple-50 to-pink-50
+    color: ['#4FA8FF', '#3B82F6', '#2563EB'], // כחול בהיר
+    bgColor: ['#EFF6FF', '#DBEAFE'], // from-blue-50 to-blue-100
     available: true,
     page: 'Alias'
   },
@@ -21,8 +21,8 @@ const games = [
     name: 'שם טוב',
     description: 'משחק קבוצתי של מילים וקשרים - נחשו את המילים הנכונות',
     icon: '🔍',
-    color: ['#60A5FA', '#06B6D4', '#14B8A6'], // from-blue-400 via-cyan-400 to-teal-400
-    bgColor: ['#EFF6FF', '#ECFEFF'], // from-blue-50 to-cyan-50
+    color: ['#D9C3A5', '#C4A574', '#B8956A'], // חום בהיר
+    bgColor: ['#FDF4E8', '#FAF0E6'], // from-beige-50 to-beige-100
     available: true,
     page: 'Codenames'
   },
@@ -31,8 +31,8 @@ const games = [
     name: 'המרגל',
     description: 'מי המרגל ביניכם? נסו לגלות מי לא באותו מקום',
     icon: '👁️',
-    color: ['#4ADE80', '#10B981', '#14B8A6'], // from-green-400 via-emerald-400 to-teal-400
-    bgColor: ['#F0FDF4', '#ECFDF5'], // from-green-50 to-emerald-50
+    color: ['#7ED957', '#4ADE80', '#22C55E'], // ירוק בהיר
+    bgColor: ['#F0FDF4', '#D1FAE5'], // from-green-50 to-emerald-50
     available: true,
     page: 'Spy'
   },
@@ -41,8 +41,8 @@ const games = [
     name: 'התדר',
     description: 'משחק חיבור וסנכרון - כמה אתם על אותו גל?',
     icon: '🎮',
-    color: ['#A78BFA', '#A855F7', '#D946EF'], // from-violet-400 via-purple-400 to-fuchsia-400
-    bgColor: ['#F5F3FF', '#FAF5FF'], // from-violet-50 to-purple-50
+    color: ['#0A1A3A', '#1E3A5F', '#2D4A6B'], // כחול כהה
+    bgColor: ['#E0E7FF', '#C7D2FE'], // from-indigo-50 to-indigo-100
     available: true,
     page: 'Frequency'
   },
@@ -51,8 +51,8 @@ const games = [
     name: 'צייר משהו',
     description: 'צייר ונחש - משחק יצירתי ומהנה!',
     icon: '🎨',
-    color: ['#F472B6', '#A855F7', '#6366F1'], // from-pink-400 via-purple-400 to-indigo-400
-    bgColor: ['#FDF2F8', '#FAF5FF'], // from-pink-50 to-purple-50
+    color: ['#C48CFF', '#A855F7', '#9333EA'], // סגול בהיר
+    bgColor: ['#F3E8FF', '#E9D5FF'], // from-purple-50 to-purple-100
     available: true,
     page: 'Draw'
   },

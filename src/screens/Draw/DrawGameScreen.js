@@ -58,7 +58,7 @@ export default function DrawGameScreen({ navigation }) {
   };
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="draw">
       <ScrollView 
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
@@ -104,13 +104,13 @@ export default function DrawGameScreen({ navigation }) {
             <GradientButton
               title="נקה"
               onPress={handleClearCanvas}
-              variant="red"
+              variant="draw"
               style={styles.controlButton}
             />
             <GradientButton
               title="סיים ציור"
               onPress={handleSubmitDrawing}
-              variant="green"
+              variant="draw"
               style={styles.controlButton}
             />
           </View>
@@ -132,7 +132,7 @@ export default function DrawGameScreen({ navigation }) {
                 onPress={() => {
                   // TODO: Submit guess
                 }}
-                variant="green"
+                variant="draw"
                 style={styles.submitButton}
               />
             </View>

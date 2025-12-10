@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Switch, Clipboard } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
 import storage from '../../utils/storage';
@@ -114,7 +115,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
                            existingRoom.blue_team.guessers.includes(playerName) ||
                            existingRoom.host_name === playerName;
 
-      // If game is playing or finished, allow players to rejoin
+      // If game is playing or finished, only allow players already in room to rejoin
       if (existingRoom.game_status === 'playing' || existingRoom.game_status === 'finished') {
         if (playerInRoom) {
           setRoom(existingRoom);
@@ -124,13 +125,10 @@ export default function CodenamesSetupScreen({ navigation, route }) {
           }
           return;
         } else {
-          console.log('⚠️ Player not in room but game is active - allowing rejoin to game');
-          if (existingRoom.game_status === 'playing') {
-            navigation.navigate('CodenamesGame', { roomCode });
-          } else {
-            setRoom(existingRoom);
-            setIsHost(existingRoom.host_name === playerName);
-          }
+          // Player not in room and game is active - show error
+          console.warn('⚠️ Player tried to join game that is already in progress');
+          Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+          navigation.navigate('CodenamesHome');
           return;
         }
       }
@@ -387,8 +385,16 @@ export default function CodenamesSetupScreen({ navigation, route }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const goBack = async () => {
-    navigation.navigate('CodenamesHome');
+  const goBack = () => {
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      navigation.navigate('Home');
+    }
   };
 
   if (isLoading || !room) {
@@ -408,9 +414,12 @@ export default function CodenamesSetupScreen({ navigation, route }) {
   return (
     <LinearGradient colors={['#3B82F6', '#06B6D4', '#14B8A6']} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <TouchableOpacity onPress={goBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← חזרה</Text>
-        </TouchableOpacity>
+        <GradientButton
+          title="← חזרה למשחקים"
+          onPress={goBack}
+          variant="codenames"
+          style={styles.backButton}
+        />
 
         <View style={styles.header}>
           <View style={styles.roomCodeContainer}>
@@ -687,13 +696,7 @@ const styles = StyleSheet.create({
   },
   backButton: {
     alignSelf: 'flex-start',
-    padding: 12,
     marginBottom: 16,
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
   },
   header: {
     marginBottom: 16,

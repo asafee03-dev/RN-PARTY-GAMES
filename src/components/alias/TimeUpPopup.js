@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import GradientButton from '../codenames/GradientButton';
 
 export default function TimeUpPopup({ 
@@ -17,20 +17,20 @@ export default function TimeUpPopup({
       
       <View style={styles.buttonsContainer}>
         {room.teams.map((team, index) => (
-          <GradientButton
+          <Pressable
             key={index}
-            title={team.name}
+            style={[styles.teamButton, { backgroundColor: team.color }]}
             onPress={() => onCorrect(index)}
-            variant={index === room.current_turn ? 'primary' : 'blue'}
-            style={styles.teamButton}
-          />
+          >
+            <Text style={styles.teamButtonText}>{team.name}</Text>
+          </Pressable>
         ))}
-        <GradientButton
-          title="דלג"
+        <Pressable
+          style={[styles.teamButton, styles.skipButton]}
           onPress={onSkip}
-          variant="red"
-          style={styles.teamButton}
-        />
+        >
+          <Text style={styles.teamButtonText}>דלג</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -66,6 +66,20 @@ const styles = StyleSheet.create({
   },
   teamButton: {
     width: '100%',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  teamButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  skipButton: {
+    backgroundColor: '#0A1A3A', // Dark blue/black
   },
 });
 

@@ -3,7 +3,6 @@ import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import PlayerCard from '../../components/shared/PlayerCard';
-import HostStatusCard from '../../components/shared/HostStatusCard';
 import { db } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import storage from '../../utils/storage';
@@ -429,8 +428,18 @@ export default function AliasSetupScreen({ navigation, route }) {
         <View style={styles.header}>
           <GradientButton
             title="← חזרה"
-            onPress={() => navigation.goBack()}
-            variant="ghost"
+            onPress={() => {
+              const parent = navigation.getParent();
+              if (parent) {
+                parent.reset({
+                  index: 0,
+                  routes: [{ name: 'Home' }]
+                });
+              } else {
+                navigation.navigate('Home');
+              }
+            }}
+            variant="alias"
             style={styles.backButton}
           />
           <View style={styles.roomCodeContainer}>
@@ -438,30 +447,55 @@ export default function AliasSetupScreen({ navigation, route }) {
               <Text style={styles.roomCodeLabel}>קוד חדר:</Text>
               <Text style={styles.roomCode}>{roomCode}</Text>
             </Pressable>
-            <GradientButton
-              title="📋 העתק קישור"
+            <Pressable
               onPress={handleCopyRoomLink}
-              variant="ghost"
-              style={styles.copyLinkButton}
-            />
+              style={styles.whiteCopyLinkButton}
+            >
+              <Text style={styles.whiteCopyLinkButtonText}>📋 העתק קישור</Text>
+            </Pressable>
           </View>
         </View>
 
+        {/* Compact Toggles Row */}
+        <View style={styles.togglesRow}>
+          {/* Drinking Mode Toggle */}
+          <View style={styles.toggleItem}>
+            <Text style={styles.toggleLabel}>🔞 שתייה</Text>
+            <Switch
+              value={drinkingMode}
+              onValueChange={handleToggleDrinkingMode}
+              trackColor={{ false: '#D1D5DB', true: '#F97316' }}
+              thumbColor={drinkingMode ? '#FFFFFF' : '#9CA3AF'}
+              style={styles.compactSwitch}
+            />
+          </View>
 
-        {/* Host Status Card */}
-        <HostStatusCard hostName={room.host_name} gameMode="normal" />
+          {/* Golden Rounds Toggle (Host Only) */}
+          {isHost && (
+            <View style={styles.toggleItem}>
+              <Text style={styles.toggleLabel}>⭐ סבבי זהב</Text>
+              <Switch
+                value={room.golden_rounds_enabled || false}
+                onValueChange={handleToggleGoldenRounds}
+                trackColor={{ false: '#D1D5DB', true: '#FFD700' }}
+                thumbColor={room.golden_rounds_enabled ? '#FFFFFF' : '#9CA3AF'}
+                style={styles.compactSwitch}
+              />
+            </View>
+          )}
+        </View>
 
         {/* Teams Section */}
         <View style={styles.teamsSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>קבוצות</Text>
             {isHost && (
-              <GradientButton
-                title="+ הוסף קבוצה"
+              <Pressable
                 onPress={handleAddTeam}
-                variant="ghost"
-                style={styles.addTeamButton}
-              />
+                style={styles.whiteAddTeamButton}
+              >
+                <Text style={styles.whiteAddTeamButtonText}>+ הוסף קבוצה</Text>
+              </Pressable>
             )}
           </View>
           {room.teams && Array.isArray(room.teams) && room.teams
@@ -517,18 +551,18 @@ export default function AliasSetupScreen({ navigation, route }) {
                       <GradientButton
                         title="עזוב קבוצה"
                         onPress={handleLeaveTeam}
-                        variant="red"
+                        variant="alias"
                         style={styles.teamButton}
                         disabled={isJoiningTeam}
                       />
                     ) : (
-                      <GradientButton
-                        title="הצטרף לקבוצה"
+                      <Pressable
                         onPress={() => handleJoinTeam(index)}
-                        variant="primary"
-                        style={styles.teamButton}
+                        style={[styles.whiteTeamButton, isJoiningTeam && styles.whiteTeamButtonDisabled]}
                         disabled={isJoiningTeam}
-                      />
+                      >
+                        <Text style={styles.whiteTeamButtonText}>הצטרף לקבוצה</Text>
+                      </Pressable>
                     )}
                   </View>
                 )}
@@ -537,39 +571,6 @@ export default function AliasSetupScreen({ navigation, route }) {
           })}
         </View>
 
-        {/* Options Section (Host Only) */}
-        {isHost && (
-          <View style={styles.optionsSection}>
-            <Pressable
-              style={[
-                styles.goldenToggle,
-                room.golden_rounds_enabled && styles.goldenToggleActive
-              ]}
-              onPress={handleToggleGoldenRounds}
-            >
-              <Text style={[
-                styles.goldenToggleText,
-                room.golden_rounds_enabled && styles.goldenToggleTextActive
-              ]}>
-                {room.golden_rounds_enabled ? '✓' : ''} סבבי זהב
-              </Text>
-            </Pressable>
-          </View>
-        )}
-
-        {/* Drinking Mode Toggle (All Players) */}
-        <View style={styles.optionsSection}>
-          <View style={styles.drinkingToggleContainer}>
-            <Text style={styles.drinkingToggleLabel}>🔞 מצב משחקי שתייה</Text>
-            <Switch
-              value={drinkingMode}
-              onValueChange={handleToggleDrinkingMode}
-              trackColor={{ false: '#D1D5DB', true: '#F97316' }}
-              thumbColor={drinkingMode ? '#FFFFFF' : '#9CA3AF'}
-            />
-            <Text style={styles.drinkingToggleLabel}>🍺</Text>
-          </View>
-        </View>
 
         {/* Start Game Button (Host Only) */}
         {isHost && (
@@ -577,7 +578,7 @@ export default function AliasSetupScreen({ navigation, route }) {
             <GradientButton
               title={isStartingGame ? 'מתחיל משחק...' : 'התחל משחק'}
               onPress={handleStartGame}
-              variant="green"
+              variant="alias"
               style={styles.startButton}
               disabled={isStartingGame || room.game_status !== 'setup'}
             />
@@ -605,7 +606,7 @@ export default function AliasSetupScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    padding: 20,
+    padding: 16,
     paddingTop: 50,
   },
   loadingContainer: {
@@ -622,10 +623,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 12,
+  },
+  togglesRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  toggleItem: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 12,
+    padding: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 36,
+  },
+  toggleLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginRight: 8,
+  },
+  compactSwitch: {
+    transform: [{ scaleX: 0.6 }, { scaleY: 0.6 }],
   },
   backButton: {
     alignSelf: 'flex-start',
+    marginBottom: 8,
   },
   roomCodeContainer: {
     flexDirection: 'row',
@@ -633,24 +660,37 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   roomCodePressable: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(79, 168, 255, 0.15)', // Alias theme color with transparency - כחול בהיר
     borderRadius: 16,
     padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     flex: 1,
+    borderWidth: 1,
+    borderColor: '#4FA8FF',
   },
   copyLinkButton: {
     paddingHorizontal: 12,
   },
-  roomCodeLabel: {
+  whiteCopyLinkButton: {
+    backgroundColor: '#4FA8FF', // Alias theme color - כחול בהיר
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  whiteCopyLinkButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
   },
+  roomCodeLabel: {
+    color: '#4FA8FF', // Alias theme color - כחול בהיר
+    fontSize: 14,
+    fontWeight: '600',
+  },
   roomCode: {
-    color: '#FFFFFF',
+    color: '#4FA8FF', // Alias theme color - כחול בהיר
     fontSize: 18,
     fontWeight: 'bold',
     fontFamily: 'monospace',
@@ -682,22 +722,33 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   teamsSection: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#4FA8FF', // Alias theme color - כחול בהיר
     textAlign: 'right',
   },
   addTeamButton: {
     paddingHorizontal: 12,
+  },
+  whiteAddTeamButton: {
+    backgroundColor: '#4FA8FF', // Alias theme color - כחול בהיר
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  whiteAddTeamButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   teamCard: {
     backgroundColor: '#FFFFFF',
@@ -758,41 +809,23 @@ const styles = StyleSheet.create({
   teamButton: {
     width: '100%',
   },
-  optionsSection: {
-    marginBottom: 24,
-  },
-  goldenToggle: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  goldenToggleActive: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#FFD700',
-  },
-  goldenToggleText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    textAlign: 'right',
-  },
-  goldenToggleTextActive: {
-    color: '#2C3E50',
-  },
-  drinkingToggleContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
+  whiteTeamButton: {
+    width: '100%',
+    backgroundColor: '#4FA8FF', // Alias theme color - כחול בהיר
+    borderRadius: 12,
+    padding: 14,
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    opacity: 1,
   },
-  drinkingToggleLabel: {
+  whiteTeamButtonDisabled: {
+    opacity: 0.5,
+    backgroundColor: '#4FA8FF',
+  },
+  whiteTeamButtonText: {
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFFFFF',
   },
   startGameContainer: {
     marginBottom: 24,

@@ -3,8 +3,8 @@ import { View, StyleSheet, Dimensions, PanResponder } from 'react-native';
 import Svg, { Path, G } from 'react-native-svg';
 
 const { width, height } = Dimensions.get('window');
-// Make canvas square and centered - use smaller dimension minus padding
-const CANVAS_SIZE = Math.min(width - 40, height * 0.6, 500); // Max 500px, responsive
+// Canvas takes 70-80% of screen height on mobile, centered and large
+const CANVAS_SIZE = Math.min(width - 20, height * 0.75, 600); // 75% of height, max 600px
 const CANVAS_WIDTH = CANVAS_SIZE;
 const CANVAS_HEIGHT = CANVAS_SIZE;
 
@@ -67,8 +67,9 @@ const DrawCanvas = forwardRef(({
   }, [isDisabled, color, brushSize, toolType]);
 
   // Update paths when strokes prop changes (Vite API)
+  // Only update if we're not currently drawing to prevent erasing strokes
   useEffect(() => {
-    if (useViteAPI && strokes) {
+    if (useViteAPI && strokes && !isDrawingRef.current) {
       const newPaths = strokes.map(stroke => ({
         pathString: stroke.path || '',
         color: stroke.color || color,
@@ -142,13 +143,43 @@ const DrawCanvas = forwardRef(({
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => !disabledRef.current,
-      onMoveShouldSetPanResponder: () => !disabledRef.current,
+      onStartShouldSetPanResponder: (evt, gestureState) => {
+        if (disabledRef.current) return false;
+        // Always capture touch events when enabled
+        return true;
+      },
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        if (disabledRef.current) return false;
+        // Capture move events to prevent scrolling
+        return true;
+      },
+      onPanResponderTerminationRequest: () => false, // Don't allow termination
       onPanResponderGrant: (evt) => {
         if (disabledRef.current) return;
+        // Prevent default to stop page scrolling
+        evt.preventDefault?.();
+        evt.stopPropagation?.();
         const { locationX, locationY } = evt.nativeEvent;
         const point = { x: locationX, y: locationY };
         isDrawingRef.current = true;
+        
+        // Ensure we have all existing strokes loaded before starting new stroke
+        if (useViteAPI && strokes && strokes.length > 0) {
+          const existingPaths = strokes.map(stroke => ({
+            pathString: stroke.path || '',
+            color: stroke.color || color,
+            width: stroke.width || brushSize,
+            points: stroke.points || [],
+          }));
+          // Only update if paths are different to avoid unnecessary re-renders
+          setPaths(prev => {
+            if (prev.length !== existingPaths.length) {
+              return existingPaths;
+            }
+            return prev;
+          });
+        }
+        
         setCurrentPoints([point]);
         
         const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
@@ -162,6 +193,9 @@ const DrawCanvas = forwardRef(({
       },
       onPanResponderMove: (evt) => {
         if (disabledRef.current || !isDrawingRef.current) return;
+        // Prevent default to stop page scrolling
+        evt.preventDefault?.();
+        evt.stopPropagation?.();
         const { locationX, locationY } = evt.nativeEvent;
         const point = { x: locationX, y: locationY };
         
@@ -204,9 +238,20 @@ const DrawCanvas = forwardRef(({
             points: [],
           };
           
-          // Update paths state
+          // Update paths state - ensure we preserve all existing paths
           setPaths(prev => {
-            const updatedPaths = [...prev, newPath];
+            // Make sure we're working with the latest paths from props if available
+            const basePaths = useViteAPI && strokes && strokes.length > 0
+              ? strokes.map(stroke => ({
+                  pathString: stroke.path || '',
+                  color: stroke.color || color,
+                  width: stroke.width || brushSize,
+                  points: stroke.points || [],
+                }))
+              : prev;
+            
+            // Only append if this stroke is not already in the paths
+            const updatedPaths = [...basePaths, newPath];
             
             // Vite API: call onStrokeComplete with single stroke
             if (useViteAPI && onStrokeComplete) {
@@ -296,7 +341,13 @@ const DrawCanvas = forwardRef(({
   }));
 
   return (
-    <View style={styles.container} {...panResponder.panHandlers}>
+    <View 
+      style={styles.container} 
+      {...panResponder.panHandlers}
+      onStartShouldSetResponder={() => !disabledRef.current}
+      onMoveShouldSetResponder={() => !disabledRef.current}
+      onResponderTerminationRequest={() => false}
+    >
       <Svg
         ref={svgRef}
         width={CANVAS_WIDTH}
@@ -350,6 +401,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 5,
+    // Prevent scrolling while drawing
+    touchAction: 'none',
+    // Ensure canvas captures all touch events
+    pointerEvents: 'box-only',
   },
   svg: {
     flex: 1,

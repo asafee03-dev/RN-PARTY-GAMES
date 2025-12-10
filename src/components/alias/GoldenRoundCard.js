@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import GradientButton from '../codenames/GradientButton';
 import AliasTimer from './AliasTimer';
 
@@ -42,14 +42,20 @@ export default function GoldenRoundCard({
       {canInteract && (
         <View style={styles.teamsGrid}>
           {teams.map((team, teamIdx) => (
-            <GradientButton
+            <Pressable
               key={teamIdx}
-              title={team.name}
-              onPress={() => onTeamGuess(teamIdx)}
-              variant="primary"
               style={[styles.teamButton, { backgroundColor: team.color }]}
-            />
+              onPress={() => onTeamGuess(teamIdx)}
+            >
+              <Text style={styles.teamButtonText}>{team.name}</Text>
+            </Pressable>
           ))}
+          <Pressable
+            style={[styles.teamButton, styles.skipButton]}
+            onPress={() => onTeamGuess(null)}
+          >
+            <Text style={styles.teamButtonText}>דלג</Text>
+          </Pressable>
         </View>
       )}
 
@@ -130,6 +136,17 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 140,
     height: 60,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  teamButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  skipButton: {
+    backgroundColor: '#0A1A3A', // Dark blue/black
   },
   waitingContainer: {
     alignItems: 'center',

@@ -1,9 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, FlatList } from 'react-native';
+import { FlatList, ScrollView, StyleSheet, Text, View } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
-import PlayerCard from '../../components/shared/PlayerCard';
 import HostStatusCard from '../../components/shared/HostStatusCard';
+import PlayerCard from '../../components/shared/PlayerCard';
 
 export default function AliasRoomScreen({ navigation }) {
   // Mock data - will be replaced with real game state
@@ -23,12 +23,30 @@ export default function AliasRoomScreen({ navigation }) {
     navigation.navigate('AliasGame');
   };
 
+  const goBack = () => {
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      navigation.navigate('Home');
+    }
+  };
+
   return (
     <GradientBackground variant="brightBlue">
       <ScrollView 
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
       >
+        <GradientButton
+          title="← חזרה למשחקים"
+          onPress={goBack}
+          variant="alias"
+          style={styles.backButton}
+        />
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Alias</Text>
         </View>
@@ -36,7 +54,7 @@ export default function AliasRoomScreen({ navigation }) {
         <GradientButton
           title="מזמין שחקנים"
           onPress={handleInvitePlayers}
-          variant="brightBlue"
+          variant="alias"
           style={styles.inviteButton}
         />
 
@@ -70,7 +88,7 @@ export default function AliasRoomScreen({ navigation }) {
             <GradientButton
               title="התחל המשחק →"
               onPress={handleStartGame}
-              variant="pink"
+              variant="alias"
               style={styles.startButton}
             />
           </View>
@@ -86,15 +104,18 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingBottom: 40,
   },
+  backButton: {
+    alignSelf: 'flex-start',
+    marginBottom: 16,
+  },
   header: {
     alignItems: 'center',
-    marginTop: 40,
     marginBottom: 24,
   },
   headerTitle: {
     fontSize: 36,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#4FA8FF', // Alias theme color - כחול בהיר
     letterSpacing: 1,
   },
   inviteButton: {

@@ -16,7 +16,7 @@ export default function PlayerCard({ playerName, isHost = false }) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#6A1B9A',
+    backgroundColor: '#9CA3AF', // Gray neutral
     borderRadius: 16,
     padding: 16,
     marginHorizontal: 6,

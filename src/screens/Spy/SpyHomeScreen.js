@@ -5,6 +5,7 @@ import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
 import storage from '../../utils/storage';
+import { generateUniqueRoomCode } from '../../utils/roomManagement';
 
 const spyIcons = ["❓", "🕵️", "🔍", "🎭", "👁️", "🗝️", "🔐", "🎩", "💼", "📍"];
 
@@ -55,36 +56,18 @@ export default function SpyHomeScreen({ navigation }) {
       console.warn('⚠️ [SPY] Could not save player name:', e);
     }
 
-    let newRoomCode = generateRoomCode().trim().toUpperCase();
-    const MAX_RETRIES = 5;
-    let retryCount = 0;
-
     try {
       if (!db) {
         throw new Error('Firestore database is not initialized');
       }
 
-      // Check if room code already exists, retry if it does
-      while (retryCount < MAX_RETRIES) {
-        const roomRef = doc(db, 'SpyRoom', newRoomCode);
-        const snapshot = await getDoc(roomRef);
-
-        if (!snapshot.exists()) {
-          const q = query(collection(db, 'SpyRoom'), where('room_code', '==', newRoomCode));
-          const querySnapshot = await getDocs(q);
-          if (querySnapshot.empty) {
-            break;
-          }
-        }
-
-        retryCount++;
-        newRoomCode = generateRoomCode().trim().toUpperCase();
-        console.log(`⚠️ Room code ${newRoomCode} already exists, generating new code (attempt ${retryCount}/${MAX_RETRIES})`);
-      }
-
-      if (retryCount >= MAX_RETRIES) {
-        console.error('❌ Failed to generate unique room code after retries');
+      // Generate unique room code using utility
+      const newRoomCode = await generateUniqueRoomCode('SpyRoom', generateRoomCode);
+      
+      if (!newRoomCode) {
         setError('שגיאה ביצירת קוד חדר ייחודי. נסה שוב.');
+        isCreatingRoomRef.current = false;
+        setIsCreating(false);
         return;
       }
 
@@ -94,7 +77,8 @@ export default function SpyHomeScreen({ navigation }) {
         room_code: newRoomCode,
         host_name: playerName,
         players: [{ name: playerName }],
-        game_status: 'lobby'
+        game_status: 'lobby',
+        created_at: Date.now() // Store as timestamp for age calculation
       };
 
       console.log('🔵 [SPY] Ensuring Firestore is ready...');
@@ -162,11 +146,21 @@ export default function SpyHomeScreen({ navigation }) {
   };
 
   const goBack = () => {
-    navigation.navigate('Home');
+    // Navigate to main menu using reset to clear the stack
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      // Fallback: navigate to Home
+      navigation.navigate('Home');
+    }
   };
 
   return (
-    <GradientBackground variant="green">
+    <GradientBackground variant="spy">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
@@ -175,9 +169,12 @@ export default function SpyHomeScreen({ navigation }) {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <TouchableOpacity onPress={goBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← חזרה למשחקים</Text>
-          </TouchableOpacity>
+          <GradientButton
+            title="← חזרה למשחקים"
+            onPress={goBack}
+            variant="spy"
+            style={styles.backButton}
+          />
 
           <View style={styles.header}>
             <View style={styles.iconContainer}>
@@ -215,7 +212,7 @@ export default function SpyHomeScreen({ navigation }) {
             <GradientButton
               title="➕ צור משחק חדש"
               onPress={createRoom}
-              variant="green"
+              variant="spy"
               style={styles.createButton}
               disabled={isCreating}
             />
@@ -252,7 +249,7 @@ export default function SpyHomeScreen({ navigation }) {
             <GradientButton
               title="🔐 הצטרף למשחק"
               onPress={joinRoom}
-              variant="outline"
+              variant="spy"
               style={styles.joinButton}
             />
           </View>
@@ -273,13 +270,7 @@ const styles = StyleSheet.create({
   },
   backButton: {
     alignSelf: 'flex-start',
-    padding: 8,
     marginBottom: 16,
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
   },
   header: {
     alignItems: 'center',

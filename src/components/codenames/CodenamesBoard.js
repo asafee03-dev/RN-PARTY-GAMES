@@ -1,9 +1,13 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_SIZE = (SCREEN_WIDTH - 48 - 16) / 5; // 5 columns with gaps
+// Fixed size for 5x5 grid - same on all devices
+const CARD_SIZE = 60; // Fixed card size in pixels
+const GAP = 4; // Gap between cards
+const GRID_SIZE = 5; // 5x5 grid
+const GRID_WIDTH = GRID_SIZE * CARD_SIZE + (GRID_SIZE - 1) * GAP; // 5 * 60 + 4 * 4 = 300 + 16 = 316
+const GRID_HEIGHT = GRID_SIZE * CARD_SIZE + (GRID_SIZE - 1) * GAP; // Same as width for square grid
 
 export default function CodenamesBoard({ 
   words, 
@@ -58,6 +62,13 @@ export default function CodenamesBoard({
     return canGuess && !revealedIndices.includes(index) && !isSpymaster;
   };
 
+  // Calculate row and column for each card (0-24 index in 5x5 grid)
+  const getCardPosition = (index) => {
+    const row = Math.floor(index / GRID_SIZE);
+    const col = index % GRID_SIZE;
+    return { row, col };
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.grid}>
@@ -66,6 +77,11 @@ export default function CodenamesBoard({
           const colors = getCardColor(index);
           const icon = getCardIcon(index);
           const clickable = isClickable(index);
+          const { row, col } = getCardPosition(index);
+          
+          // Calculate absolute position
+          const left = col * (CARD_SIZE + GAP);
+          const top = row * (CARD_SIZE + GAP);
           
           return (
             <TouchableOpacity
@@ -76,6 +92,9 @@ export default function CodenamesBoard({
                   backgroundColor: colors.bg,
                   borderColor: colors.border,
                   borderWidth: isRevealed ? 4 : 2,
+                  position: 'absolute',
+                  left: left,
+                  top: top,
                 },
                 clickable && styles.clickableCard,
               ]}
@@ -112,12 +131,12 @@ export default function CodenamesBoard({
 const styles = StyleSheet.create({
   container: {
     padding: 8,
+    alignItems: 'center',
   },
   grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    justifyContent: 'center',
+    width: GRID_WIDTH,
+    height: GRID_HEIGHT,
+    position: 'relative',
   },
   card: {
     width: CARD_SIZE,
@@ -125,7 +144,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'relative',
+    position: 'absolute',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,

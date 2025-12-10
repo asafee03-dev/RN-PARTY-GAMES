@@ -41,32 +41,31 @@ export default function DrawingTools({ toolType, onToolChange, brushSize, onBrus
         </View>
       </View>
 
-      {/* Brush Size - Only show for pencil */}
-      {toolType === 'pencil' && (
-        <View style={styles.sizeSection}>
-          <Text style={styles.sectionTitle}>גודל מברשת:</Text>
-          <View style={styles.sizeButtons}>
-            {BRUSH_SIZES.map((size) => (
-              <Pressable
-                key={size}
-                onPress={() => onBrushSizeChange(size)}
+      {/* Brush Size - Show for both pencil and eraser */}
+      <View style={styles.sizeSection}>
+        <Text style={styles.sectionTitle}>גודל מברשת:</Text>
+        <View style={styles.sizeButtons}>
+          {BRUSH_SIZES.map((size) => (
+            <Pressable
+              key={size}
+              onPress={() => onBrushSizeChange(size)}
+              style={[
+                styles.sizeButton,
+                brushSize === size && styles.sizeButtonActive
+              ]}
+            >
+              <View
                 style={[
-                  styles.sizeButton,
-                  brushSize === size && styles.sizeButtonActive
+                  styles.sizeIndicator,
+                  { width: size, height: size, borderRadius: size / 2 },
+                  brushSize === size && styles.sizeIndicatorActive,
+                  toolType === 'eraser' && styles.sizeIndicatorEraser
                 ]}
-              >
-                <View
-                  style={[
-                    styles.sizeIndicator,
-                    { width: size, height: size, borderRadius: size / 2 },
-                    brushSize === size && styles.sizeIndicatorActive
-                  ]}
-                />
-              </Pressable>
-            ))}
-          </View>
+              />
+            </Pressable>
+          ))}
         </View>
-      )}
+      </View>
     </View>
   );
 }
@@ -74,9 +73,9 @@ export default function DrawingTools({ toolType, onToolChange, brushSize, onBrus
 const styles = StyleSheet.create({
   container: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    gap: 16,
+    borderRadius: 12,
+    padding: 10,
+    gap: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -97,9 +96,9 @@ const styles = StyleSheet.create({
   },
   toolButton: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
     borderWidth: 2,
     borderColor: '#E5E7EB',
     backgroundColor: '#F9FAFB',
@@ -110,7 +109,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3E8FF',
   },
   toolButtonText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
     color: '#6B7280',
   },
@@ -126,9 +125,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sizeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     borderWidth: 2,
     borderColor: '#E5E7EB',
     backgroundColor: '#F9FAFB',
@@ -144,6 +143,11 @@ const styles = StyleSheet.create({
   },
   sizeIndicatorActive: {
     backgroundColor: '#7C3AED',
+  },
+  sizeIndicatorEraser: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#9CA3AF',
   },
 });
 

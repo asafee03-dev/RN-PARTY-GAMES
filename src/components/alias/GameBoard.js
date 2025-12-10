@@ -78,11 +78,20 @@ export default function GameBoard({ teams, goldenSquares = [] }) {
             const isFinish = square.position === TOTAL_SQUARES - 1;
             const isGoldenSquare = goldenSquares.includes(square.position);
             
+            // Calculate absolute position based on row and col
+            const left = square.col * (30 + 4); // square width + gap
+            const top = square.row * (30 + 4); // square height + gap
+            
             return (
               <View
                 key={square.position}
                 style={[
                   styles.square,
+                  {
+                    position: 'absolute',
+                    left: left,
+                    top: top,
+                  },
                   isStart && styles.startSquare,
                   isFinish && styles.finishSquare,
                   isGoldenSquare && styles.goldenSquare,
@@ -155,11 +164,14 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 3,
     borderColor: '#3B82F6',
+    width: 360, // Fixed width: 10 columns * 30px + 9 gaps * 4px + padding 24px
+    height: 224, // Fixed height: 6 rows * 30px + 5 gaps * 4px + padding 24px
+    alignSelf: 'center',
   },
   grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
+    width: 336, // 10 columns * 30px + 9 gaps * 4px = 300 + 36
+    height: 200, // 6 rows * 30px + 5 gaps * 4px = 180 + 20
+    position: 'relative',
   },
   square: {
     width: 30,
@@ -170,7 +182,7 @@ const styles = StyleSheet.create({
     borderColor: '#3B82F6',
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
+    position: 'absolute',
   },
   startSquare: {
     backgroundColor: '#10B981',

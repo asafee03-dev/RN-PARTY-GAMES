@@ -43,7 +43,7 @@ export default function FrequencyGameScreen({ navigation }) {
   };
 
   return (
-    <GradientBackground variant="teal">
+    <GradientBackground variant="frequency">
       <ScrollView 
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
@@ -146,7 +146,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   activeButton: {
-    backgroundColor: '#FF6B35',
+    backgroundColor: '#0A1A3A', // Frequency theme color
     flexDirection: 'row',
     gap: 8,
     paddingHorizontal: 20,
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   turnIndicator: {
-    backgroundColor: '#81C784',
+    backgroundColor: '#0A1A3A', // Frequency theme color
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
@@ -204,7 +204,7 @@ const styles = StyleSheet.create({
     color: '#2C3E50',
   },
   submitButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#0A1A3A', // Frequency theme color
     borderRadius: 25,
     paddingVertical: 16,
     paddingHorizontal: 32,

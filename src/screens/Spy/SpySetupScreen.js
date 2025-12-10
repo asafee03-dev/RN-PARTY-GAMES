@@ -13,9 +13,27 @@ export default function SpySetupScreen({ navigation }) {
     }
   };
 
+  const goBack = () => {
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      navigation.navigate('Home');
+    }
+  };
+
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="spy">
       <ScrollView contentContainerStyle={styles.container}>
+        <GradientButton
+          title="← חזרה למשחקים"
+          onPress={goBack}
+          variant="spy"
+          style={styles.backButton}
+        />
         <View style={styles.header}>
           <Text style={styles.title}>בחר מיקום</Text>
           <Text style={styles.subtitle}>איזה מיקום תרצה?</Text>
@@ -44,7 +62,7 @@ export default function SpySetupScreen({ navigation }) {
         <GradientButton
           title="המשך"
           onPress={handleContinue}
-          variant="primary"
+          variant="spy"
           style={styles.continueButton}
           disabled={!selectedLocation}
         />
@@ -96,7 +114,7 @@ const styles = StyleSheet.create({
   },
   locationCardSelected: {
     backgroundColor: '#FFFFFF',
-    borderColor: '#9C27B0',
+    borderColor: '#7ED957', // Spy theme color
   },
   locationText: {
     fontSize: 20,
@@ -105,10 +123,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   locationTextSelected: {
-    color: '#9C27B0',
+    color: '#7ED957', // Spy theme color
   },
   continueButton: {
     width: '100%',
     marginBottom: 24,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    marginBottom: 16,
   },
 });

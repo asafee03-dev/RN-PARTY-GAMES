@@ -15,6 +15,18 @@ export default function CodenamesRoomScreen({ navigation }) {
     navigation.navigate('CodenamesGame');
   };
 
+  const goBack = () => {
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      navigation.navigate('Home');
+    }
+  };
+
   const PlayerItem = ({ player, isSpymaster, team }) => (
     <View style={[
       styles.playerItem,
@@ -32,6 +44,12 @@ export default function CodenamesRoomScreen({ navigation }) {
   return (
     <GradientBackground variant="beige">
       <ScrollView contentContainerStyle={styles.container}>
+        <GradientButton
+          title="← חזרה למשחקים"
+          onPress={goBack}
+          variant="codenames"
+          style={styles.backButton}
+        />
         <View style={styles.header}>
           <Text style={styles.title}>חדר המשחק</Text>
           <View style={styles.roomCodeContainer}>
@@ -97,7 +115,7 @@ export default function CodenamesRoomScreen({ navigation }) {
         <GradientButton
           title="התחל משחק"
           onPress={handleStartGame}
-          variant="green"
+          variant="codenames"
           style={styles.startButton}
         />
       </ScrollView>
@@ -110,10 +128,13 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 24,
   },
+  backButton: {
+    alignSelf: 'flex-start',
+    marginBottom: 16,
+  },
   header: {
     alignItems: 'center',
     marginBottom: 32,
-    marginTop: 40,
   },
   title: {
     fontSize: 32,
@@ -138,7 +159,7 @@ const styles = StyleSheet.create({
   roomCode: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#D4A574',
+    color: '#D9C3A5', // Codenames theme color - חום בהיר
     letterSpacing: 4,
   },
   teamsSection: {

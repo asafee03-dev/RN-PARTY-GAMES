@@ -28,7 +28,7 @@ export default function DrawEndScreen({ navigation, route }) {
   };
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="draw">
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>סיכום סיבוב</Text>
@@ -79,7 +79,7 @@ export default function DrawEndScreen({ navigation, route }) {
             <GradientButton
               title="שלח ניחוש"
               onPress={handleSubmitGuess}
-              variant="green"
+              variant="draw"
               style={styles.submitGuessButton}
               disabled={!guess.trim()}
             />
@@ -92,13 +92,13 @@ export default function DrawEndScreen({ navigation, route }) {
             <GradientButton
               title="סיבוב הבא →"
               onPress={handleNextRound}
-              variant="primary"
+              variant="draw"
               style={styles.actionButton}
             />
             <GradientButton
               title="חזור ללובי"
               onPress={handleBackToLobby}
-              variant="blue"
+              variant="draw"
               style={styles.actionButton}
             />
           </View>

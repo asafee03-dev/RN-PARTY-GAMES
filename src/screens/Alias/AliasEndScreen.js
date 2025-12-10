@@ -36,13 +36,13 @@ export default function AliasEndScreen({ navigation, route }) {
             <GradientButton
               title="שחק שוב"
               onPress={handlePlayAgain}
-              variant="primary"
+              variant="alias"
               style={styles.actionButton}
             />
             <GradientButton
               title="חזור ללובי"
               onPress={handleBackToLobby}
-              variant="blue"
+              variant="alias"
               style={styles.actionButton}
             />
           </View>

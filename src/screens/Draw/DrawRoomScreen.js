@@ -1,16 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, Modal, Switch, TouchableOpacity, TextInput, Image } from 'react-native';
+import { collection, doc, getDoc, getDocs, onSnapshot, updateDoc } from 'firebase/firestore';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
-import DrawCanvas from '../../components/draw/DrawCanvas';
 import ColorPicker from '../../components/draw/ColorPicker';
+import DrawCanvas from '../../components/draw/DrawCanvas';
 import DrawingTools from '../../components/draw/DrawingTools';
 import Timer from '../../components/game/Timer';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
-import storage from '../../utils/storage';
 import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
-import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
+import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
+import storage from '../../utils/storage';
 
 const WINNING_SCORE = 12;
 
@@ -25,6 +26,7 @@ const getAllGuesses = (roomData) => {
 
 export default function DrawRoomScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
+  const insets = useSafeAreaInsets();
   const [room, setRoom] = useState(null);
   const [currentPlayerName, setCurrentPlayerName] = useState('');
   const [copied, setCopied] = useState(false);
@@ -37,11 +39,13 @@ export default function DrawRoomScreen({ navigation, route }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [timeRemaining, setTimeRemaining] = useState(60);
+  const [forceCloseModal, setForceCloseModal] = useState(false);
 
   const timerCheckInterval = useRef(null);
   const unsubscribeRef = useRef(null);
   const roomRef = useRef(room);
   const currentPlayerNameRef = useRef(currentPlayerName);
+  const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
 
   useEffect(() => {
     roomRef.current = room;
@@ -119,6 +123,23 @@ export default function DrawRoomScreen({ navigation, route }) {
     setupRealtimeListener();
 
     return () => {
+      // Remove player from room on unmount
+      const currentRoom = roomRef.current;
+      const playerName = currentPlayerNameRef.current;
+      if (currentRoom && currentRoom.id && playerName) {
+        try {
+          const updatedPlayers = currentRoom.players.filter(p => p && p.name !== playerName);
+          const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
+          updateDoc(roomDocRef, {
+            players: updatedPlayers
+          }).catch(error => {
+            console.error('Error removing player from room on unmount:', error);
+          });
+        } catch (error) {
+          console.error('Error removing player from room on unmount:', error);
+        }
+      }
+      
       // Cleanup on unmount
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
@@ -133,7 +154,22 @@ export default function DrawRoomScreen({ navigation, route }) {
 
   // Cleanup on navigation away
   useEffect(() => {
-    const unsubscribe = navigation.addListener('beforeRemove', () => {
+    const unsubscribe = navigation.addListener('beforeRemove', async () => {
+      // Remove player from room before leaving
+      const currentRoom = roomRef.current;
+      const playerName = currentPlayerNameRef.current;
+      if (currentRoom && currentRoom.id && playerName) {
+        try {
+          const updatedPlayers = currentRoom.players.filter(p => p && p.name !== playerName);
+          const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
+          await updateDoc(roomDocRef, {
+            players: updatedPlayers
+          });
+        } catch (error) {
+          console.error('Error removing player from room on navigation:', error);
+        }
+      }
+      
       // Cleanup timers and listeners when navigating away
       if (timerCheckInterval.current) {
         clearInterval(timerCheckInterval.current);
@@ -181,8 +217,26 @@ export default function DrawRoomScreen({ navigation, route }) {
           return;
         }
         
-        // Always update room so strokes propagate to all players
+        // Log game status changes for debugging
+        const prevRoom = roomRef.current;
+        if (prevRoom && prevRoom.game_status !== newRoom.game_status) {
+          console.log(`🔄 [DRAW] Game status changed: ${prevRoom.game_status} → ${newRoom.game_status}`);
+        }
+        
+        // Always update room so strokes propagate to all players and UI updates
         setRoom(newRoom);
+        roomRef.current = newRoom; // Update ref immediately for isMyTurn() checks
+        setIsLoading(false); // Ensure loading state is cleared when room updates
+        
+        // Force re-check of drawing permissions when room updates
+        // This ensures isMyTurn() works correctly after room state changes
+        if (newRoom.game_status === 'playing' && newRoom.current_turn_index !== undefined) {
+          const playerName = currentPlayerNameRef.current || '';
+          const isMyTurnNow = newRoom.players && Array.isArray(newRoom.players) && 
+            newRoom.players[newRoom.current_turn_index]?.name === playerName;
+          console.log(`🔄 [DRAW] Turn check - Player: ${playerName}, Turn index: ${newRoom.current_turn_index}, Is my turn: ${isMyTurnNow}`);
+        }
+        
         // Update local strokes from snapshot (source of truth)
         if (newRoom.drawing_data) {
           try {
@@ -193,9 +247,12 @@ export default function DrawRoomScreen({ navigation, route }) {
           } catch (error) {
             console.error('Error parsing strokes from listener:', error);
           }
+        } else if (newRoom.game_status === 'playing' && !newRoom.drawing_data) {
+          // Clear strokes when new round starts
+          setLocalStrokes([]);
         }
       } else {
-        // Room deleted - cleanup everything
+        // Room deleted - cleanup everything and redirect
         if (timerCheckInterval.current) {
           clearInterval(timerCheckInterval.current);
           timerCheckInterval.current = null;
@@ -204,16 +261,35 @@ export default function DrawRoomScreen({ navigation, route }) {
           unsubscribeRef.current();
           unsubscribeRef.current = null;
         }
-        Alert.alert('שגיאה', 'החדר נמחק');
-        navigation.goBack();
+        if (autoDeletionCleanupRef.current.cancelGameEnd) {
+          autoDeletionCleanupRef.current.cancelGameEnd();
+        }
+        if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
+          autoDeletionCleanupRef.current.cancelEmptyRoom();
+        }
+        if (autoDeletionCleanupRef.current.cancelAge) {
+          autoDeletionCleanupRef.current.cancelAge();
+        }
+        clearCurrentRoom();
+        // Navigate to main menu
+        const parent = navigation.getParent();
+        if (parent) {
+          parent.reset({
+            index: 0,
+            routes: [{ name: 'Home' }]
+          });
+        } else {
+          navigation.navigate('Home');
+        }
       }
     }, (error) => {
-      console.error('Error in realtime listener:', error);
+      console.error('❌ Error in realtime listener:', error);
       // Cleanup on error
       if (timerCheckInterval.current) {
         clearInterval(timerCheckInterval.current);
         timerCheckInterval.current = null;
       }
+      setIsLoading(false);
     });
   };
 
@@ -232,7 +308,12 @@ export default function DrawRoomScreen({ navigation, route }) {
     } else if (room?.game_status === 'playing' && !room?.drawing_data) {
       setLocalStrokes([]);
     }
-  }, [room?.drawing_data, room?.game_status]);
+    
+    // Reset force close modal flag when game status changes back to lobby
+    if (room?.game_status === 'lobby' && forceCloseModal) {
+      setForceCloseModal(false);
+    }
+  }, [room?.drawing_data, room?.game_status, forceCloseModal]);
 
   // Timer management - with proper cleanup
   useEffect(() => {
@@ -373,7 +454,7 @@ export default function DrawRoomScreen({ navigation, route }) {
         setCurrentPlayerName(playerName);
       }
 
-      // Add player if not already in room
+      // Add player if not already in room (only in lobby state)
       const playerExists = roomData.players && Array.isArray(roomData.players) && roomData.players.some(p => p && p.name === playerName);
       if (!playerExists && roomData.game_status === 'lobby' && playerName) {
         const updatedPlayers = [...(roomData.players || []), { name: playerName, score: 0 }];
@@ -384,13 +465,24 @@ export default function DrawRoomScreen({ navigation, route }) {
           if (updatedSnapshot.exists()) {
             const updatedRoom = { id: updatedSnapshot.id, ...updatedSnapshot.data() };
             setRoom(updatedRoom);
+            setIsLoading(false);
             return;
           }
         } catch (updateErr) {
           console.error('❌ Error adding player:', updateErr);
         }
       }
+      
+      // If game is already playing and player is not in room, show error
+      if (!playerExists && roomData.game_status === 'playing' && playerName) {
+        console.warn('⚠️ Player tried to join game that is already in progress');
+        Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+        navigation.goBack();
+        return;
+      }
+      
       setRoom(roomData);
+      setIsLoading(false);
     } catch (error) {
       console.error('❌ Error loading room:', error);
       Alert.alert('שגיאה', 'לא הצלחנו לטעון את החדר');
@@ -448,8 +540,11 @@ export default function DrawRoomScreen({ navigation, route }) {
           turn_start_time: turnStartTime
         };
         await updateDoc(roomRef, updates);
-        setRoom(prev => ({ ...prev, ...updates }));
+        const updatedRoom = { ...room, ...updates };
+        setRoom(updatedRoom);
+        roomRef.current = updatedRoom; // Update ref immediately so isMyTurn() works correctly for first turn
         console.log('✅ Game started successfully');
+        console.log(`🔵 [DRAW] First turn - Player at index 0: ${updatedRoom.players[0]?.name}, Current player: ${currentPlayerName}`);
       } catch (error) {
         console.error('❌ Error starting game:', error);
         Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');
@@ -462,7 +557,38 @@ export default function DrawRoomScreen({ navigation, route }) {
   };
 
   const handleStrokeComplete = async (stroke) => {
-    if (!isMyTurn() || !roomRef.current || !roomRef.current.id) return;
+    // Double-check it's my turn using current room state
+    const currentRoom = roomRef.current || room;
+    if (!currentRoom || !currentRoom.id || !currentRoom.players) {
+      console.warn('⚠️ [DRAW] Stroke rejected - no room data');
+      return;
+    }
+    
+    if (currentRoom.current_turn_index === undefined || currentRoom.current_turn_index === null) {
+      console.warn('⚠️ [DRAW] Stroke rejected - no current_turn_index');
+      return;
+    }
+    
+    const playerName = currentPlayerNameRef.current || currentPlayerName;
+    if (!playerName) {
+      console.warn('⚠️ [DRAW] Stroke rejected - no player name');
+      return;
+    }
+    
+    const currentDrawer = currentRoom.players[currentRoom.current_turn_index];
+    if (!currentDrawer || !currentDrawer.name) {
+      console.warn('⚠️ [DRAW] Stroke rejected - no current drawer');
+      return;
+    }
+    
+    const isMyTurnNow = currentDrawer.name === playerName;
+    
+    if (!isMyTurnNow) {
+      console.warn(`⚠️ [DRAW] Stroke rejected - not my turn. Player: ${playerName}, Drawer: ${currentDrawer.name}, Turn index: ${currentRoom.current_turn_index}`);
+      return;
+    }
+    
+    console.log(`✅ [DRAW] Stroke accepted - Player: ${playerName}, Turn index: ${currentRoom.current_turn_index}`);
 
     try {
       // Get current strokes from latest snapshot and append
@@ -710,7 +836,22 @@ export default function DrawRoomScreen({ navigation, route }) {
   };
 
   const resetGame = async () => {
-    if (!room || !room.id) return;
+    if (!room || !room.id || !isHost) return;
+
+    // Cancel game end auto-deletion since we're resetting
+    if (autoDeletionCleanupRef.current.cancelGameEnd) {
+      autoDeletionCleanupRef.current.cancelGameEnd();
+      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
+    }
+
+    // Force close modal immediately
+    setForceCloseModal(true);
+
+    // Cancel all timers
+    if (timerCheckInterval.current) {
+      clearInterval(timerCheckInterval.current);
+      timerCheckInterval.current = null;
+    }
 
     const resetPlayers = room.players.map(p => ({ ...p, score: 0, current_guess: '', has_submitted: false }));
 
@@ -727,22 +868,94 @@ export default function DrawRoomScreen({ navigation, route }) {
         winner_name: null,
         drinking_players: null,
         all_guesses: [],
-        final_draw_image: null
+        final_draw_image: null,
+        turn_start_time: null
       });
       setLocalStrokes([]);
+      
+      // Reset force close flag after a short delay to allow state to update
+      setTimeout(() => {
+        setForceCloseModal(false);
+      }, 100);
     } catch (error) {
       console.error('Error resetting game:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+      setForceCloseModal(false);
     }
   };
 
   const goBack = async () => {
+    // Remove player from room before leaving
+    if (room && room.id && currentPlayerName) {
+      try {
+        const updatedPlayers = room.players.filter(p => p && p.name !== currentPlayerName);
+        const roomRef = doc(db, 'DrawRoom', room.id);
+        await updateDoc(roomRef, {
+          players: updatedPlayers
+        });
+      } catch (error) {
+        console.error('Error removing player from room:', error);
+      }
+    }
+    
+    // Cleanup all listeners and timers
+    if (timerCheckInterval.current) {
+      clearInterval(timerCheckInterval.current);
+      timerCheckInterval.current = null;
+    }
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    
     await clearCurrentRoom();
-    navigation.navigate('DrawHome');
+    
+    // Navigate to main menu using reset to clear the stack
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      // Fallback: navigate to Home
+      navigation.navigate('Home');
+    }
   };
 
   const isMyTurn = () => {
-    if (!room || !room.players) return false;
-    return room.players[room.current_turn_index]?.name === currentPlayerName;
+    // Use roomRef for most up-to-date state
+    const currentRoom = roomRef.current || room;
+    if (!currentRoom || !currentRoom.players) {
+      console.log('🔍 [DRAW] isMyTurn - no room or players');
+      return false;
+    }
+    
+    if (currentRoom.current_turn_index === undefined || currentRoom.current_turn_index === null) {
+      console.log('🔍 [DRAW] isMyTurn - no current_turn_index');
+      return false;
+    }
+    
+    if (currentRoom.game_status !== 'playing') {
+      console.log('🔍 [DRAW] isMyTurn - game not playing, status:', currentRoom.game_status);
+      return false;
+    }
+    
+    const playerName = currentPlayerNameRef.current || currentPlayerName;
+    if (!playerName) {
+      console.log('🔍 [DRAW] isMyTurn - no player name');
+      return false;
+    }
+    
+    const currentDrawer = currentRoom.players[currentRoom.current_turn_index];
+    if (!currentDrawer || !currentDrawer.name) {
+      console.log(`🔍 [DRAW] isMyTurn - no current drawer at index ${currentRoom.current_turn_index}`);
+      return false;
+    }
+    
+    const result = currentDrawer.name === playerName;
+    console.log(`🔍 [DRAW] isMyTurn check - Player: ${playerName}, Drawer: ${currentDrawer.name}, Turn index: ${currentRoom.current_turn_index}, Result: ${result}`);
+    return result;
   };
 
   const getCurrentPlayerName = () => {
@@ -752,7 +965,7 @@ export default function DrawRoomScreen({ navigation, route }) {
 
   if (error) {
     return (
-      <GradientBackground variant="purple">
+      <GradientBackground variant="draw">
         <View style={styles.errorContainer}>
           <Text style={styles.errorTitle}>שגיאה בטעינת החדר</Text>
           <Text style={styles.errorMessage}>לא הצלחנו לטעון את חדר המשחק</Text>
@@ -763,7 +976,7 @@ export default function DrawRoomScreen({ navigation, route }) {
               setIsLoading(true);
               navigation.navigate('DrawHome');
             }}
-            variant="purple"
+            variant="draw"
             style={styles.errorButton}
           />
         </View>
@@ -773,7 +986,7 @@ export default function DrawRoomScreen({ navigation, route }) {
 
   if (isLoading || !room) {
     return (
-      <GradientBackground variant="purple">
+      <GradientBackground variant="draw">
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#FFFFFF" />
           <Text style={styles.loadingText}>טוען משחק ציור...</Text>
@@ -793,16 +1006,21 @@ export default function DrawRoomScreen({ navigation, route }) {
     .filter(Boolean);
 
   return (
-    <GradientBackground variant="purple">
+    <GradientBackground variant="draw">
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        nestedScrollEnabled={true}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={goBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← יציאה</Text>
-          </TouchableOpacity>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
+          <GradientButton
+            title="← יציאה"
+            onPress={goBack}
+            variant="draw"
+            style={styles.backButton}
+          />
 
           <View style={styles.headerRight}>
             <Pressable onPress={handleCopyRoomCode} style={styles.roomCodeContainer}>
@@ -813,7 +1031,7 @@ export default function DrawRoomScreen({ navigation, route }) {
             <GradientButton
               title="📋 העתק קישור"
               onPress={handleCopyRoomLink}
-              variant="ghost"
+              variant="draw"
               style={styles.copyLinkButton}
             />
           </View>
@@ -877,7 +1095,7 @@ export default function DrawRoomScreen({ navigation, route }) {
                 <GradientButton
                   title="▶ התחל משחק!"
                   onPress={startGame}
-                  variant="purple"
+                  variant="draw"
                   style={styles.startButton}
                   disabled={room.players.length < 2}
                 />
@@ -893,70 +1111,51 @@ export default function DrawRoomScreen({ navigation, route }) {
         {/* Playing State */}
         {room.game_status === 'playing' && (
           <View style={styles.gameContainer}>
-            <View style={styles.gameMain}>
-              {/* Status Card */}
-              <View style={styles.statusCard}>
-                <View style={styles.statusContent}>
-                  {/* Timer Display */}
-                  {room.game_status === 'playing' && room.turn_start_time && !room.show_round_summary && (
-                    <View style={styles.timerContainer}>
-                      <Timer
-                        duration={60}
-                        startTime={room.turn_start_time}
-                        onTimeUp={handleTimerExpiration}
-                        compact={true}
-                      />
-                    </View>
-                  )}
-                  
-                  {isMyTurn() ? (
-                    <>
-                      <View style={styles.turnBadge}>
-                        <Text style={styles.turnBadgeText}>🎮 התור שלך לצייר!</Text>
-                      </View>
-                      <View style={styles.wordCard}>
-                        <Text style={styles.wordLabel}>המילה לציור:</Text>
-                        <Text style={styles.wordText}>{room.current_word}</Text>
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <View style={styles.drawerInfo}>
-                        <Text style={styles.drawerIcon}>👁️</Text>
-                        <Text style={styles.drawerText}>{currentDrawerName} מצייר...</Text>
-                      </View>
-                      <Text style={styles.guessHint}>נסה לנחש מה הוא מצייר!</Text>
-
-                      {/* Guess Input */}
-                      <View style={styles.guessInputContainer}>
-                        <TextInput
-                          style={styles.guessInput}
-                          value={guessInput}
-                          onChangeText={setGuessInput}
-                          placeholder="כתוב את הניחוש שלך..."
-                          placeholderTextColor="#999"
-                          editable={!isMyTurn() && !room.show_round_summary}
-                          onSubmitEditing={handleGuessSubmit}
-                        />
-                        <Pressable
-                          onPress={handleGuessSubmit}
-                          disabled={!guessInput.trim() || isMyTurn() || room.show_round_summary}
-                          style={[
-                            styles.sendButton,
-                            (!guessInput.trim() || isMyTurn() || room.show_round_summary) && styles.sendButtonDisabled
-                          ]}
-                        >
-                          <Text style={styles.sendButtonText}>📤</Text>
-                        </Pressable>
-                      </View>
-                    </>
-                  )}
+            {/* Top Bar - Timer, Word, Status */}
+            <View style={styles.topBar}>
+              {/* Timer */}
+              {room.game_status === 'playing' && room.turn_start_time && !room.show_round_summary && (
+                <View style={styles.timerWrapper}>
+                  <Timer
+                    duration={60}
+                    startTime={room.turn_start_time}
+                    onTimeUp={handleTimerExpiration}
+                    compact={true}
+                  />
                 </View>
-              </View>
+              )}
+              
+              {/* Word/Status */}
+              {isMyTurn() ? (
+                <View style={styles.wordCardCompact}>
+                  <Text style={styles.wordTextCompact}>{room.current_word}</Text>
+                </View>
+              ) : (
+                <View style={styles.drawerInfoCompact}>
+                  <Text style={styles.drawerTextCompact}>{currentDrawerName} מצייר...</Text>
+                </View>
+              )}
+            </View>
 
-              {/* Drawing Tools - Only for drawer */}
-              {isMyTurn() && (
-                <View style={styles.toolsSection}>
+            {/* Canvas - CENTERPIECE */}
+            <View 
+              style={styles.canvasContainer} 
+              collapsable={false}
+            >
+              <DrawCanvas
+                strokes={localStrokes}
+                onStrokeComplete={handleStrokeComplete}
+                canDraw={isMyTurn()}
+                color={selectedColor}
+                brushSize={brushSize}
+                toolType={toolType}
+              />
+            </View>
+
+            {/* Bottom Tools Row - Only for drawer */}
+            {isMyTurn() && (
+              <View style={styles.bottomToolsRow}>
+                <View style={styles.toolsCompact}>
                   <DrawingTools
                     toolType={toolType}
                     onToolChange={setToolType}
@@ -970,40 +1169,53 @@ export default function DrawRoomScreen({ navigation, route }) {
                       onColorChange={setSelectedColor} 
                     />
                   )}
-                  
-                  <View style={styles.toolButtons}>
-                    <GradientButton
-                      title="↶ בטל קו אחרון"
-                      onPress={handleUndo}
-                      variant="outline"
-                      style={styles.toolButton}
-                      disabled={localStrokes.length === 0}
-                    />
-                    <GradientButton
-                      title="🧹 נקה הכל"
-                      onPress={handleClearAll}
-                      variant="red"
-                      style={styles.toolButton}
-                      disabled={localStrokes.length === 0}
-                    />
-                  </View>
                 </View>
-              )}
-
-              {/* Canvas */}
-              <View style={styles.canvasContainer}>
-                <DrawCanvas
-                  strokes={localStrokes}
-                  onStrokeComplete={handleStrokeComplete}
-                  canDraw={isMyTurn()}
-                  color={selectedColor}
-                  brushSize={brushSize}
-                  toolType={toolType}
-                />
+                
+                <View style={styles.toolButtonsCompact}>
+                  <GradientButton
+                    title="↶ בטל"
+                    onPress={handleUndo}
+                    variant="draw"
+                    style={styles.toolButtonCompact}
+                    disabled={localStrokes.length === 0}
+                  />
+                  <GradientButton
+                    title="🧹 נקה"
+                    onPress={handleClearAll}
+                    variant="draw"
+                    style={styles.toolButtonCompact}
+                    disabled={localStrokes.length === 0}
+                  />
+                </View>
               </View>
-            </View>
+            )}
 
-            {/* Sidebar */}
+            {/* Guess Input - For non-drawers */}
+            {!isMyTurn() && (
+              <View style={styles.guessInputRow}>
+                <TextInput
+                  style={styles.guessInputCompact}
+                  value={guessInput}
+                  onChangeText={setGuessInput}
+                  placeholder="כתוב את הניחוש שלך..."
+                  placeholderTextColor="#999"
+                  editable={!room.show_round_summary}
+                  onSubmitEditing={handleGuessSubmit}
+                />
+                <Pressable
+                  onPress={handleGuessSubmit}
+                  disabled={!guessInput.trim() || room.show_round_summary}
+                  style={[
+                    styles.sendButtonCompact,
+                    (!guessInput.trim() || room.show_round_summary) && styles.sendButtonDisabled
+                  ]}
+                >
+                  <Text style={styles.sendButtonText}>📤</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {/* Sidebar - Guesses and Scoreboard */}
             <View style={styles.sidebar}>
               {/* Shared Guesses Box */}
               {room.game_status === 'playing' && !room.show_round_summary && (
@@ -1046,7 +1258,11 @@ export default function DrawRoomScreen({ navigation, route }) {
                 <View style={styles.scoreboardHeader}>
                   <Text style={styles.scoreboardTitle}>🏆 שחקנים</Text>
                 </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scoreboardList}>
+                <ScrollView 
+                  style={styles.scoreboardList}
+                  showsVerticalScrollIndicator={false}
+                  nestedScrollEnabled
+                >
                   {[...room.players].sort((a, b) => b.score - a.score).map((player, idx) => {
                     const isCurrentTurn = room.players[room.current_turn_index]?.name === player.name;
                     
@@ -1133,7 +1349,7 @@ export default function DrawRoomScreen({ navigation, route }) {
         )}
 
         {/* Round Summary Modal */}
-        {room.show_round_summary && !room.drinking_players && 
+        {room.show_round_summary && !room.drinking_players && !forceCloseModal &&
          room.players && Array.isArray(room.players) && 
          room.players.some(p => p && p.name === currentPlayerName) && (
           <Modal
@@ -1143,141 +1359,139 @@ export default function DrawRoomScreen({ navigation, route }) {
             onRequestClose={() => {}}
           >
             <View style={styles.modalOverlay}>
-              <ScrollView 
-                contentContainerStyle={styles.modalScrollContent}
-                showsVerticalScrollIndicator={false}
-              >
-                <View style={styles.modalContent}>
-                  <View style={styles.summaryHeader}>
-                    <Text style={styles.summaryTitle}>סיכום הסבב</Text>
-                  </View>
+              <View style={styles.modalContent}>
+                <View style={styles.summaryHeader}>
+                  <Text style={styles.summaryTitle}>סיכום הסבב</Text>
+                </View>
 
-                  {/* Winner announcement */}
-                  <View style={styles.winnerCard}>
-                    {correctGuessers.length > 0 ? (
-                      <>
-                        <Text style={styles.trophyIconLarge}>🏆</Text>
-                        <Text style={styles.winnerTitle}>
-                          {correctGuessers.length === 1
-                            ? `${correctGuessers[0].name} ניחש נכון!`
-                            : 'כל הכבוד למנחשים המהירים!'}
-                        </Text>
-                        <View style={styles.winnersList}>
-                          {correctGuessers.map((player) => (
-                            <View key={player.name} style={styles.winnerBadge}>
-                              <Text style={styles.winnerBadgeText}>{player.name} +1 ⭐</Text>
-                            </View>
-                          ))}
-                        </View>
-                      </>
-                    ) : (
-                      <>
-                        <Text style={styles.eyeIconLarge}>👁️</Text>
-                        <Text style={styles.noWinnerTitle}>אף אחד לא ניחש נכון הפעם...</Text>
-                      </>
-                    )}
-                    <Text style={styles.wordReveal}>
-                      המילה הייתה: <Text style={styles.wordRevealBold}>{room.current_word}</Text>
-                    </Text>
-                  </View>
+                {/* Winner announcement */}
+                <View style={styles.winnerCard}>
+                  {correctGuessers.length > 0 ? (
+                    <>
+                      <Text style={styles.trophyIconLarge}>🏆</Text>
+                      <Text style={styles.winnerTitle}>
+                        {correctGuessers.length === 1
+                          ? `${correctGuessers[0].name} ניחש נכון!`
+                          : 'כל הכבוד למנחשים המהירים!'}
+                      </Text>
+                      <View style={styles.winnersList}>
+                        {correctGuessers.map((player) => (
+                          <View key={player.name} style={styles.winnerBadge}>
+                            <Text style={styles.winnerBadgeText}>{player.name} +1 ⭐</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.eyeIconLarge}>👁️</Text>
+                      <Text style={styles.noWinnerTitle}>אף אחד לא ניחש נכון הפעם...</Text>
+                    </>
+                  )}
+                  <Text style={styles.wordReveal}>
+                    המילה הייתה: <Text style={styles.wordRevealBold}>{room.current_word}</Text>
+                  </Text>
+                </View>
 
-                  {/* Drawing */}
-                  <View style={styles.drawingSection}>
-                    <Text style={styles.drawingSectionTitle}>הציור:</Text>
-                    <View style={styles.drawingDisplay}>
-                      <DrawCanvas
-                        strokes={(() => {
-                          // Use room.drawing_data as source of truth for summary
-                          if (room?.drawing_data) {
-                            try {
-                              const strokes = typeof room.drawing_data === 'string' 
-                                ? JSON.parse(room.drawing_data) 
-                                : room.drawing_data;
-                              return Array.isArray(strokes) ? strokes : [];
-                            } catch (error) {
-                              console.error('Error parsing strokes for summary:', error);
-                              return localStrokes;
-                            }
+                {/* Drawing - Smaller */}
+                <View style={styles.drawingSection}>
+                  <Text style={styles.drawingSectionTitle}>הציור:</Text>
+                  <View style={styles.drawingDisplay}>
+                    <DrawCanvas
+                      strokes={(() => {
+                        // Use room.drawing_data as source of truth for summary
+                        if (room?.drawing_data) {
+                          try {
+                            const strokes = typeof room.drawing_data === 'string' 
+                              ? JSON.parse(room.drawing_data) 
+                              : room.drawing_data;
+                            return Array.isArray(strokes) ? strokes : [];
+                          } catch (error) {
+                            console.error('Error parsing strokes for summary:', error);
+                            return localStrokes;
                           }
-                          return localStrokes;
-                        })()}
-                        onStrokeComplete={() => {}}
-                        canDraw={false}
-                        color={selectedColor}
-                        brushSize={brushSize}
-                        toolType={toolType}
-                      />
-                    </View>
+                        }
+                        return localStrokes;
+                      })()}
+                      onStrokeComplete={() => {}}
+                      canDraw={false}
+                      color={selectedColor}
+                      brushSize={brushSize}
+                      toolType={toolType}
+                    />
                   </View>
+                </View>
 
-                  {/* Guesses */}
-                  <View style={styles.guessesSection}>
-                    <Text style={styles.guessesSectionTitle}>ניחושים:</Text>
-                    <ScrollView style={styles.summaryGuessesList} nestedScrollEnabled>
-                      {allGuesses.length === 0 ? (
-                        <Text style={styles.noGuessesTextSummary}>לא היו ניחושים בסבב זה</Text>
-                      ) : (
-                        allGuesses.map((guess, idx) => {
-                          const isCorrect = guess.isCorrect;
-                          return (
-                            <View
-                              key={idx}
-                              style={[styles.summaryGuessItem, isCorrect && styles.summaryGuessItemCorrect]}
-                            >
-                              <View style={styles.summaryGuessContent}>
-                                <Text style={styles.summaryGuessPlayerName}>{guess.playerName}</Text>
-                                <Text style={styles.summaryGuessLabel}>ניחש:</Text>
-                                <Text style={[styles.summaryGuessText, isCorrect && styles.summaryGuessTextCorrect]}>
-                                  {guess.guess}
-                                </Text>
-                              </View>
-                              {isCorrect && (
-                                <Text style={styles.summaryCheckmark}>✓</Text>
-                              )}
-                            </View>
-                          );
-                        })
-                      )}
-                    </ScrollView>
-                  </View>
-
-                  {/* Updated Scores */}
-                  <View style={styles.scoresSection}>
-                    <Text style={styles.scoresSectionTitle}>לוח תוצאות:</Text>
-                    <View style={styles.scoresGrid}>
-                      {[...room.players].sort((a, b) => b.score - a.score).map((player) => {
-                        const earnedPointThisRound = correctGuessers.some(
-                          (winner) => winner.name === player.name
-                        );
+                {/* Guesses - Compact list, no ScrollView */}
+                <View style={styles.guessesSection}>
+                  <Text style={styles.guessesSectionTitle}>ניחושים:</Text>
+                  <View style={styles.summaryGuessesList}>
+                    {allGuesses.length === 0 ? (
+                      <Text style={styles.noGuessesTextSummary}>לא היו ניחושים בסבב זה</Text>
+                    ) : (
+                      allGuesses.slice(0, 3).map((guess, idx) => {
+                        const isCorrect = guess.isCorrect;
                         return (
                           <View
-                            key={player.name}
-                            style={[styles.scoreItem, earnedPointThisRound && styles.scoreItemEarned]}
+                            key={idx}
+                            style={[styles.summaryGuessItem, isCorrect && styles.summaryGuessItemCorrect]}
                           >
-                            <Text style={styles.scoreItemName}>{player.name}</Text>
-                            <View style={styles.scoreItemBadge}>
-                              <Text style={styles.scoreItemBadgeText}>{player.score} נקודות</Text>
+                            <View style={styles.summaryGuessContent}>
+                              <Text style={styles.summaryGuessPlayerName}>{guess.playerName}</Text>
+                              <Text style={styles.summaryGuessLabel}>ניחש:</Text>
+                              <Text style={[styles.summaryGuessText, isCorrect && styles.summaryGuessTextCorrect]}>
+                                {guess.guess}
+                              </Text>
                             </View>
+                            {isCorrect && (
+                              <Text style={styles.summaryCheckmark}>✓</Text>
+                            )}
                           </View>
                         );
-                      })}
-                    </View>
+                      })
+                    )}
+                    {allGuesses.length > 3 && (
+                      <Text style={styles.moreGuessesText}>+{allGuesses.length - 3} ניחושים נוספים</Text>
+                    )}
                   </View>
-
-                  <GradientButton
-                    title="המשך לסבב הבא"
-                    onPress={continueToNextRound}
-                    variant="purple"
-                    style={styles.continueButton}
-                  />
                 </View>
-              </ScrollView>
+
+                {/* Updated Scores - Compact */}
+                <View style={styles.scoresSection}>
+                  <Text style={styles.scoresSectionTitle}>לוח תוצאות:</Text>
+                  <View style={styles.scoresGrid}>
+                    {[...room.players].sort((a, b) => b.score - a.score).slice(0, 4).map((player) => {
+                      const earnedPointThisRound = correctGuessers.some(
+                        (winner) => winner.name === player.name
+                      );
+                      return (
+                        <View
+                          key={player.name}
+                          style={[styles.scoreItem, earnedPointThisRound && styles.scoreItemEarned]}
+                        >
+                          <Text style={styles.scoreItemName}>{player.name}</Text>
+                          <View style={styles.scoreItemBadge}>
+                            <Text style={styles.scoreItemBadgeText}>{player.score}</Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <GradientButton
+                  title="המשך לסבב הבא"
+                  onPress={continueToNextRound}
+                  variant="draw"
+                  style={styles.continueButton}
+                />
+              </View>
             </View>
           </Modal>
         )}
 
         {/* Finished State Modal */}
-        {room.game_status === 'finished' && 
+        {room.game_status === 'finished' && !forceCloseModal &&
          room.players && Array.isArray(room.players) && 
          room.players.some(p => p && p.name === currentPlayerName) && (
           <Modal
@@ -1336,18 +1550,20 @@ export default function DrawRoomScreen({ navigation, route }) {
                 )}
 
                 <View style={styles.finishedActions}>
-                  {isHost && (
-                    <GradientButton
-                      title="משחק חדש"
-                      onPress={resetGame}
-                      variant="purple"
-                      style={styles.resetButton}
-                    />
+                  <GradientButton
+                    title="משחק חדש"
+                    onPress={resetGame}
+                    variant="draw"
+                    style={styles.resetButton}
+                    disabled={!isHost}
+                  />
+                  {!isHost && (
+                    <Text style={styles.hostOnlyText}>רק המארח יכול להתחיל משחק חדש</Text>
                   )}
                   <GradientButton
                     title="חזרה לתפריט הראשי"
                     onPress={goBack}
-                    variant="outline"
+                    variant="draw"
                     style={styles.exitButton}
                   />
                 </View>
@@ -1363,14 +1579,15 @@ export default function DrawRoomScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
-    padding: 16,
-    paddingBottom: 40,
+    padding: 10,
+    paddingBottom: 16,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
+    paddingHorizontal: 4,
   },
   backButton: {
     padding: 8,
@@ -1399,7 +1616,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   roomCodeText: {
-    color: '#9C27B0',
+    color: '#C48CFF', // Draw theme color
     fontSize: 14,
     fontWeight: '700',
   },
@@ -1451,7 +1668,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   lobbyHeader: {
-    backgroundColor: '#9C27B0',
+    backgroundColor: '#C48CFF', // Draw theme color
     padding: 20,
     alignItems: 'center',
   },
@@ -1467,7 +1684,7 @@ const styles = StyleSheet.create({
   hostCard: {
     backgroundColor: '#F3E8FF',
     borderWidth: 1,
-    borderColor: '#C084FC',
+    borderColor: '#C48CFF', // Draw theme color
     borderRadius: 16,
     padding: 16,
     gap: 12,
@@ -1529,7 +1746,7 @@ const styles = StyleSheet.create({
     minWidth: 100,
     backgroundColor: '#F9FAFB',
     borderWidth: 2,
-    borderColor: '#C084FC',
+    borderColor: '#C48CFF', // Draw theme color
     borderRadius: 16,
     padding: 12,
     alignItems: 'center',
@@ -1552,23 +1769,52 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   gameContainer: {
-    flexDirection: 'row',
-    gap: 16,
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-  },
-  gameMain: {
     flex: 1,
-    minWidth: 300,
-    maxWidth: 600,
-    gap: 16,
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 8,
+    width: '100%',
+  },
+  timerWrapper: {
+    flex: 1,
+    maxWidth: 120,
+  },
+  wordCardCompact: {
+    backgroundColor: 'rgba(196, 140, 255, 0.25)',
+    borderWidth: 2,
+    borderColor: '#C48CFF',
+    borderRadius: 12,
+    padding: 8,
+    flex: 1,
+    alignItems: 'center',
+  },
+  wordTextCompact: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#C48CFF',
+  },
+  drawerInfoCompact: {
+    flex: 1,
+    alignItems: 'center',
+    padding: 8,
+  },
+  drawerTextCompact: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
   },
   statusCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 12,
+    padding: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -1576,41 +1822,41 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   statusContent: {
-    gap: 12,
+    gap: 8,
     alignItems: 'center',
   },
   timerContainer: {
-    marginBottom: 8,
+    marginBottom: 4,
   },
   turnBadge: {
-    backgroundColor: '#10B981',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    backgroundColor: '#C48CFF', // Draw theme color
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
   },
   turnBadgeText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
   },
   wordCard: {
-    backgroundColor: '#FEF3C7',
+    backgroundColor: 'rgba(196, 140, 255, 0.25)', // Draw theme color with less transparency
     borderWidth: 2,
-    borderColor: '#FCD34D',
-    borderRadius: 16,
-    padding: 16,
+    borderColor: '#C48CFF', // Draw theme color
+    borderRadius: 12,
+    padding: 10,
     width: '100%',
     alignItems: 'center',
   },
   wordLabel: {
-    fontSize: 12,
-    color: '#92400E',
-    marginBottom: 8,
+    fontSize: 10,
+    color: '#C48CFF', // Draw theme color
+    marginBottom: 4,
   },
   wordText: {
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: '900',
-    color: '#92400E',
+    color: '#C48CFF', // Draw theme color
   },
   drawerInfo: {
     flexDirection: 'row',
@@ -1643,10 +1889,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'right',
     borderWidth: 2,
-    borderColor: '#C084FC',
+    borderColor: '#C48CFF', // Draw theme color
   },
   sendButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#C48CFF', // Draw theme color
     borderRadius: 16,
     padding: 12,
     justifyContent: 'center',
@@ -1661,7 +1907,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
   toolsSection: {
-    gap: 12,
+    gap: 8,
   },
   toolButtons: {
     flexDirection: 'row',
@@ -1673,11 +1919,68 @@ const styles = StyleSheet.create({
   canvasContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
+    padding: 4,
+    flex: 1,
+    width: '100%',
+    maxHeight: '75%',
+  },
+  bottomToolsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 8,
+    width: '100%',
+    flexWrap: 'wrap',
+  },
+  toolsCompact: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  toolButtonsCompact: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  toolButtonCompact: {
+    minWidth: 80,
+    paddingVertical: 8,
+  },
+  guessInputRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 8,
+    width: '100%',
+    alignItems: 'center',
+  },
+  guessInputCompact: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 10,
+    fontSize: 14,
+    textAlign: 'right',
+    borderWidth: 2,
+    borderColor: '#C48CFF',
+  },
+  sendButtonCompact: {
+    backgroundColor: '#C48CFF',
+    borderRadius: 12,
+    padding: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 50,
   },
   sidebar: {
-    width: 300,
-    gap: 16,
+    position: 'absolute',
+    right: 8,
+    top: 60,
+    width: 200,
+    maxHeight: '60%',
+    gap: 8,
+    zIndex: 10,
   },
   guessesCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
@@ -1722,7 +2025,7 @@ const styles = StyleSheet.create({
   },
   guessItemCorrect: {
     backgroundColor: '#D1FAE5',
-    borderColor: '#10B981',
+    borderColor: '#C48CFF', // Draw theme color
   },
   guessItemContent: {
     flex: 1,
@@ -1745,102 +2048,101 @@ const styles = StyleSheet.create({
   },
   checkmark: {
     fontSize: 16,
-    color: '#10B981',
+    color: '#C48CFF', // Draw theme color
   },
   scoreboardCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 24,
+    borderRadius: 16,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    maxHeight: 200,
   },
   scoreboardHeader: {
-    backgroundColor: '#9C27B0',
-    padding: 16,
+    backgroundColor: '#C48CFF', // Draw theme color
+    padding: 10,
     alignItems: 'center',
   },
   scoreboardTitle: {
     color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '700',
   },
   scoreboardList: {
-    gap: 12,
-    padding: 16,
+    padding: 8,
+    maxHeight: 160,
   },
   scoreboardPlayerCard: {
-    minWidth: 140,
     backgroundColor: '#F9FAFB',
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 16,
-    padding: 12,
+    borderRadius: 10,
+    padding: 8,
+    marginBottom: 6,
   },
   scoreboardPlayerCardActive: {
     backgroundColor: '#F3E8FF',
-    borderColor: '#C084FC',
+    borderColor: '#C48CFF', // Draw theme color
   },
   scoreboardPlayerContent: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 8,
   },
   scoreboardRankRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
+    gap: 4,
   },
   scoreboardRank: {
-    fontSize: 20,
-    fontWeight: '900',
+    fontSize: 14,
+    fontWeight: '700',
     color: '#9CA3AF',
   },
   trophyIcon: {
-    fontSize: 20,
+    fontSize: 14,
   },
   scoreboardPlayerName: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     color: '#1F2937',
+    flex: 1,
   },
   drawingBadge: {
-    backgroundColor: '#10B981',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    backgroundColor: '#C48CFF', // Draw theme color
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
   },
   drawingBadgeText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '600',
   },
   scoreboardScore: {
-    fontSize: 24,
-    fontWeight: '900',
-    color: '#9C27B0',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#C48CFF', // Draw theme color
   },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
-  },
-  modalScrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
+    padding: 12,
   },
   modalContent: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 24,
+    borderRadius: 16,
+    padding: 12,
     width: '100%',
-    maxWidth: 600,
+    maxWidth: 500,
     maxHeight: '90%',
-    gap: 24,
+    gap: 8,
   },
   drinkingIcon: {
     fontSize: 56,
@@ -1886,30 +2188,30 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   summaryHeader: {
-    backgroundColor: '#10B981',
-    padding: 20,
-    borderRadius: 16,
+    backgroundColor: '#C48CFF', // Draw theme color
+    padding: 8,
+    borderRadius: 10,
     alignItems: 'center',
   },
   summaryTitle: {
     color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 14,
     fontWeight: '700',
   },
   winnerCard: {
     backgroundColor: '#D1FAE5',
     borderWidth: 2,
-    borderColor: '#10B981',
-    borderRadius: 16,
-    padding: 20,
-    gap: 12,
+    borderColor: '#C48CFF', // Draw theme color
+    borderRadius: 10,
+    padding: 8,
+    gap: 6,
     alignItems: 'center',
   },
   trophyIconLarge: {
-    fontSize: 48,
+    fontSize: 24,
   },
   winnerTitle: {
-    fontSize: 24,
+    fontSize: 13,
     fontWeight: '700',
     color: '#059669',
     textAlign: 'center',
@@ -1921,27 +2223,27 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   winnerBadge: {
-    backgroundColor: '#10B981',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
+    backgroundColor: '#C48CFF', // Draw theme color
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   winnerBadgeText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: '600',
   },
   eyeIconLarge: {
-    fontSize: 48,
+    fontSize: 24,
   },
   noWinnerTitle: {
-    fontSize: 24,
+    fontSize: 13,
     fontWeight: '700',
     color: '#7C3AED',
     textAlign: 'center',
   },
   wordReveal: {
-    fontSize: 16,
+    fontSize: 12,
     color: '#059669',
     textAlign: 'center',
   },
@@ -1949,32 +2251,38 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   drawingSection: {
-    gap: 12,
+    gap: 4,
   },
   drawingSectionTitle: {
-    fontSize: 18,
+    fontSize: 11,
     fontWeight: '700',
     color: '#1F2937',
     textAlign: 'center',
   },
   drawingDisplay: {
-    borderWidth: 4,
-    borderColor: '#C084FC',
-    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#C48CFF', // Draw theme color
+    borderRadius: 10,
     overflow: 'hidden',
     backgroundColor: '#FFFFFF',
+    height: 120,
   },
   guessesSection: {
-    gap: 12,
+    gap: 4,
   },
   guessesSectionTitle: {
-    fontSize: 18,
+    fontSize: 11,
     fontWeight: '700',
     color: '#1F2937',
   },
   summaryGuessesList: {
-    maxHeight: 240,
-    gap: 8,
+    gap: 4,
+  },
+  moreGuessesText: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
   noGuessesTextSummary: {
     fontSize: 14,
@@ -1987,14 +2295,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: '#F9FAFB',
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: '#D1D5DB',
-    borderRadius: 16,
-    padding: 12,
+    borderRadius: 8,
+    padding: 6,
   },
   summaryGuessItemCorrect: {
     backgroundColor: '#D1FAE5',
-    borderColor: '#10B981',
+    borderColor: '#C48CFF', // Draw theme color
   },
   summaryGuessContent: {
     flex: 1,
@@ -2003,16 +2311,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   summaryGuessPlayerName: {
-    fontSize: 16,
+    fontSize: 11,
     fontWeight: '700',
     color: '#1F2937',
   },
   summaryGuessLabel: {
-    fontSize: 14,
+    fontSize: 10,
     color: '#6B7280',
   },
   summaryGuessText: {
-    fontSize: 14,
+    fontSize: 10,
     color: '#374151',
   },
   summaryGuessTextCorrect: {
@@ -2021,55 +2329,55 @@ const styles = StyleSheet.create({
   },
   summaryCheckmark: {
     fontSize: 20,
-    color: '#10B981',
+    color: '#C48CFF', // Draw theme color
   },
   scoresSection: {
-    gap: 12,
+    gap: 4,
   },
   scoresSectionTitle: {
-    fontSize: 18,
+    fontSize: 11,
     fontWeight: '700',
     color: '#1F2937',
   },
   scoresGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 4,
   },
   scoreItem: {
     flex: 1,
     minWidth: '45%',
     backgroundColor: '#F9FAFB',
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: '#D1D5DB',
-    borderRadius: 16,
-    padding: 12,
+    borderRadius: 8,
+    padding: 6,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   scoreItemEarned: {
     backgroundColor: '#D1FAE5',
-    borderColor: '#10B981',
+    borderColor: '#C48CFF', // Draw theme color
   },
   scoreItemName: {
-    fontSize: 16,
+    fontSize: 11,
     fontWeight: '700',
     color: '#1F2937',
   },
   scoreItemBadge: {
-    backgroundColor: '#9C27B0',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    backgroundColor: '#C48CFF', // Draw theme color
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
   },
   scoreItemBadgeText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 10,
     fontWeight: '600',
   },
   continueButton: {
-    marginTop: 8,
+    marginTop: 4,
   },
   finishedHeader: {
     alignItems: 'center',
@@ -2103,7 +2411,7 @@ const styles = StyleSheet.create({
     color: '#1F2937',
   },
   podiumScore: {
-    backgroundColor: '#9C27B0',
+    backgroundColor: '#C48CFF', // Draw theme color
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
@@ -2122,7 +2430,7 @@ const styles = StyleSheet.create({
   },
   podium1: {
     height: 120,
-    backgroundColor: '#FCD34D',
+    backgroundColor: '#C48CFF', // Draw theme color
   },
   podium2: {
     height: 100,
@@ -2170,11 +2478,22 @@ const styles = StyleSheet.create({
   },
   finishedActions: {
     gap: 12,
+    width: '100%',
+    flexDirection: 'column',
+    alignItems: 'stretch',
   },
   resetButton: {
-    marginBottom: 8,
+    width: '100%',
+    minHeight: 48,
   },
   exitButton: {
-    marginTop: 8,
+    width: '100%',
+    minHeight: 48,
+  },
+  hostOnlyText: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 4,
   },
 });

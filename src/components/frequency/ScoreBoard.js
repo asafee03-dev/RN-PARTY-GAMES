@@ -106,8 +106,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   playerCardActive: {
-    backgroundColor: '#F3E8FF',
-    borderColor: '#A78BFA',
+    backgroundColor: '#E0E7FF',
+    borderColor: '#0A1A3A', // Frequency theme color - navy blue
   },
   playerCardContent: {
     flexDirection: 'row',
@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
   scoreText: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#7C3AED',
+    color: '#0A1A3A', // Frequency theme color - navy blue
     minWidth: 50,
     textAlign: 'right',
   },
@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: '100%',
-    backgroundColor: '#7C3AED',
+    backgroundColor: '#0A1A3A', // Frequency theme color - navy blue
     borderRadius: 4,
   },
   footerText: {

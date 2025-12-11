@@ -30,6 +30,7 @@ export default function AliasGameScreen({ navigation, route }) {
   const [timerKey, setTimerKey] = useState(0);
   const [showGoldenPopup, setShowGoldenPopup] = useState(false);
   const unsubscribeRef = useRef(null);
+  const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
 
   useEffect(() => {
     const loadPlayerName = async () => {

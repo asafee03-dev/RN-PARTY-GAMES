@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Switch, Clipboard } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Switch, Clipboard, Pressable } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
+import { copyRoomLink } from '../../utils/clipboard';
 
 export default function CodenamesSetupScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
   const gameMode = route?.params?.gameMode || 'friends';
+  const insets = useSafeAreaInsets();
   const [room, setRoom] = useState(null);
   const [currentPlayerName, setCurrentPlayerName] = useState('');
   const [isHost, setIsHost] = useState(false);
@@ -385,6 +388,10 @@ export default function CodenamesSetupScreen({ navigation, route }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleCopyRoomLink = async () => {
+    await copyRoomLink(roomCode, 'codenames');
+  };
+
   const goBack = () => {
     const parent = navigation.getParent();
     if (parent) {
@@ -414,27 +421,33 @@ export default function CodenamesSetupScreen({ navigation, route }) {
   return (
     <LinearGradient colors={['#3B82F6', '#06B6D4', '#14B8A6']} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <GradientButton
-          title="← חזרה למשחקים"
-          onPress={goBack}
-          variant="codenames"
-          style={styles.backButton}
-        />
-
-        <View style={styles.header}>
-          <View style={styles.roomCodeContainer}>
-            <Text style={styles.roomCodeLabel}>קוד חדר:</Text>
-            <View style={styles.roomCodeBadge}>
-              <Text style={styles.roomCodeText}>{roomCode}</Text>
-            </View>
-            <TouchableOpacity onPress={copyRoomCode} style={styles.copyButton}>
-              <Text style={styles.copyButtonText}>{copied ? '✓' : '📋'}</Text>
-            </TouchableOpacity>
+        {/* Header */}
+        <View style={[styles.header, { paddingTop: Math.max(insets.top || 0, 8) }]}>
+          {/* Centered Room Code */}
+          <View style={styles.headerCenter}>
             {isRivalsMode && (
               <View style={styles.rivalsBadge}>
                 <Text style={styles.rivalsBadgeText}>⚔️ יריבים</Text>
               </View>
             )}
+            <Pressable onPress={copyRoomCode} style={styles.roomCodeContainer}>
+              <Text style={styles.roomCodeLabel}>קוד:</Text>
+              <Text style={styles.roomCodeText}>{roomCode}</Text>
+              <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
+            </Pressable>
+          </View>
+
+          {/* Right side: Copy Link + Exit */}
+          <View style={styles.headerRight}>
+            <Pressable onPress={handleCopyRoomLink} style={styles.copyLinkButtonCompact}>
+              <Text style={styles.copyLinkIcon}>📋</Text>
+            </Pressable>
+            <GradientButton
+              title="יציאה"
+              onPress={goBack}
+              variant="codenames"
+              style={styles.exitButtonHeader}
+            />
           </View>
         </View>
 
@@ -482,9 +495,9 @@ export default function CodenamesSetupScreen({ navigation, route }) {
             )}
 
             {!isRivalsMode && (
-              <View style={styles.teamsContainer}>
+              <View style={styles.teamsContainerSideBySide}>
                 {/* Red Team */}
-                <View style={styles.teamCard}>
+                <View style={styles.teamCardShrunk}>
                   <View style={[styles.teamHeader, styles.redTeamHeader]}>
                     <Text style={styles.teamTitle}>קבוצה אדומה 🔴</Text>
                   </View>
@@ -552,7 +565,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
                 </View>
 
                 {/* Blue Team */}
-                <View style={styles.teamCard}>
+                <View style={styles.teamCardShrunk}>
                   <View style={[styles.teamHeader, styles.blueTeamHeader]}>
                     <Text style={styles.teamTitle}>קבוצה כחולה 🔵</Text>
                   </View>
@@ -699,14 +712,51 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   header: {
-    marginBottom: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 4,
+    position: 'relative',
+  },
+  headerCenter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 1,
+    gap: 4,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginLeft: 'auto',
+    zIndex: 2,
+  },
+  copyLinkButtonCompact: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  copyLinkIcon: {
+    fontSize: 14,
+  },
+  exitButtonHeader: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    minWidth: 60,
   },
   roomCodeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
     gap: 8,
   },
   roomCodeLabel: {
@@ -720,9 +770,13 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   roomCodeText: {
-    color: '#FFFFFF',
+    color: '#2563EB',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  copyIcon: {
+    fontSize: 16,
+    color: '#6B7280',
   },
   copyButton: {
     padding: 4,
@@ -831,6 +885,19 @@ const styles = StyleSheet.create({
   },
   teamsContainer: {
     gap: 16,
+  },
+  teamsContainerSideBySide: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  teamCardShrunk: {
+    flex: 1,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderRadius: 20,
+    overflow: 'hidden',
+    maxWidth: '48%',
   },
   teamCard: {
     borderWidth: 2,

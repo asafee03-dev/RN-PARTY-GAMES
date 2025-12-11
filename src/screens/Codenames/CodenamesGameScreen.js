@@ -726,15 +726,16 @@ export default function CodenamesGameScreen({ navigation, route }) {
       });
       console.log('✅ Game reset successfully - all state cleared');
       
-      // Reset force close flag after a short delay
-      setTimeout(() => {
-        setForceCloseModal(false);
-      }, 100);
-      
-      navigation.navigate('CodenamesSetup', { 
+      // Navigate immediately using replace to ensure clean navigation
+      navigation.replace('CodenamesSetup', { 
         roomCode, 
         gameMode: room.game_mode || 'friends' 
       });
+      
+      // Reset force close flag after navigation
+      setTimeout(() => {
+        setForceCloseModal(false);
+      }, 100);
     } catch (error) {
       console.error('❌ Error resetting game:', error);
       Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
@@ -802,20 +803,13 @@ export default function CodenamesGameScreen({ navigation, route }) {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
-          <GradientButton
-            title="← יציאה"
-            onPress={goBack}
-            variant="codenames"
-            style={styles.backButton}
-          />
-
-          <View style={styles.headerRight}>
+          {/* Centered Room Code */}
+          <View style={styles.headerCenter}>
             {room.drinking_popup !== null && (
               <View style={styles.drinkingBadge}>
                 <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה</Text>
               </View>
             )}
-            
             <View style={styles.roomCodeContainer}>
               <Text style={styles.roomCodeLabel}>קוד:</Text>
               <View style={styles.roomCodeBadge}>
@@ -825,6 +819,16 @@ export default function CodenamesGameScreen({ navigation, route }) {
                 <Text style={styles.copyButtonText}>{copied ? '✓' : '📋'}</Text>
               </TouchableOpacity>
             </View>
+          </View>
+
+          {/* Right side: Exit */}
+          <View style={styles.headerRight}>
+            <GradientButton
+              title="יציאה"
+              onPress={goBack}
+              variant="codenames"
+              style={styles.exitButtonHeader}
+            />
           </View>
         </View>
 
@@ -857,7 +861,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
         )}
 
         {/* Winner Modal */}
-        {room.game_status === 'finished' && !forceCloseModal && (
+        {room && room.game_status === 'finished' && !forceCloseModal && (
           <Modal
             visible={true}
             transparent={true}
@@ -1078,6 +1082,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
     paddingHorizontal: 4,
+    position: 'relative',
+  },
+  headerCenter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 1,
+    gap: 4,
   },
   backButton: {
     padding: 8,
@@ -1090,7 +1103,14 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    marginLeft: 'auto',
+    zIndex: 2,
+  },
+  exitButtonHeader: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    minWidth: 60,
   },
   drinkingBadge: {
     backgroundColor: '#F97316',

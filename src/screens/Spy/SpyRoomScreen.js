@@ -647,24 +647,25 @@ export default function SpyRoomScreen({ navigation, route }) {
       >
         {/* Header */}
         <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
-          <GradientButton
-            title="← יציאה"
-            onPress={goBack}
-            variant="spy"
-            style={styles.backButton}
-          />
-
-          <View style={styles.headerRight}>
+          {/* Centered Room Code */}
+          <View style={styles.headerCenter}>
             <Pressable onPress={handleCopyRoomCode} style={styles.roomCodeContainer}>
               <Text style={styles.roomCodeLabel}>קוד חדר:</Text>
               <Text style={styles.roomCodeText}>{roomCode}</Text>
               <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
             </Pressable>
+          </View>
+
+          {/* Right side: Copy Link + Exit */}
+          <View style={styles.headerRight}>
+            <Pressable onPress={handleCopyRoomLink} style={styles.copyLinkButtonCompact}>
+              <Text style={styles.copyLinkIcon}>📋</Text>
+            </Pressable>
             <GradientButton
-              title="📋 העתק קישור"
-              onPress={handleCopyRoomLink}
+              title="יציאה"
+              onPress={goBack}
               variant="spy"
-              style={styles.copyLinkButton}
+              style={styles.exitButtonHeader}
             />
           </View>
         </View>
@@ -810,7 +811,7 @@ export default function SpyRoomScreen({ navigation, route }) {
                       .filter((player) => player != null && player.name != null)
                       .map((player, idx) => {
                       const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
-                      const votesForPlayer = players.filter(p => p && p.name && (typeof p.name === 'string' ? p.name : String(p.name || '')) === playerName).length;
+                      const votesForPlayer = players.filter(p => p && p.vote === playerName).length;
                       const isMyVote = myVote === playerName;
                       const isMe = playerName === currentPlayerName;
 
@@ -1028,6 +1029,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
     paddingHorizontal: 4,
+    position: 'relative',
+  },
+  headerCenter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 1,
   },
   backButton: {
     padding: 8,
@@ -1040,7 +1049,25 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    marginLeft: 'auto',
+    zIndex: 2,
+  },
+  copyLinkButtonCompact: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  copyLinkIcon: {
+    fontSize: 14,
+  },
+  exitButtonHeader: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    minWidth: 60,
   },
   roomCodeContainer: {
     flexDirection: 'row',

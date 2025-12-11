@@ -27,12 +27,17 @@ export default function TeamInfo({
         isCurrentTurn && styles.currentTurnCard,
         color === 'red' ? styles.redCard : styles.blueCard
       ]}>
-        <View style={styles.teamHeader}>
+        <View style={[
+          styles.teamHeader,
+          color === 'red' ? styles.redTeamHeaderBg : styles.blueTeamHeaderBg
+        ]}>
           <View style={styles.teamInfo}>
-            <View style={[styles.colorDot, color === 'red' ? styles.redDot : styles.blueDot]} />
             <View style={styles.teamNameContainer}>
-              <Text style={[styles.teamName, compact && styles.compactTeamName]}>
-                {color === 'red' ? 'אדומה 🔴' : 'כחולה 🔵'}
+              <Text style={[styles.teamName, compact && styles.compactTeamName, styles.teamNameWhite]}>
+                {color === 'red' ? 'אדומה' : 'כחולה'}
+              </Text>
+              <Text style={[styles.wordsRemainingHeader, compact && styles.compactWordsRemainingHeader]}>
+                {wordsLeft} מילים
               </Text>
               {isMyTeam && (
                 <View style={styles.youBadge}>
@@ -48,12 +53,6 @@ export default function TeamInfo({
               </Text>
             </View>
           )}
-        </View>
-        <View style={styles.wordsContainer}>
-          <Text style={[styles.wordsNumber, compact && styles.compactWordsNumber, { color: color === 'red' ? '#EF4444' : '#3B82F6' }]}>
-            {wordsLeft}
-          </Text>
-          <Text style={[styles.wordsLabel, compact && styles.compactWordsLabel]}>מילים</Text>
         </View>
       </View>
     );
@@ -92,11 +91,11 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#D1D5DB',
     borderRadius: 16,
-    padding: 16,
+    overflow: 'hidden',
     backgroundColor: '#FFFFFF',
   },
   compactTeamCard: {
-    padding: 8,
+    padding: 0,
   },
   currentTurnCard: {
     borderWidth: 3,
@@ -115,8 +114,14 @@ const styles = StyleSheet.create({
   teamHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
+    alignItems: 'center',
+    padding: 16,
+  },
+  redTeamHeaderBg: {
+    backgroundColor: '#EF4444',
+  },
+  blueTeamHeaderBg: {
+    backgroundColor: '#3B82F6',
   },
   teamInfo: {
     flexDirection: 'row',
@@ -124,36 +129,37 @@ const styles = StyleSheet.create({
     gap: 8,
     flex: 1,
   },
-  colorDot: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-  },
-  redDot: {
-    backgroundColor: '#EF4444',
-  },
-  blueDot: {
-    backgroundColor: '#3B82F6',
-  },
   teamNameContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 4,
     flex: 1,
   },
   teamName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#374151',
+    color: '#FFFFFF',
+  },
+  teamNameWhite: {
+    color: '#FFFFFF',
   },
   compactTeamName: {
     fontSize: 14,
   },
+  wordsRemainingHeader: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: '500',
+  },
+  compactWordsRemainingHeader: {
+    fontSize: 12,
+  },
   youBadge: {
-    backgroundColor: '#3B82F6',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 4,
+    marginTop: 4,
   },
   youBadgeText: {
     color: '#FFFFFF',
@@ -166,32 +172,15 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   spymasterBadge: {
-    backgroundColor: '#A78BFA',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
   },
   guesserBadge: {
-    backgroundColor: '#10B981',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
   },
   roleBadgeText: {
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '600',
-  },
-  wordsContainer: {
-    alignItems: 'center',
-  },
-  wordsNumber: {
-    fontSize: 32,
-    fontWeight: 'bold',
-  },
-  compactWordsNumber: {
-    fontSize: 24,
-  },
-  wordsLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  compactWordsLabel: {
-    fontSize: 12,
   },
 });
 

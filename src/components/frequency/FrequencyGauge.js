@@ -289,9 +289,9 @@ export default function FrequencyGauge({
           <Svg width={GAUGE_WIDTH} height={GAUGE_HEIGHT} viewBox={`0 0 ${GAUGE_WIDTH} ${GAUGE_HEIGHT}`}>
           <Defs>
             <LinearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <Stop offset="0%" stopColor="#8B5CF6" stopOpacity="0.3" />
-              <Stop offset="50%" stopColor="#A78BFA" stopOpacity="0.5" />
-              <Stop offset="100%" stopColor="#C084FC" stopOpacity="0.3" />
+              <Stop offset="0%" stopColor="#0A1A3A" stopOpacity="0.3" />
+              <Stop offset="50%" stopColor="#1E3A5F" stopOpacity="0.5" />
+              <Stop offset="100%" stopColor="#0A1A3A" stopOpacity="0.3" />
             </LinearGradient>
           </Defs>
 
@@ -385,8 +385,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
-    backgroundColor: '#0A1A3A',
-    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 0,
   },
   svgContainer: {
     width: GAUGE_WIDTH,

@@ -11,7 +11,7 @@ const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC
 
 const BASE_TEAMS = [
   { name: "קבוצה אדומה", position: 0, color: TEAM_COLORS[0], players: [] },
-  { name: "קבוצה כחולה", position: 0, color: TEAM_COLORS[1], players: [] }
+  { name: "קבוצה ירוקה", position: 0, color: TEAM_COLORS[2], players: [] }
 ];
 
 export default function AliasHomeScreen({ navigation }) {

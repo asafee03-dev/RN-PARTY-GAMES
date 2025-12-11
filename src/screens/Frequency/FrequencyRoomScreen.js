@@ -769,14 +769,8 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       >
         {/* Header */}
         <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
-          <GradientButton
-            title="← יציאה"
-            onPress={goBack}
-            variant="frequency"
-            style={styles.backButton}
-          />
-
-          <View style={styles.headerRight}>
+          {/* Centered Room Code */}
+          <View style={styles.headerCenter}>
             {drinkingMode && (
               <View style={styles.drinkingBadge}>
                 <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה</Text>
@@ -787,12 +781,19 @@ export default function FrequencyRoomScreen({ navigation, route }) {
               <Text style={styles.roomCodeText}>{roomCode}</Text>
               <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
             </Pressable>
-            <Pressable
-              onPress={handleCopyRoomLink}
-              style={styles.whiteCopyLinkButton}
-            >
-              <Text style={styles.whiteCopyLinkButtonText}>📋 העתק קישור</Text>
+          </View>
+
+          {/* Right side: Copy Link + Exit */}
+          <View style={styles.headerRight}>
+            <Pressable onPress={handleCopyRoomLink} style={styles.copyLinkButtonCompact}>
+              <Text style={styles.copyLinkIcon}>📋</Text>
             </Pressable>
+            <GradientButton
+              title="יציאה"
+              onPress={goBack}
+              variant="frequency"
+              style={styles.exitButtonHeader}
+            />
           </View>
         </View>
 
@@ -1164,6 +1165,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
     paddingHorizontal: 4,
+    position: 'relative',
+  },
+  headerCenter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 1,
+    gap: 4,
   },
   backButton: {
     padding: 8,
@@ -1176,7 +1186,25 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    marginLeft: 'auto',
+    zIndex: 2,
+  },
+  copyLinkButtonCompact: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  copyLinkIcon: {
+    fontSize: 14,
+  },
+  exitButtonHeader: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    minWidth: 60,
   },
   drinkingBadge: {
     backgroundColor: '#F97316',
@@ -1216,7 +1244,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   roomCodeText: {
-    color: '#7C3AED',
+    color: '#0A1A3A', // Frequency theme color - navy blue
     fontSize: 14,
     fontWeight: '700',
   },
@@ -1268,7 +1296,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   lobbyHeader: {
-    backgroundColor: '#7C3AED',
+    backgroundColor: '#0A1A3A', // Frequency theme color - navy blue
     padding: 20,
     alignItems: 'center',
   },
@@ -1282,9 +1310,9 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   hostCard: {
-    backgroundColor: '#F3E8FF',
-    borderWidth: 1,
-    borderColor: '#C084FC',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#0A1A3A', // Frequency theme color - navy blue
     borderRadius: 16,
     padding: 16,
     gap: 12,
@@ -1334,7 +1362,7 @@ const styles = StyleSheet.create({
     minWidth: 100,
     backgroundColor: '#F9FAFB',
     borderWidth: 2,
-    borderColor: '#C084FC',
+    borderColor: '#0A1A3A', // Frequency theme color - navy blue
     borderRadius: 16,
     padding: 12,
     alignItems: 'center',
@@ -1446,16 +1474,16 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   waitingSummaryCard: {
-    backgroundColor: '#F3E8FF',
+    backgroundColor: '#FFFFFF',
     borderWidth: 2,
-    borderColor: '#A78BFA',
+    borderColor: '#0A1A3A', // Frequency theme color - navy blue
     borderRadius: 16,
     padding: 16,
   },
   waitingSummaryText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#6B21A8',
+    color: '#0A1A3A', // Frequency theme color - navy blue
     textAlign: 'center',
   },
   scoreboardContainer: {
@@ -1487,7 +1515,7 @@ const styles = StyleSheet.create({
   summaryTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#7C3AED',
+    color: '#0A1A3A', // Frequency theme color - navy blue
   },
   summarySubtitle: {
     fontSize: 16,
@@ -1616,7 +1644,7 @@ const styles = StyleSheet.create({
     color: '#1F2937',
   },
   podiumScore: {
-    backgroundColor: '#7C3AED',
+    backgroundColor: '#0A1A3A', // Frequency theme color - navy blue
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,

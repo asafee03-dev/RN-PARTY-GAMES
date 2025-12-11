@@ -1015,24 +1015,25 @@ export default function DrawRoomScreen({ navigation, route }) {
       >
         {/* Header */}
         <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
-          <GradientButton
-            title="← יציאה"
-            onPress={goBack}
-            variant="draw"
-            style={styles.backButton}
-          />
-
-          <View style={styles.headerRight}>
+          {/* Centered Room Code */}
+          <View style={styles.headerCenter}>
             <Pressable onPress={handleCopyRoomCode} style={styles.roomCodeContainer}>
               <Text style={styles.roomCodeLabel}>קוד:</Text>
               <Text style={styles.roomCodeText}>{roomCode}</Text>
               <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
             </Pressable>
+          </View>
+
+          {/* Right side: Copy Link + Exit */}
+          <View style={styles.headerRight}>
+            <Pressable onPress={handleCopyRoomLink} style={styles.copyLinkButtonCompact}>
+              <Text style={styles.copyLinkIcon}>📋</Text>
+            </Pressable>
             <GradientButton
-              title="📋 העתק קישור"
-              onPress={handleCopyRoomLink}
+              title="יציאה"
+              onPress={goBack}
               variant="draw"
-              style={styles.copyLinkButton}
+              style={styles.exitButtonHeader}
             />
           </View>
         </View>
@@ -1111,31 +1112,30 @@ export default function DrawRoomScreen({ navigation, route }) {
         {/* Playing State */}
         {room.game_status === 'playing' && (
           <View style={styles.gameContainer}>
-            {/* Top Bar - Timer, Word, Status */}
-            <View style={styles.topBar}>
-              {/* Timer */}
-              {room.game_status === 'playing' && room.turn_start_time && !room.show_round_summary && (
-                <View style={styles.timerWrapper}>
-                  <Timer
-                    duration={60}
-                    startTime={room.turn_start_time}
-                    onTimeUp={handleTimerExpiration}
-                    compact={true}
-                  />
-                </View>
-              )}
-              
-              {/* Word/Status */}
+            {/* Top Bar - Word (Centered) */}
+            <View style={styles.topBarCentered}>
               {isMyTurn() ? (
-                <View style={styles.wordCardCompact}>
-                  <Text style={styles.wordTextCompact}>{room.current_word}</Text>
+                <View style={styles.wordCardCentered}>
+                  <Text style={styles.wordTextCentered}>{room.current_word}</Text>
                 </View>
               ) : (
-                <View style={styles.drawerInfoCompact}>
-                  <Text style={styles.drawerTextCompact}>{currentDrawerName} מצייר...</Text>
+                <View style={styles.drawerInfoCentered}>
+                  <Text style={styles.drawerTextCentered}>{currentDrawerName} מצייר...</Text>
                 </View>
               )}
             </View>
+
+            {/* Timer Bar (Below Word, Centered) */}
+            {room.game_status === 'playing' && room.turn_start_time && !room.show_round_summary && (
+              <View style={styles.timerBarCentered}>
+                <Timer
+                  duration={60}
+                  startTime={room.turn_start_time}
+                  onTimeUp={handleTimerExpiration}
+                  compact={true}
+                />
+              </View>
+            )}
 
             {/* Canvas - CENTERPIECE */}
             <View 
@@ -1588,6 +1588,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
     paddingHorizontal: 4,
+    position: 'relative',
+  },
+  headerCenter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 1,
   },
   backButton: {
     padding: 8,
@@ -1600,7 +1608,25 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    marginLeft: 'auto',
+    zIndex: 2,
+  },
+  copyLinkButtonCompact: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  copyLinkIcon: {
+    fontSize: 14,
+  },
+  exitButtonHeader: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    minWidth: 60,
   },
   roomCodeContainer: {
     flexDirection: 'row',
@@ -1783,6 +1809,45 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     width: '100%',
   },
+  topBarCentered: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    width: '100%',
+    marginBottom: 4,
+  },
+  wordCardCentered: {
+    backgroundColor: 'rgba(196, 140, 255, 0.25)',
+    borderWidth: 2,
+    borderColor: '#C48CFF',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    minWidth: 200,
+  },
+  wordTextCentered: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#C48CFF',
+  },
+  drawerInfoCentered: {
+    alignItems: 'center',
+    padding: 8,
+  },
+  drawerTextCentered: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  timerBarCentered: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    width: '100%',
+    marginBottom: 8,
+    maxWidth: 300,
+    alignSelf: 'center',
+  },
   timerWrapper: {
     flex: 1,
     maxWidth: 120,
@@ -1921,32 +1986,38 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 4,
     flex: 1,
-    width: '100%',
-    maxHeight: '75%',
+    width: '65%',
+    maxWidth: '65%',
+    marginRight: 180,
+    maxHeight: '60%',
   },
   bottomToolsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
     paddingHorizontal: 8,
-    width: '100%',
-    flexWrap: 'wrap',
+    width: '65%',
+    marginRight: 180,
+    flexWrap: 'nowrap',
   },
   toolsCompact: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
     alignItems: 'center',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     justifyContent: 'center',
+    flex: 1,
   },
   toolButtonsCompact: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
+    flexShrink: 0,
   },
   toolButtonCompact: {
-    minWidth: 80,
-    paddingVertical: 8,
+    minWidth: 70,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
   },
   guessInputRow: {
     flexDirection: 'row',
@@ -1977,9 +2048,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 8,
     top: 60,
-    width: 200,
+    width: 160,
     maxHeight: '60%',
-    gap: 8,
+    gap: 6,
     zIndex: 10,
   },
   guessesCard: {
@@ -2138,11 +2209,11 @@ const styles = StyleSheet.create({
   modalContent: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 12,
+    padding: 16,
     width: '100%',
     maxWidth: 500,
-    maxHeight: '90%',
-    gap: 8,
+    maxHeight: '85%',
+    gap: 10,
   },
   drinkingIcon: {
     fontSize: 56,
@@ -2265,7 +2336,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
     backgroundColor: '#FFFFFF',
-    height: 120,
+    height: 200,
+    width: '100%',
   },
   guessesSection: {
     gap: 4,

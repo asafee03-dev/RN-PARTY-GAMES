@@ -4,9 +4,7 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Swi
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
-import ColorPicker from '../../components/draw/ColorPicker';
 import DrawCanvas from '../../components/draw/DrawCanvas';
-import DrawingTools from '../../components/draw/DrawingTools';
 import Timer from '../../components/game/Timer';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
@@ -1647,15 +1645,15 @@ export default function DrawRoomScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
-    padding: 10,
-    paddingBottom: 16,
+    padding: 4,
+    paddingBottom: 8,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-    paddingHorizontal: 4,
+    marginBottom: 8,
+    paddingHorizontal: 2,
     position: 'relative',
   },
   headerCenter: {
@@ -1880,7 +1878,7 @@ const styles = StyleSheet.create({
   topBarCentered: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
     width: '100%',
     marginBottom: 4,
   },
@@ -1888,10 +1886,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(196, 140, 255, 0.25)',
     borderWidth: 2,
     borderColor: '#C48CFF',
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 10,
+    padding: 8,
     alignItems: 'center',
-    minWidth: 200,
+    minWidth: 160,
+    maxWidth: '90%',
   },
   wordTextCentered: {
     fontSize: 20,
@@ -1910,10 +1909,10 @@ const styles = StyleSheet.create({
   timerBarCentered: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
     width: '100%',
-    marginBottom: 8,
-    maxWidth: 300,
+    marginBottom: 6,
+    maxWidth: 250,
     alignSelf: 'center',
   },
   timerWrapper: {
@@ -2051,10 +2050,10 @@ const styles = StyleSheet.create({
   },
   canvasSidebarRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 4,
     alignItems: 'flex-start',
     flex: 1,
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
   },
   canvasWrapper: {
     flex: 1,
@@ -2064,28 +2063,28 @@ const styles = StyleSheet.create({
   canvasContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 4,
+    padding: 2,
     width: '100%',
-    maxHeight: '55%',
+    maxHeight: '50%',
     aspectRatio: 1,
   },
   bottomToolsContainer: {
     width: '100%',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    gap: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+    gap: 6,
     alignItems: 'center',
   },
   brushSizesRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
   },
   brushSizeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 2,
     borderColor: '#E5E7EB',
     backgroundColor: '#F9FAFB',
@@ -2112,44 +2111,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
-    gap: 8,
+    gap: 4,
   },
   toolToggleContainer: {
     flexDirection: 'row',
-    gap: 4,
+    gap: 2,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 4,
+    borderRadius: 10,
+    padding: 3,
     borderWidth: 2,
     borderColor: '#E5E7EB',
   },
   toolToggleButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
     backgroundColor: 'transparent',
   },
   toolToggleButtonActive: {
     backgroundColor: '#C48CFF',
   },
   toolToggleText: {
-    fontSize: 18,
+    fontSize: 16,
   },
   toolToggleTextActive: {
     opacity: 1,
   },
   colorsRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 4,
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
   },
   colorButtonCompact: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: '#E5E7EB',
     justifyContent: 'center',
@@ -2165,28 +2164,28 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.1 }],
   },
   colorCheckmark: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     backgroundColor: '#C48CFF',
     justifyContent: 'center',
     alignItems: 'center',
   },
   colorCheckmarkInner: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: '#FFFFFF',
   },
   actionButtonsContainer: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 4,
     flexShrink: 0,
   },
   actionButton: {
-    minWidth: 60,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    minWidth: 50,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
   },
   guessInputRow: {
     flexDirection: 'row',
@@ -2214,9 +2213,9 @@ const styles = StyleSheet.create({
     minWidth: 50,
   },
   sidebar: {
-    width: 120,
-    maxWidth: 120,
-    gap: 6,
+    width: 100,
+    maxWidth: 100,
+    gap: 4,
     flexShrink: 0,
   },
   guessesCard: {
@@ -2231,7 +2230,7 @@ const styles = StyleSheet.create({
   },
   guessesHeader: {
     backgroundColor: '#3B82F6',
-    padding: 8,
+    padding: 6,
     alignItems: 'center',
   },
   guessesTitle: {
@@ -2240,9 +2239,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   guessesList: {
-    maxHeight: 200,
-    padding: 8,
-    gap: 6,
+    maxHeight: 180,
+    padding: 6,
+    gap: 4,
   },
   noGuessesText: {
     fontSize: 12,
@@ -2255,10 +2254,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: '#F9FAFB',
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: '#E5E7EB',
-    borderRadius: 10,
-    padding: 6,
+    borderRadius: 8,
+    padding: 4,
   },
   guessItemCorrect: {
     backgroundColor: '#D1FAE5',
@@ -2300,7 +2299,7 @@ const styles = StyleSheet.create({
   },
   scoreboardHeader: {
     backgroundColor: '#C48CFF', // Draw theme color
-    padding: 8,
+    padding: 6,
     alignItems: 'center',
   },
   scoreboardTitle: {
@@ -2309,16 +2308,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   scoreboardList: {
-    padding: 6,
-    maxHeight: 180,
+    padding: 4,
+    maxHeight: 160,
   },
   scoreboardPlayerCard: {
     backgroundColor: '#F9FAFB',
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 8,
-    padding: 6,
-    marginBottom: 4,
+    borderRadius: 6,
+    padding: 4,
+    marginBottom: 3,
   },
   scoreboardPlayerCardActive: {
     backgroundColor: '#F3E8FF',

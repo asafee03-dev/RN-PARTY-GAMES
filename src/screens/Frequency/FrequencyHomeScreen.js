@@ -1,6 +1,6 @@
 import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
@@ -175,10 +175,8 @@ export default function FrequencyHomeScreen({ navigation }) {
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Back Button */}
           <GradientButton
             title="← חזרה למשחקים"
             onPress={goBack}
@@ -186,79 +184,80 @@ export default function FrequencyHomeScreen({ navigation }) {
             style={styles.backButton}
           />
 
-          {/* Header */}
           <View style={styles.header}>
-            <View style={styles.iconContainer}>
-              <Text style={styles.icon}>📻</Text>
-            </View>
+            <Text style={styles.iconText}>📻</Text>
             <Text style={styles.title}>התדר</Text>
             <Text style={styles.subtitle}>משחק הגלים והתדירויות!</Text>
           </View>
 
-          {/* Error Message */}
-          {error ? (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>הצטרף למשחק</Text>
             </View>
-          ) : null}
+            <View style={styles.cardContent}>
+              <View style={styles.inputSection}>
+                <Text style={styles.label}>שם שחקן</Text>
+                <TextInput
+                  style={styles.input}
+                  value={playerName}
+                  onChangeText={(text) => {
+                    setPlayerName(text);
+                    setError('');
+                  }}
+                  placeholder="הכנס את שמך..."
+                  placeholderTextColor="#999"
+                  autoCapitalize="words"
+                />
+              </View>
 
-          {/* Player Name Input */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>👤 השם שלך</Text>
-            <TextInput
-              style={styles.input}
-              value={playerName}
-              onChangeText={(text) => {
-                setPlayerName(text);
-                setError('');
-              }}
-              placeholder="הכנס שם..."
-              placeholderTextColor="#999"
-              autoCapitalize="none"
-            />
+              {error ? (
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              ) : null}
+
+              <GradientButton
+                title="צור חדר חדש"
+                onPress={createRoom}
+                variant="frequency"
+                style={styles.createButton}
+                disabled={isCreating}
+              />
+
+              {isCreating && (
+                <ActivityIndicator size="small" color="#FFFFFF" style={styles.loader} />
+              )}
+
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>או</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              <View style={styles.inputSection}>
+                <Text style={styles.label}>קוד חדר</Text>
+                <TextInput
+                  style={styles.input}
+                  value={roomCode}
+                  onChangeText={(text) => {
+                    setRoomCode(text.toUpperCase());
+                    setError('');
+                  }}
+                  placeholder="הכנס קוד חדר..."
+                  placeholderTextColor="#999"
+                  autoCapitalize="characters"
+                  maxLength={6}
+                />
+              </View>
+
+              <GradientButton
+                title="הצטרף לחדר"
+                onPress={joinRoom}
+                variant="frequency"
+                style={styles.joinButton}
+              />
+            </View>
           </View>
-
-          {/* Create Room Button */}
-          <Pressable
-            onPress={createRoom}
-            style={[styles.whiteButton, isCreating && styles.whiteButtonDisabled]}
-            disabled={isCreating}
-          >
-            <Text style={styles.whiteButtonText}>➕ צור משחק חדש</Text>
-          </Pressable>
-          {isCreating && <ActivityIndicator style={styles.loader} />}
-
-          {/* Divider */}
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>או</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Room Code Input */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}># קוד חדר</Text>
-            <TextInput
-              style={styles.input}
-              value={roomCode}
-              onChangeText={(text) => {
-                setRoomCode(text.toUpperCase());
-                setError('');
-              }}
-              placeholder="הכנס קוד..."
-              placeholderTextColor="#999"
-              autoCapitalize="characters"
-              maxLength={6}
-            />
-          </View>
-
-          {/* Join Room Button */}
-          <Pressable
-            onPress={joinRoom}
-            style={styles.whiteButton}
-          >
-            <Text style={styles.whiteButtonText}>🔑 הצטרף למשחק</Text>
-          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </GradientBackground>
@@ -272,7 +271,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: 24,
-    paddingBottom: 40,
+    paddingTop: 16,
   },
   backButton: {
     alignSelf: 'flex-start',
@@ -281,94 +280,79 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 32,
-    marginTop: 20,
   },
-  iconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
+  iconText: {
+    fontSize: 80,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  icon: {
-    fontSize: 64,
   },
   title: {
     fontSize: 48,
     fontWeight: '900',
     color: '#FFFFFF',
     marginBottom: 8,
-    textAlign: 'center',
   },
   subtitle: {
     fontSize: 18,
-    color: 'rgba(255, 255, 255, 0.9)',
-    textAlign: 'center',
+    color: '#FFFFFF',
+    opacity: 0.9,
+  },
+  card: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 24,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  cardHeader: {
+    backgroundColor: '#0A1A3A', // Frequency theme color - כחול כהה
+    padding: 20,
+    alignItems: 'center',
+  },
+  cardTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  cardContent: {
+    padding: 24,
+    gap: 16,
+  },
+  inputSection: {
+    gap: 8,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
+  },
+  input: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 16,
+    fontSize: 18,
+    textAlign: 'right',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
   },
   errorContainer: {
     backgroundColor: '#FEE2E2',
     borderWidth: 2,
-    borderColor: '#FCA5A5',
+    borderColor: '#EF4444',
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
+    padding: 12,
   },
   errorText: {
-    color: '#0A1A3A', // Frequency theme color
-    fontSize: 16,
+    color: '#DC2626',
+    fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
   },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 8,
-    textAlign: 'right',
-  },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    fontSize: 18,
-    borderWidth: 3,
-    borderColor: '#A78BFA',
-    textAlign: 'right',
-    minHeight: 56,
-  },
-  button: {
-    marginBottom: 16,
-    borderRadius: 16,
-    paddingVertical: 18,
-  },
-  whiteButton: {
-    backgroundColor: '#0A1A3A', // Frequency theme color - כחול כהה
-    borderRadius: 16,
-    paddingVertical: 18,
-    paddingHorizontal: 24,
-    marginBottom: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 56,
-  },
-  whiteButtonDisabled: {
-    opacity: 0.5,
-    backgroundColor: '#0A1A3A',
-  },
-  whiteButtonText: {
-    color: '#FFFFFF', // White text for dark blue background
-    fontSize: 18,
-    fontWeight: '600',
+  createButton: {
+    width: '100%',
+    marginTop: 8,
   },
   loader: {
     marginTop: 8,
@@ -376,18 +360,19 @@ const styles = StyleSheet.create({
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 24,
+    marginVertical: 16,
   },
   dividerLine: {
     flex: 1,
-    height: 2,
-    backgroundColor: '#FFFFFF',
-    opacity: 0.3,
+    height: 1,
+    backgroundColor: '#D1D5DB',
   },
   dividerText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    paddingHorizontal: 16,
+    marginHorizontal: 16,
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  joinButton: {
+    width: '100%',
   },
 });

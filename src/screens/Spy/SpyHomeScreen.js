@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import { db, waitForFirestoreReady } from '../../firebase';
@@ -177,81 +177,78 @@ export default function SpyHomeScreen({ navigation }) {
           />
 
           <View style={styles.header}>
-            <View style={styles.iconContainer}>
-              <Text style={styles.iconText}>👁️</Text>
-            </View>
+            <Text style={styles.iconText}>👁️</Text>
             <Text style={styles.title}>המרגל</Text>
             <Text style={styles.subtitle}>מי המרגל ביניכם?</Text>
           </View>
 
-          {error ? (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>הצטרף למשחק</Text>
             </View>
-          ) : null}
-
-          <View style={styles.content}>
-            <View style={styles.inputSection}>
-              <View style={styles.labelRow}>
-                <Text style={styles.labelIcon}>👤</Text>
-                <Text style={styles.label}>השם שלך</Text>
+            <View style={styles.cardContent}>
+              <View style={styles.inputSection}>
+                <Text style={styles.label}>שם שחקן</Text>
+                <TextInput
+                  style={styles.input}
+                  value={playerName}
+                  onChangeText={(text) => {
+                    setPlayerName(text);
+                    setError('');
+                  }}
+                  placeholder="הכנס את שמך..."
+                  placeholderTextColor="#999"
+                  autoCapitalize="words"
+                />
               </View>
-              <TextInput
-                style={styles.input}
-                value={playerName}
-                onChangeText={(text) => {
-                  setPlayerName(text);
-                  setError('');
-                }}
-                placeholder="הכנס שם..."
-                placeholderTextColor="#999"
-                autoCapitalize="words"
+
+              {error ? (
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              ) : null}
+
+              <GradientButton
+                title="צור חדר חדש"
+                onPress={createRoom}
+                variant="spy"
+                style={styles.createButton}
+                disabled={isCreating}
               />
-            </View>
 
-            <GradientButton
-              title="➕ צור משחק חדש"
-              onPress={createRoom}
-              variant="spy"
-              style={styles.createButton}
-              disabled={isCreating}
-            />
+              {isCreating && (
+                <ActivityIndicator size="small" color="#FFFFFF" style={styles.loader} />
+              )}
 
-            {isCreating && (
-              <ActivityIndicator size="small" color="#FFFFFF" style={styles.loader} />
-            )}
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>או</Text>
+                <View style={styles.dividerLine} />
+              </View>
 
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>או</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            <View style={styles.inputSection}>
-              <View style={styles.labelRow}>
-                <Text style={styles.labelIcon}>#</Text>
+              <View style={styles.inputSection}>
                 <Text style={styles.label}>קוד חדר</Text>
+                <TextInput
+                  style={styles.input}
+                  value={roomCode}
+                  onChangeText={(text) => {
+                    setRoomCode(text.toUpperCase());
+                    setError('');
+                  }}
+                  placeholder="הכנס קוד חדר..."
+                  placeholderTextColor="#999"
+                  autoCapitalize="characters"
+                  maxLength={6}
+                />
               </View>
-              <TextInput
-                style={styles.input}
-                value={roomCode}
-                onChangeText={(text) => {
-                  setRoomCode(text.toUpperCase());
-                  setError('');
-                }}
-                placeholder="הכנס קוד..."
-                placeholderTextColor="#999"
-                autoCapitalize="characters"
-                maxLength={6}
+
+              <GradientButton
+                title="הצטרף לחדר"
+                onPress={joinRoom}
+                variant="spy"
+                style={styles.joinButton}
               />
             </View>
-
-            <GradientButton
-              title="🔐 הצטרף למשחק"
-              onPress={joinRoom}
-              variant="spy"
-              style={styles.joinButton}
-            />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -276,22 +273,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 32,
   },
-  iconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
   iconText: {
-    fontSize: 64,
+    fontSize: 80,
+    marginBottom: 16,
   },
   title: {
     fontSize: 48,
@@ -300,56 +284,67 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 20,
+    fontSize: 18,
     color: '#FFFFFF',
     opacity: 0.9,
+  },
+  card: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 24,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  cardHeader: {
+    backgroundColor: '#7ED957', // Spy theme color - ירוק בהיר
+    padding: 20,
+    alignItems: 'center',
+  },
+  cardTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  cardContent: {
+    padding: 24,
+    gap: 16,
+  },
+  inputSection: {
+    gap: 8,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
+  },
+  input: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 16,
+    fontSize: 18,
+    textAlign: 'right',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
   },
   errorContainer: {
     backgroundColor: '#FEE2E2',
     borderWidth: 2,
     borderColor: '#EF4444',
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
+    padding: 12,
   },
   errorText: {
     color: '#DC2626',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
   },
-  content: {
-    width: '100%',
-  },
-  inputSection: {
-    marginBottom: 24,
-  },
-  labelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  labelIcon: {
-    fontSize: 24,
-  },
-  label: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    fontSize: 18,
-    textAlign: 'right',
-    borderWidth: 3,
-    borderColor: '#10B981',
-  },
   createButton: {
     width: '100%',
-    marginBottom: 16,
+    marginTop: 8,
   },
   loader: {
     marginTop: 8,
@@ -357,20 +352,17 @@ const styles = StyleSheet.create({
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 24,
+    marginVertical: 16,
   },
   dividerLine: {
     flex: 1,
-    height: 2,
-    backgroundColor: '#FFFFFF',
-    opacity: 0.3,
+    height: 1,
+    backgroundColor: '#D1D5DB',
   },
   dividerText: {
     marginHorizontal: 16,
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    opacity: 0.8,
+    fontSize: 14,
+    color: '#6B7280',
   },
   joinButton: {
     width: '100%',

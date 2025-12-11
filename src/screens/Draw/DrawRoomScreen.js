@@ -1137,86 +1137,153 @@ export default function DrawRoomScreen({ navigation, route }) {
               </View>
             )}
 
-            {/* Canvas - CENTERPIECE */}
-            <View 
-              style={styles.canvasContainer} 
-              collapsable={false}
-            >
-              <DrawCanvas
-                strokes={localStrokes}
-                onStrokeComplete={handleStrokeComplete}
-                canDraw={isMyTurn()}
-                color={selectedColor}
-                brushSize={brushSize}
-                toolType={toolType}
-              />
-            </View>
-
-            {/* Bottom Tools Row - Only for drawer */}
-            {isMyTurn() && (
-              <View style={styles.bottomToolsRow}>
-                <View style={styles.toolsCompact}>
-                  <DrawingTools
-                    toolType={toolType}
-                    onToolChange={setToolType}
-                    brushSize={brushSize}
-                    onBrushSizeChange={setBrushSize}
-                  />
-                  
-                  {toolType === 'pencil' && (
-                    <ColorPicker 
-                      selectedColor={selectedColor} 
-                      onColorChange={setSelectedColor} 
-                    />
-                  )}
-                </View>
-                
-                <View style={styles.toolButtonsCompact}>
-                  <GradientButton
-                    title="↶ בטל"
-                    onPress={handleUndo}
-                    variant="draw"
-                    style={styles.toolButtonCompact}
-                    disabled={localStrokes.length === 0}
-                  />
-                  <GradientButton
-                    title="🧹 נקה"
-                    onPress={handleClearAll}
-                    variant="draw"
-                    style={styles.toolButtonCompact}
-                    disabled={localStrokes.length === 0}
-                  />
-                </View>
-              </View>
-            )}
-
-            {/* Guess Input - For non-drawers */}
-            {!isMyTurn() && (
-              <View style={styles.guessInputRow}>
-                <TextInput
-                  style={styles.guessInputCompact}
-                  value={guessInput}
-                  onChangeText={setGuessInput}
-                  placeholder="כתוב את הניחוש שלך..."
-                  placeholderTextColor="#999"
-                  editable={!room.show_round_summary}
-                  onSubmitEditing={handleGuessSubmit}
-                />
-                <Pressable
-                  onPress={handleGuessSubmit}
-                  disabled={!guessInput.trim() || room.show_round_summary}
-                  style={[
-                    styles.sendButtonCompact,
-                    (!guessInput.trim() || room.show_round_summary) && styles.sendButtonDisabled
-                  ]}
+            {/* Canvas + Sidebar Row */}
+            <View style={styles.canvasSidebarRow}>
+              {/* Canvas - LEFT */}
+              <View style={styles.canvasWrapper}>
+                <View 
+                  style={styles.canvasContainer} 
+                  collapsable={false}
                 >
-                  <Text style={styles.sendButtonText}>📤</Text>
-                </Pressable>
-              </View>
-            )}
+                  <DrawCanvas
+                    strokes={localStrokes}
+                    onStrokeComplete={handleStrokeComplete}
+                    canDraw={isMyTurn()}
+                    color={selectedColor}
+                    brushSize={brushSize}
+                    toolType={toolType}
+                  />
+                </View>
 
-            {/* Sidebar - Guesses and Scoreboard */}
-            <View style={styles.sidebar}>
+                {/* Bottom Tools - Only for drawer */}
+                {isMyTurn() && (
+                  <View style={styles.bottomToolsContainer}>
+                    {/* Row 1: Brush Sizes (Centered) */}
+                    <View style={styles.brushSizesRow}>
+                      {[3, 6, 9].map((size) => (
+                        <Pressable
+                          key={size}
+                          onPress={() => setBrushSize(size)}
+                          style={[
+                            styles.brushSizeButton,
+                            brushSize === size && styles.brushSizeButtonActive
+                          ]}
+                        >
+                          <View
+                            style={[
+                              styles.brushSizeIndicator,
+                              { width: size * 2, height: size * 2, borderRadius: size },
+                              brushSize === size && styles.brushSizeIndicatorActive,
+                              toolType === 'eraser' && styles.brushSizeIndicatorEraser
+                            ]}
+                          />
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    {/* Row 2: Colors + Tool Toggle + Action Buttons */}
+                    <View style={styles.toolsRow2}>
+                      {/* Left: Tool Toggle */}
+                      <View style={styles.toolToggleContainer}>
+                        <Pressable
+                          onPress={() => setToolType('pencil')}
+                          style={[
+                            styles.toolToggleButton,
+                            toolType === 'pencil' && styles.toolToggleButtonActive
+                          ]}
+                        >
+                          <Text style={[
+                            styles.toolToggleText,
+                            toolType === 'pencil' && styles.toolToggleTextActive
+                          ]}>✏️</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => setToolType('eraser')}
+                          style={[
+                            styles.toolToggleButton,
+                            toolType === 'eraser' && styles.toolToggleButtonActive
+                          ]}
+                        >
+                          <Text style={[
+                            styles.toolToggleText,
+                            toolType === 'eraser' && styles.toolToggleTextActive
+                          ]}>🧹</Text>
+                        </Pressable>
+                      </View>
+
+                      {/* Center: Colors */}
+                      {toolType === 'pencil' && (
+                        <View style={styles.colorsRow}>
+                          {['#000000', '#EF4444', '#F59E0B', '#FCD34D', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#6B7280'].map((color) => (
+                            <Pressable
+                              key={color}
+                              onPress={() => setSelectedColor(color)}
+                              style={[
+                                styles.colorButtonCompact,
+                                { backgroundColor: color },
+                                color === '#FFFFFF' && styles.colorButtonWhite,
+                                selectedColor === color && styles.colorButtonSelected
+                              ]}
+                            >
+                              {selectedColor === color && (
+                                <View style={styles.colorCheckmark}>
+                                  <View style={styles.colorCheckmarkInner} />
+                                </View>
+                              )}
+                            </Pressable>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Right: Clear + Undo */}
+                      <View style={styles.actionButtonsContainer}>
+                        <GradientButton
+                          title="🧹 נקה"
+                          onPress={handleClearAll}
+                          variant="draw"
+                          style={styles.actionButton}
+                          disabled={localStrokes.length === 0}
+                        />
+                        <GradientButton
+                          title="↶ בטל"
+                          onPress={handleUndo}
+                          variant="draw"
+                          style={styles.actionButton}
+                          disabled={localStrokes.length === 0}
+                        />
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Guess Input - For non-drawers */}
+                {!isMyTurn() && (
+                  <View style={styles.guessInputRow}>
+                    <TextInput
+                      style={styles.guessInputCompact}
+                      value={guessInput}
+                      onChangeText={setGuessInput}
+                      placeholder="כתוב את הניחוש שלך..."
+                      placeholderTextColor="#999"
+                      editable={!room.show_round_summary}
+                      onSubmitEditing={handleGuessSubmit}
+                    />
+                    <Pressable
+                      onPress={handleGuessSubmit}
+                      disabled={!guessInput.trim() || room.show_round_summary}
+                      style={[
+                        styles.sendButtonCompact,
+                        (!guessInput.trim() || room.show_round_summary) && styles.sendButtonDisabled
+                      ]}
+                    >
+                      <Text style={styles.sendButtonText}>📤</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+
+              {/* Sidebar - Guesses and Scoreboard - RIGHT */}
+              <View style={styles.sidebar}>
               {/* Shared Guesses Box */}
               {room.game_status === 'playing' && !room.show_round_summary && (
                 <View style={styles.guessesCard}>
@@ -1291,6 +1358,7 @@ export default function DrawRoomScreen({ navigation, route }) {
                   })}
                 </ScrollView>
               </View>
+            </View>
             </View>
           </View>
         )}
@@ -1981,41 +2049,142 @@ const styles = StyleSheet.create({
   toolButton: {
     flex: 1,
   },
+  canvasSidebarRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-start',
+    flex: 1,
+    paddingHorizontal: 4,
+  },
+  canvasWrapper: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+  },
   canvasContainer: {
     alignItems: 'center',
     justifyContent: 'center',
     padding: 4,
-    flex: 1,
-    width: '65%',
-    maxWidth: '65%',
-    marginRight: 180,
-    maxHeight: '60%',
+    width: '100%',
+    maxHeight: '55%',
+    aspectRatio: 1,
   },
-  bottomToolsRow: {
+  bottomToolsContainer: {
+    width: '100%',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    gap: 8,
+    alignItems: 'center',
+  },
+  brushSizesRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  brushSizeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  brushSizeButtonActive: {
+    borderColor: '#C48CFF',
+    backgroundColor: '#F3E8FF',
+  },
+  brushSizeIndicator: {
+    backgroundColor: '#6B7280',
+  },
+  brushSizeIndicatorActive: {
+    backgroundColor: '#C48CFF',
+  },
+  brushSizeIndicatorEraser: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#9CA3AF',
+  },
+  toolsRow2: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingHorizontal: 8,
-    width: '65%',
-    marginRight: 180,
-    flexWrap: 'nowrap',
+    justifyContent: 'space-between',
+    width: '100%',
+    gap: 8,
   },
-  toolsCompact: {
+  toolToggleContainer: {
+    flexDirection: 'row',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+  },
+  toolToggleButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
+  toolToggleButtonActive: {
+    backgroundColor: '#C48CFF',
+  },
+  toolToggleText: {
+    fontSize: 18,
+  },
+  toolToggleTextActive: {
+    opacity: 1,
+  },
+  colorsRow: {
     flexDirection: 'row',
     gap: 6,
     alignItems: 'center',
-    flexWrap: 'nowrap',
     justifyContent: 'center',
     flex: 1,
+    flexWrap: 'wrap',
   },
-  toolButtonsCompact: {
+  colorButtonCompact: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  colorButtonWhite: {
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+  },
+  colorButtonSelected: {
+    borderWidth: 3,
+    borderColor: '#C48CFF',
+    transform: [{ scale: 1.1 }],
+  },
+  colorCheckmark: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#C48CFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  colorCheckmarkInner: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+  },
+  actionButtonsContainer: {
     flexDirection: 'row',
     gap: 6,
     flexShrink: 0,
   },
-  toolButtonCompact: {
-    minWidth: 70,
+  actionButton: {
+    minWidth: 60,
     paddingVertical: 6,
     paddingHorizontal: 10,
   },
@@ -2045,13 +2214,10 @@ const styles = StyleSheet.create({
     minWidth: 50,
   },
   sidebar: {
-    position: 'absolute',
-    right: 8,
-    top: 60,
-    width: 160,
-    maxHeight: '60%',
+    width: 120,
+    maxWidth: 120,
     gap: 6,
-    zIndex: 10,
+    flexShrink: 0,
   },
   guessesCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
@@ -2065,18 +2231,18 @@ const styles = StyleSheet.create({
   },
   guessesHeader: {
     backgroundColor: '#3B82F6',
-    padding: 12,
+    padding: 8,
     alignItems: 'center',
   },
   guessesTitle: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: '700',
   },
   guessesList: {
-    maxHeight: 240,
-    padding: 12,
-    gap: 8,
+    maxHeight: 200,
+    padding: 8,
+    gap: 6,
   },
   noGuessesText: {
     fontSize: 12,
@@ -2091,8 +2257,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9FAFB',
     borderWidth: 2,
     borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 8,
+    borderRadius: 10,
+    padding: 6,
   },
   guessItemCorrect: {
     backgroundColor: '#D1FAE5',
@@ -2100,17 +2266,17 @@ const styles = StyleSheet.create({
   },
   guessItemContent: {
     flex: 1,
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
+    flexDirection: 'column',
+    gap: 2,
+    alignItems: 'flex-start',
   },
   guessPlayerName: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: '700',
     color: '#1F2937',
   },
   guessText: {
-    fontSize: 14,
+    fontSize: 11,
     color: '#374151',
   },
   guessTextCorrect: {
@@ -2134,68 +2300,69 @@ const styles = StyleSheet.create({
   },
   scoreboardHeader: {
     backgroundColor: '#C48CFF', // Draw theme color
-    padding: 10,
+    padding: 8,
     alignItems: 'center',
   },
   scoreboardTitle: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
   },
   scoreboardList: {
-    padding: 8,
-    maxHeight: 160,
+    padding: 6,
+    maxHeight: 180,
   },
   scoreboardPlayerCard: {
     backgroundColor: '#F9FAFB',
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 10,
-    padding: 8,
-    marginBottom: 6,
+    borderRadius: 8,
+    padding: 6,
+    marginBottom: 4,
   },
   scoreboardPlayerCardActive: {
     backgroundColor: '#F3E8FF',
     borderColor: '#C48CFF', // Draw theme color
   },
   scoreboardPlayerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 4,
   },
   scoreboardRankRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    width: '100%',
   },
   scoreboardRank: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: '700',
     color: '#9CA3AF',
   },
   trophyIcon: {
-    fontSize: 14,
+    fontSize: 11,
   },
   scoreboardPlayerName: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '600',
     color: '#1F2937',
     flex: 1,
   },
   drawingBadge: {
     backgroundColor: '#C48CFF', // Draw theme color
-    paddingHorizontal: 6,
+    paddingHorizontal: 4,
     paddingVertical: 2,
-    borderRadius: 8,
+    borderRadius: 6,
+    marginTop: 2,
   },
   drawingBadgeText: {
     color: '#FFFFFF',
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
   },
   scoreboardScore: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
     color: '#C48CFF', // Draw theme color
   },

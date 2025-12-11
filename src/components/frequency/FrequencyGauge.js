@@ -422,7 +422,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   labelText: {
-    color: '#FFFFFF',
+    color: '#0A1A3A',
     fontWeight: 'bold',
     fontSize: isMobile ? 12 : 14,
     textAlign: 'center',

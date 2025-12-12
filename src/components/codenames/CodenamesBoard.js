@@ -46,13 +46,10 @@ export default function CodenamesBoard({
     const color = keyMap[index];
     const isRevealed = revealedIndices.includes(index);
 
-    // Icons only for spymaster or revealed black words
+    // Icons only for revealed black words (removed eye emoji for spymaster)
     if (isRevealed) {
       if (color === 'black') return '💀';
       return null;
-    } else if (isSpymaster) {
-      if (color === 'black') return '💀';
-      if (color === 'red' || color === 'blue') return '👁️';
     }
     
     return null;

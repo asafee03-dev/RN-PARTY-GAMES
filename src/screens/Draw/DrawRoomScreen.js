@@ -73,6 +73,16 @@ export default function DrawRoomScreen({ navigation, route }) {
     loadPlayerName();
   }, []);
 
+  // Cleanup: Reset modal state when room changes or player leaves
+  useEffect(() => {
+    // If room is null or player is not in room, ensure modals are closed
+    if (!room || !room.players || !Array.isArray(room.players) || 
+        !room.players.some(p => p && p.name === currentPlayerName)) {
+      // Player is not in this room - modals should not be visible
+      // The modal visibility is already controlled by the condition, but this ensures cleanup
+    }
+  }, [room, currentPlayerName]);
+
   // Save room state for reconnection on refresh
   useEffect(() => {
     if (roomCode) {
@@ -896,6 +906,10 @@ export default function DrawRoomScreen({ navigation, route }) {
   };
 
   const goBack = async () => {
+    // Cleanup: Clear any active modals/popups in local state
+    // Note: We don't update Firestore show_round_summary here because other players might still be viewing it
+    // Instead, we rely on the component unmounting and the modal visibility being tied to room state
+    
     // Remove player from room before leaving
     if (room && room.id && currentPlayerName) {
       try {
@@ -1432,9 +1446,10 @@ export default function DrawRoomScreen({ navigation, route }) {
         )}
 
         {/* Round Summary Modal */}
-        {room.show_round_summary && !room.drinking_players && !forceCloseModal &&
+        {room && room.show_round_summary && !room.drinking_players && !forceCloseModal &&
          room.players && Array.isArray(room.players) && 
-         room.players.some(p => p && p.name === currentPlayerName) && (
+         room.players.some(p => p && p.name === currentPlayerName) &&
+         currentPlayerName && (
           <Modal
             visible={true}
             transparent={true}

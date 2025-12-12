@@ -703,8 +703,19 @@ export default function CodenamesGameScreen({ navigation, route }) {
       autoDeletionCleanupRef.current.cancelGameEnd = () => {};
     }
     
-    // Force close modal immediately
+    // Force close modal immediately - set before any async operations
     setForceCloseModal(true);
+    
+    // Also clear winner_team in Firestore to ensure modal doesn't reappear
+    try {
+      const roomRef = doc(db, 'CodenamesRoom', room.id);
+      await updateDoc(roomRef, {
+        winner_team: null,
+        game_status: 'setup'
+      });
+    } catch (error) {
+      console.error('Error clearing winner_team:', error);
+    }
     
     const resetRedTeam = {
       ...room.red_team,

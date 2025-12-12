@@ -57,11 +57,6 @@ export default function WordTile({
       ]}>
         {word}
       </Text>
-      {isSpymaster && !isRevealed && (
-        <View style={styles.eyeIcon}>
-          <Text style={styles.eyeText}>👁️</Text>
-        </View>
-      )}
     </Pressable>
   );
 }
@@ -94,14 +89,6 @@ const styles = StyleSheet.create({
   },
   lightText: {
     color: '#FFFFFF',
-  },
-  eyeIcon: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-  },
-  eyeText: {
-    fontSize: 12,
   },
 });
 

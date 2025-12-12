@@ -176,8 +176,17 @@ export default function SpyRoomScreen({ navigation, route }) {
       console.log('✅ Room loaded successfully:', roomData.id, 'with code:', roomData.room_code);
 
       // Load numberOfSpies from room (default to 1)
-      if (roomData.number_of_spies !== undefined) {
+      if (roomData.number_of_spies !== undefined && roomData.number_of_spies !== null) {
         setNumberOfSpies(roomData.number_of_spies);
+      } else {
+        // If not set, default to 1 and save it
+        setNumberOfSpies(1);
+        if (roomData.id) {
+          const roomRef = doc(db, 'SpyRoom', roomData.id);
+          updateDoc(roomRef, { number_of_spies: 1 }).catch(err => {
+            console.error('Error setting default number of spies:', err);
+          });
+        }
       }
 
       // Get player name from storage
@@ -236,6 +245,10 @@ export default function SpyRoomScreen({ navigation, route }) {
         const newRoom = { id: snapshot.id, ...snapshot.data() };
         setRoom(prevRoom => {
           if (!prevRoom) {
+            // Update numberOfSpies when room is first loaded
+            if (newRoom.number_of_spies !== undefined && newRoom.number_of_spies !== null) {
+              setNumberOfSpies(newRoom.number_of_spies);
+            }
             return newRoom;
           }
           
@@ -252,6 +265,12 @@ export default function SpyRoomScreen({ navigation, route }) {
               console.warn('⚠️ Blocked critical game state change during active game');
               return prevRoom;
             }
+          }
+          
+          // Update numberOfSpies if it changed in room (only in lobby)
+          if (newRoom.game_status === 'lobby' && newRoom.number_of_spies !== undefined && 
+              newRoom.number_of_spies !== null && newRoom.number_of_spies !== numberOfSpies) {
+            setNumberOfSpies(newRoom.number_of_spies);
           }
           
           if (JSON.stringify(prevRoom) !== JSON.stringify(newRoom)) {

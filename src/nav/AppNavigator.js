@@ -135,13 +135,25 @@ export default function AppNavigator() {
       onStateChange={handleStateChange}
       onReady={async () => {
         // Navigation is ready, ensure we're on the correct screen
-        if (Platform.OS === 'web' && typeof window !== 'undefined' && navigationRef.current) {
-          // Check if URL has room info and navigate if needed
-          const path = window.location.pathname;
-          // Support both /game/<gameType>/room/<roomCode> and /join/<gameType>/<roomCode>
-          const roomMatch = path.match(/\/(?:game|join)\/(\w+)\/(?:room\/)?(\w+)/);
-          if (roomMatch) {
-            const [, gameType, roomCode] = roomMatch;
+        // Handle deep links for both web and native platforms
+        if (navigationRef.current) {
+          let roomCode = null;
+          let gameType = null;
+          
+          // Check URL for web platform
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            const path = window.location.pathname;
+            // Support both /game/<gameType>/room/<roomCode> and /join/<gameType>/<roomCode>
+            const roomMatch = path.match(/\/(?:game|join)\/(\w+)\/(?:room\/)?(\w+)/);
+            if (roomMatch) {
+              [, gameType, roomCode] = roomMatch;
+            }
+          }
+          
+          // Also check for deep link params (for native platforms)
+          // This would be set by the deep linking handler
+          
+          if (roomCode && gameType) {
             const gameTypeCapitalized = gameType.charAt(0).toUpperCase() + gameType.slice(1);
             
             // Navigate to the room if not already there

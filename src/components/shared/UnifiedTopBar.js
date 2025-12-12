@@ -72,10 +72,11 @@ export default function UnifiedTopBar({
           <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
         </Pressable>
 
-        {/* Drinking Mode Badge */}
+        {/* Drinking Mode Badge - More visible */}
         {drinkingMode && (
           <View style={[styles.drinkingBadge, { backgroundColor: themeColor }]}>
             <Text style={styles.drinkingBadgeText}>🍺</Text>
+            <Text style={styles.drinkingBadgeLabel}>שתייה</Text>
           </View>
         )}
 
@@ -163,14 +164,20 @@ const styles = StyleSheet.create({
     minWidth: 60,
   },
   drinkingBadge: {
-    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
+    gap: 4,
   },
   drinkingBadgeText: {
     fontSize: 14,
+    color: '#FFFFFF',
+  },
+  drinkingBadgeLabel: {
+    fontSize: 12,
+    fontWeight: '600',
     color: '#FFFFFF',
   },
 });

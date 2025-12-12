@@ -106,7 +106,7 @@ export default function AliasSetupScreen({ navigation, route }) {
 
   // Auto-navigate when game starts
   useEffect(() => {
-    if (room && room.game_status !== 'setup') {
+    if (room && (room.game_status === 'waiting' || room.game_status === 'playing')) {
       // Game has started, navigate to game screen
       navigation.replace('AliasGame', { roomCode });
     }

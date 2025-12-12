@@ -9,7 +9,7 @@ import { generateUniqueRoomCode } from '../../utils/roomManagement';
 
 const spyIcons = ["❓", "🕵️", "🔍", "🎭", "👁️", "🗝️", "🔐", "🎩", "💼", "📍"];
 
-export default function SpyHomeScreen({ navigation }) {
+export default function SpyHomeScreen({ navigation, route }) {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [error, setError] = useState('');
@@ -28,7 +28,12 @@ export default function SpyHomeScreen({ navigation }) {
       }
     };
     loadSavedName();
-  }, []);
+    
+    // Check for pre-filled room code from deep link
+    if (route?.params?.prefillRoomCode) {
+      setRoomCode(route.params.prefillRoomCode);
+    }
+  }, [route?.params?.prefillRoomCode]);
 
   const generateRoomCode = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -78,6 +83,7 @@ export default function SpyHomeScreen({ navigation }) {
         host_name: playerName,
         players: [{ name: playerName }],
         game_status: 'lobby',
+        number_of_spies: 1, // Default to 1 spy
         created_at: Date.now() // Store as timestamp for age calculation
       };
 

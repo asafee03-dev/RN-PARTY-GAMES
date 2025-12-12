@@ -1,16 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientButton from '../codenames/GradientButton';
 import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
+import storage from '../../utils/storage';
 
 export default function UnifiedTopBar({ 
   roomCode, 
   variant = 'draw', 
   onExit, 
   onRulesPress,
-  showRules = true 
+  showRules = true,
+  drinkingMode: propDrinkingMode = null // Allow override from prop, otherwise check storage
 }) {
+  const [drinkingMode, setDrinkingMode] = useState(false);
+
+  useEffect(() => {
+    const loadDrinkingMode = async () => {
+      if (propDrinkingMode !== null) {
+        // Use prop value if provided
+        setDrinkingMode(propDrinkingMode);
+      } else {
+        // Otherwise check storage
+        try {
+          const savedMode = await storage.getItem('drinkingMode');
+          setDrinkingMode(savedMode === 'true');
+        } catch (e) {
+          console.warn('Could not load drinking mode:', e);
+        }
+      }
+    };
+    loadDrinkingMode();
+  }, [propDrinkingMode]);
   const insets = useSafeAreaInsets();
   const [copied, setCopied] = useState(false);
 
@@ -37,7 +58,7 @@ export default function UnifiedTopBar({
 
   return (
     <View style={[styles.container, { paddingTop: Math.max(insets.top, 8) }]}>
-      {/* Right to Left: Share Link, Room Code, Rules, Exit */}
+      {/* Right to Left: Share Link, Room Code, Drinking Mode Badge, Rules, Exit */}
       <View style={styles.content}>
         {/* Share Room Link Button */}
         <Pressable onPress={handleCopyRoomLink} style={styles.shareButton}>
@@ -50,6 +71,13 @@ export default function UnifiedTopBar({
           <Text style={[styles.roomCodeText, { color: themeColor }]}>{roomCode}</Text>
           <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
         </Pressable>
+
+        {/* Drinking Mode Badge */}
+        {drinkingMode && (
+          <View style={[styles.drinkingBadge, { backgroundColor: themeColor }]}>
+            <Text style={styles.drinkingBadgeText}>🍺</Text>
+          </View>
+        )}
 
         {/* Rules Button */}
         {showRules && (
@@ -133,6 +161,17 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
     minWidth: 60,
+  },
+  drinkingBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  drinkingBadgeText: {
+    fontSize: 14,
+    color: '#FFFFFF',
   },
 });
 

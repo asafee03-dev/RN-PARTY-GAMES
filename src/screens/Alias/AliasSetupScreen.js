@@ -442,6 +442,7 @@ export default function AliasSetupScreen({ navigation, route }) {
             }
           }}
           onRulesPress={() => setShowRulesModal(true)}
+          drinkingMode={drinkingMode}
         />
 
         {/* Rules Modal */}

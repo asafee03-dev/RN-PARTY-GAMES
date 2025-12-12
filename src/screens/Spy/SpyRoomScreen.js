@@ -22,6 +22,7 @@ export default function SpyRoomScreen({ navigation, route }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showLocations, setShowLocations] = useState(false);
+  const [numberOfSpies, setNumberOfSpies] = useState(1);
 
   const timerInterval = useRef(null);
   const unsubscribeRef = useRef(null);
@@ -173,6 +174,11 @@ export default function SpyRoomScreen({ navigation, route }) {
       
       const roomData = { id: roomSnap.id, ...roomSnap.data() };
       console.log('✅ Room loaded successfully:', roomData.id, 'with code:', roomData.room_code);
+
+      // Load numberOfSpies from room (default to 1)
+      if (roomData.number_of_spies !== undefined) {
+        setNumberOfSpies(roomData.number_of_spies);
+      }
 
       // Get player name from storage
       const playerName = currentPlayerName || (await storage.getItem('playerName')) || '';
@@ -387,12 +393,24 @@ export default function SpyRoomScreen({ navigation, route }) {
     }
 
     const freshPlayers = currentRoom.players.map(p => ({ name: p.name }));
+    const numSpies = currentRoom.number_of_spies || 1;
+    
+    // Validate number of spies
+    const maxSpies = Math.max(1, Math.floor(freshPlayers.length / 2)); // At most half the players
+    const actualNumSpies = Math.min(numSpies, maxSpies);
 
-    const randomSpyIndex = Math.floor(Math.random() * freshPlayers.length);
-    const spyName = freshPlayers[randomSpyIndex].name;
+    // Select random spies
+    const shuffledPlayers = [...freshPlayers].sort(() => Math.random() - 0.5);
+    const spyIndices = new Set();
+    const spyNames = [];
+    
+    for (let i = 0; i < actualNumSpies && i < shuffledPlayers.length; i++) {
+      spyIndices.add(shuffledPlayers[i].name);
+      spyNames.push(shuffledPlayers[i].name);
+    }
 
-    const updatedPlayers = freshPlayers.map((player, index) => {
-      if (index === randomSpyIndex) {
+    const updatedPlayers = freshPlayers.map((player) => {
+      if (spyIndices.has(player.name)) {
         return {
           name: player.name,
           is_spy: true,
@@ -427,7 +445,8 @@ export default function SpyRoomScreen({ navigation, route }) {
         players: updatedPlayers,
         game_status: 'playing',
         game_start_time: Date.now(),
-        spy_name: spyName || '',
+        spy_name: spyNames.length === 1 ? spyNames[0] : '', // For backward compatibility, use first spy if only one
+        spy_names: spyNames, // Array of all spy names
         chosen_location: randomLocation.location || '',
         all_locations: allLocationNames,
         eliminated_locations: [],
@@ -540,6 +559,7 @@ export default function SpyRoomScreen({ navigation, route }) {
         game_status: 'lobby',
         game_start_time: null,
         spy_name: null,
+        spy_names: null,
         chosen_location: null,
         all_locations: null,
         eliminated_locations: null,
@@ -646,6 +666,7 @@ export default function SpyRoomScreen({ navigation, route }) {
           variant="spy"
           onExit={goBack}
           onRulesPress={handleRulesPress}
+          drinkingMode={drinkingMode}
         />
 
         {/* Rules Modal */}
@@ -681,6 +702,64 @@ export default function SpyRoomScreen({ navigation, route }) {
                     />
                     <Text style={styles.drinkingToggleLabel}>🍺</Text>
                   </View>
+                  
+                  {/* Number of Spies Selection */}
+                  <View style={styles.spiesSelectionContainer}>
+                    <Text style={styles.spiesSelectionLabel}>🕵️ מספר מרגלים:</Text>
+                    <View style={styles.spiesButtonsRow}>
+                      {[1, 2, 3, 4].map((num) => {
+                        const maxSpies = Math.max(1, Math.floor(players.length / 2));
+                        const isDisabled = num > maxSpies || num > players.length;
+                        const isSelected = numberOfSpies === num;
+                        return (
+                          <Pressable
+                            key={num}
+                            onPress={() => {
+                              if (!isDisabled) {
+                                const newNumSpies = num;
+                                setNumberOfSpies(newNumSpies);
+                                // Save to room
+                                if (room?.id) {
+                                  const roomRef = doc(db, 'SpyRoom', room.id);
+                                  updateDoc(roomRef, { number_of_spies: newNumSpies }).catch(err => {
+                                    console.error('Error updating number of spies:', err);
+                                  });
+                                }
+                              }
+                            }}
+                            disabled={isDisabled}
+                            style={[
+                              styles.spyCountButton,
+                              isSelected && styles.spyCountButtonSelected,
+                              isDisabled && styles.spyCountButtonDisabled
+                            ]}
+                          >
+                            <Text style={[
+                              styles.spyCountButtonText,
+                              isSelected && styles.spyCountButtonTextSelected,
+                              isDisabled && styles.spyCountButtonTextDisabled
+                            ]}>
+                              {num}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <Text style={styles.spiesSelectionHint}>
+                      {numberOfSpies === 1 
+                        ? 'יהיה מרגל אחד במשחק' 
+                        : `יהיו ${numberOfSpies} מרגלים במשחק`}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Show number of spies to non-host players */}
+              {!isHost && room?.number_of_spies && room.number_of_spies > 1 && (
+                <View style={styles.spiesInfoBadge}>
+                  <Text style={styles.spiesInfoText}>
+                    🕵️ במשחק זה יהיו {room.number_of_spies} מרגלים
+                  </Text>
                 </View>
               )}
 
@@ -912,8 +991,18 @@ export default function SpyRoomScreen({ navigation, route }) {
 
             <View style={styles.finishedContent}>
               <View style={styles.spyRevealCard}>
-                <Text style={styles.spyRevealLabel}>המרגל היה:</Text>
-                <Text style={styles.spyRevealName}>{room.spy_name}</Text>
+                <Text style={styles.spyRevealLabel}>
+                  {(() => {
+                    const spyNames = room?.spy_names || (room?.spy_name ? [room.spy_name] : []);
+                    return spyNames.length === 1 ? 'המרגל היה:' : 'המרגלים היו:';
+                  })()}
+                </Text>
+                <Text style={styles.spyRevealName}>
+                  {(() => {
+                    const spyNames = room?.spy_names || (room?.spy_name ? [room.spy_name] : []);
+                    return spyNames.join(', ');
+                  })()}
+                </Text>
               </View>
 
               <View style={styles.locationRevealCard}>
@@ -925,27 +1014,38 @@ export default function SpyRoomScreen({ navigation, route }) {
               <View style={styles.votingResultsCard}>
                 <Text style={styles.votingResultsTitle}>תוצאות ההצבעה:</Text>
                 {(() => {
+                  const spyNames = room?.spy_names || (room?.spy_name ? [room.spy_name] : []);
                   const voteCounts = players.map(player => {
                     const votes = players.filter(p => p && p.vote === player.name).length;
-                    const wasSpy = player.name === room?.spy_name;
+                    const wasSpy = spyNames.includes(player.name);
                     return { player, votes, wasSpy };
                   });
                   
                   const maxVotes = Math.max(...voteCounts.map(v => v.votes));
-                  const spyVotes = voteCounts.find(v => v.wasSpy)?.votes || 0;
-                  const spyCaught = spyVotes === maxVotes && spyVotes > 0;
-                  const spyWon = !spyCaught;
+                  const spyVotes = voteCounts.filter(v => v.wasSpy).map(v => v.votes);
+                  const maxSpyVotes = spyVotes.length > 0 ? Math.max(...spyVotes) : 0;
+                  
+                  // Spies win if at least one spy has fewer votes than the max (not caught)
+                  // Spies lose if all spies have the max votes (all caught)
+                  const allSpiesCaught = spyVotes.length > 0 && spyVotes.every(v => v === maxVotes && maxVotes > 0);
+                  const spyWon = !allSpiesCaught;
                   
                   return (
                     <>
                       <View style={[styles.resultCard, spyWon ? styles.resultCardSpyWon : styles.resultCardSpyCaught]}>
                         <Text style={styles.resultTitle}>
-                          {spyWon ? '🕵️ המרגל ניצח!' : '✅ המרגל נתפס!'}
+                          {spyWon 
+                            ? (spyNames.length === 1 ? '🕵️ המרגל ניצח!' : '🕵️ המרגלים ניצחו!')
+                            : (spyNames.length === 1 ? '✅ המרגל נתפס!' : '✅ כל המרגלים נתפסו!')}
                         </Text>
                         <Text style={styles.resultDescription}>
                           {spyWon 
-                            ? 'המרגל הצליח להישאר בחשאי!' 
-                            : 'השחקנים הצליחו לזהות את המרגל!'}
+                            ? (spyNames.length === 1 
+                                ? 'המרגל הצליח להישאר בחשאי!' 
+                                : 'לפחות אחד מהמרגלים הצליח להישאר בחשאי!')
+                            : (spyNames.length === 1
+                                ? 'השחקנים הצליחו לזהות את המרגל!'
+                                : 'השחקנים הצליחו לזהות את כל המרגלים!')}
                         </Text>
                       </View>
                       
@@ -1736,5 +1836,69 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     textAlign: 'center',
     marginTop: 4,
+  },
+  spiesSelectionContainer: {
+    marginTop: 12,
+    gap: 8,
+  },
+  spiesSelectionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 4,
+  },
+  spiesButtonsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  spyCountButton: {
+    minWidth: 50,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  spyCountButtonSelected: {
+    backgroundColor: '#7ED957', // Spy theme color
+    borderColor: '#7ED957',
+  },
+  spyCountButtonDisabled: {
+    opacity: 0.4,
+    backgroundColor: '#F3F4F6',
+  },
+  spyCountButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  spyCountButtonTextSelected: {
+    color: '#FFFFFF',
+  },
+  spyCountButtonTextDisabled: {
+    color: '#9CA3AF',
+  },
+  spiesSelectionHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontStyle: 'italic',
+  },
+  spiesInfoBadge: {
+    backgroundColor: 'rgba(126, 217, 87, 0.2)', // Spy theme color with transparency
+    borderWidth: 2,
+    borderColor: '#7ED957', // Spy theme color
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 8,
+  },
+  spiesInfoText: {
+    fontSize: 14,
+    color: '#374151',
+    textAlign: 'center',
+    fontWeight: '600',
   },
 });

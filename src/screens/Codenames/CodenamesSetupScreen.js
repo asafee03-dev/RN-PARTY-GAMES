@@ -428,6 +428,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
           variant="codenames"
           onExit={goBack}
           onRulesPress={() => setShowRulesModal(true)}
+          drinkingMode={drinkingMode}
         />
 
         {/* Rivals Mode Badge */}

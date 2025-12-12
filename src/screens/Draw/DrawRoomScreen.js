@@ -1030,6 +1030,7 @@ export default function DrawRoomScreen({ navigation, route }) {
           variant="draw"
           onExit={goBack}
           onRulesPress={handleRulesPress}
+          drinkingMode={drinkingMode}
         />
 
         {/* Rules Modal */}
@@ -1441,132 +1442,138 @@ export default function DrawRoomScreen({ navigation, route }) {
             onRequestClose={() => {}}
           >
             <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <View style={styles.summaryHeader}>
-                  <Text style={styles.summaryTitle}>סיכום הסבב</Text>
-                </View>
-
-                {/* Winner announcement */}
-                <View style={styles.winnerCard}>
-                  {correctGuessers.length > 0 ? (
-                    <>
-                      <Text style={styles.trophyIconLarge}>🏆</Text>
-                      <Text style={styles.winnerTitle}>
-                        {correctGuessers.length === 1
-                          ? `${correctGuessers[0].name} ניחש נכון!`
-                          : 'כל הכבוד למנחשים המהירים!'}
-                      </Text>
-                      <View style={styles.winnersList}>
-                        {correctGuessers.map((player) => (
-                          <View key={player.name} style={styles.winnerBadge}>
-                            <Text style={styles.winnerBadgeText}>{player.name} +1 ⭐</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.eyeIconLarge}>👁️</Text>
-                      <Text style={styles.noWinnerTitle}>אף אחד לא ניחש נכון הפעם...</Text>
-                    </>
-                  )}
-                  <Text style={styles.wordReveal}>
-                    המילה הייתה: <Text style={styles.wordRevealBold}>{room.current_word}</Text>
-                  </Text>
-                </View>
-
-                {/* Drawing - Full Display */}
-                <View style={styles.drawingSection}>
-                  <Text style={styles.drawingSectionTitle}>הציור:</Text>
-                  <View style={styles.drawingDisplay}>
-                    <DrawCanvas
-                      strokes={(() => {
-                        // Use room.drawing_data as source of truth for summary
-                        if (room?.drawing_data) {
-                          try {
-                            const strokes = typeof room.drawing_data === 'string' 
-                              ? JSON.parse(room.drawing_data) 
-                              : room.drawing_data;
-                            return Array.isArray(strokes) ? strokes : [];
-                          } catch (error) {
-                            console.error('Error parsing strokes for summary:', error);
-                            return localStrokes;
-                          }
-                        }
-                        return localStrokes;
-                      })()}
-                      onStrokeComplete={() => {}}
-                      canDraw={false}
-                      color={selectedColor}
-                      brushSize={brushSize}
-                      toolType={toolType}
-                    />
+              <View style={styles.modalContentSummary}>
+                <ScrollView 
+                  style={styles.summaryScrollContent}
+                  contentContainerStyle={styles.summaryScrollContainer}
+                  showsVerticalScrollIndicator={true}
+                >
+                  <View style={styles.summaryHeader}>
+                    <Text style={styles.summaryTitle}>סיכום הסבב</Text>
                   </View>
-                </View>
 
-                {/* Guesses - Compact list, no ScrollView */}
-                <View style={styles.guessesSection}>
-                  <Text style={styles.guessesSectionTitle}>ניחושים:</Text>
-                  <View style={styles.summaryGuessesList}>
-                    {allGuesses.length === 0 ? (
-                      <Text style={styles.noGuessesTextSummary}>לא היו ניחושים בסבב זה</Text>
+                  {/* Winner announcement */}
+                  <View style={styles.winnerCard}>
+                    {correctGuessers.length > 0 ? (
+                      <>
+                        <Text style={styles.trophyIconLarge}>🏆</Text>
+                        <Text style={styles.winnerTitle}>
+                          {correctGuessers.length === 1
+                            ? `${correctGuessers[0].name} ניחש נכון!`
+                            : 'כל הכבוד למנחשים המהירים!'}
+                        </Text>
+                        <View style={styles.winnersList}>
+                          {correctGuessers.map((player) => (
+                            <View key={player.name} style={styles.winnerBadge}>
+                              <Text style={styles.winnerBadgeText}>{player.name} +1 ⭐</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </>
                     ) : (
-                      allGuesses.slice(0, 3).map((guess, idx) => {
-                        const isCorrect = guess.isCorrect;
+                      <>
+                        <Text style={styles.eyeIconLarge}>👁️</Text>
+                        <Text style={styles.noWinnerTitle}>אף אחד לא ניחש נכון הפעם...</Text>
+                      </>
+                    )}
+                    <Text style={styles.wordReveal}>
+                      המילה הייתה: <Text style={styles.wordRevealBold}>{room.current_word}</Text>
+                    </Text>
+                  </View>
+
+                  {/* Drawing - Full Display */}
+                  <View style={styles.drawingSection}>
+                    <Text style={styles.drawingSectionTitle}>הציור:</Text>
+                    <View style={styles.drawingDisplay}>
+                      <DrawCanvas
+                        strokes={(() => {
+                          // Use room.drawing_data as source of truth for summary
+                          if (room?.drawing_data) {
+                            try {
+                              const strokes = typeof room.drawing_data === 'string' 
+                                ? JSON.parse(room.drawing_data) 
+                                : room.drawing_data;
+                              return Array.isArray(strokes) ? strokes : [];
+                            } catch (error) {
+                              console.error('Error parsing strokes for summary:', error);
+                              return localStrokes;
+                            }
+                          }
+                          return localStrokes;
+                        })()}
+                        onStrokeComplete={() => {}}
+                        canDraw={false}
+                        color={selectedColor}
+                        brushSize={brushSize}
+                        toolType={toolType}
+                      />
+                    </View>
+                  </View>
+
+                  {/* Guesses - Scrollable list */}
+                  <View style={styles.guessesSection}>
+                    <Text style={styles.guessesSectionTitle}>ניחושים:</Text>
+                    <View style={styles.summaryGuessesList}>
+                      {allGuesses.length === 0 ? (
+                        <Text style={styles.noGuessesTextSummary}>לא היו ניחושים בסבב זה</Text>
+                      ) : (
+                        allGuesses.map((guess, idx) => {
+                          const isCorrect = guess.isCorrect;
+                          return (
+                            <View
+                              key={idx}
+                              style={[styles.summaryGuessItem, isCorrect && styles.summaryGuessItemCorrect]}
+                            >
+                              <View style={styles.summaryGuessContent}>
+                                <Text style={styles.summaryGuessPlayerName}>{guess.playerName}</Text>
+                                <Text style={styles.summaryGuessLabel}>ניחש:</Text>
+                                <Text style={[styles.summaryGuessText, isCorrect && styles.summaryGuessTextCorrect]}>
+                                  {guess.guess}
+                                </Text>
+                              </View>
+                              {isCorrect && (
+                                <Text style={styles.summaryCheckmark}>✓</Text>
+                              )}
+                            </View>
+                          );
+                        })
+                      )}
+                    </View>
+                  </View>
+
+                  {/* Updated Scores - Compact */}
+                  <View style={styles.scoresSection}>
+                    <Text style={styles.scoresSectionTitle}>לוח תוצאות:</Text>
+                    <View style={styles.scoresGrid}>
+                      {[...room.players].sort((a, b) => b.score - a.score).slice(0, 4).map((player) => {
+                        const earnedPointThisRound = correctGuessers.some(
+                          (winner) => winner.name === player.name
+                        );
                         return (
                           <View
-                            key={idx}
-                            style={[styles.summaryGuessItem, isCorrect && styles.summaryGuessItemCorrect]}
+                            key={player.name}
+                            style={[styles.scoreItem, earnedPointThisRound && styles.scoreItemEarned]}
                           >
-                            <View style={styles.summaryGuessContent}>
-                              <Text style={styles.summaryGuessPlayerName}>{guess.playerName}</Text>
-                              <Text style={styles.summaryGuessLabel}>ניחש:</Text>
-                              <Text style={[styles.summaryGuessText, isCorrect && styles.summaryGuessTextCorrect]}>
-                                {guess.guess}
-                              </Text>
+                            <Text style={styles.scoreItemName}>{player.name}</Text>
+                            <View style={styles.scoreItemBadge}>
+                              <Text style={styles.scoreItemBadgeText}>{player.score}</Text>
                             </View>
-                            {isCorrect && (
-                              <Text style={styles.summaryCheckmark}>✓</Text>
-                            )}
                           </View>
                         );
-                      })
-                    )}
-                    {allGuesses.length > 3 && (
-                      <Text style={styles.moreGuessesText}>+{allGuesses.length - 3} ניחושים נוספים</Text>
-                    )}
+                      })}
+                    </View>
                   </View>
-                </View>
+                </ScrollView>
 
-                {/* Updated Scores - Compact */}
-                <View style={styles.scoresSection}>
-                  <Text style={styles.scoresSectionTitle}>לוח תוצאות:</Text>
-                  <View style={styles.scoresGrid}>
-                    {[...room.players].sort((a, b) => b.score - a.score).slice(0, 4).map((player) => {
-                      const earnedPointThisRound = correctGuessers.some(
-                        (winner) => winner.name === player.name
-                      );
-                      return (
-                        <View
-                          key={player.name}
-                          style={[styles.scoreItem, earnedPointThisRound && styles.scoreItemEarned]}
-                        >
-                          <Text style={styles.scoreItemName}>{player.name}</Text>
-                          <View style={styles.scoreItemBadge}>
-                            <Text style={styles.scoreItemBadgeText}>{player.score}</Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
+                {/* Fixed button at bottom */}
+                <View style={styles.summaryButtonContainer}>
+                  <GradientButton
+                    title="המשך לסבב הבא"
+                    onPress={continueToNextRound}
+                    variant="draw"
+                    style={styles.continueButton}
+                  />
                 </View>
-
-                <GradientButton
-                  title="המשך לסבב הבא"
-                  onPress={continueToNextRound}
-                  variant="draw"
-                  style={styles.continueButton}
-                />
               </View>
             </View>
           </Modal>
@@ -2404,6 +2411,30 @@ const styles = StyleSheet.create({
     maxWidth: 500,
     maxHeight: '85%',
     gap: 10,
+  },
+  modalContentSummary: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 500,
+    maxHeight: '85%',
+    overflow: 'hidden',
+    flexDirection: 'column',
+  },
+  summaryScrollContent: {
+    flex: 1,
+  },
+  summaryScrollContainer: {
+    padding: 16,
+    gap: 10,
+    paddingBottom: 8,
+  },
+  summaryButtonContainer: {
+    padding: 16,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
   },
   drinkingIcon: {
     fontSize: 56,

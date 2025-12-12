@@ -11,7 +11,7 @@ const agentIcons = ["🕵️", "🔍", "🎯", "📋", "🗂️", "💼", "🕶�
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-export default function CodenamesHomeScreen({ navigation }) {
+export default function CodenamesHomeScreen({ navigation, route }) {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [gameMode, setGameMode] = useState('friends');
@@ -31,7 +31,12 @@ export default function CodenamesHomeScreen({ navigation }) {
       }
     };
     loadSavedName();
-  }, []);
+    
+    // Check for pre-filled room code from deep link
+    if (route?.params?.prefillRoomCode) {
+      setRoomCode(route.params.prefillRoomCode);
+    }
+  }, [route?.params?.prefillRoomCode]);
 
   const generateRoomCode = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase();

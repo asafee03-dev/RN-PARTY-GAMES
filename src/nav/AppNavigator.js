@@ -133,12 +133,13 @@ export default function AppNavigator() {
       ref={navigationRef}
       initialState={initialState}
       onStateChange={handleStateChange}
-      onReady={() => {
+      onReady={async () => {
         // Navigation is ready, ensure we're on the correct screen
         if (Platform.OS === 'web' && typeof window !== 'undefined' && navigationRef.current) {
           // Check if URL has room info and navigate if needed
           const path = window.location.pathname;
-          const roomMatch = path.match(/\/game\/(\w+)\/room\/(\w+)/);
+          // Support both /game/<gameType>/room/<roomCode> and /join/<gameType>/<roomCode>
+          const roomMatch = path.match(/\/(?:game|join)\/(\w+)\/(?:room\/)?(\w+)/);
           if (roomMatch) {
             const [, gameType, roomCode] = roomMatch;
             const gameTypeCapitalized = gameType.charAt(0).toUpperCase() + gameType.slice(1);
@@ -147,19 +148,30 @@ export default function AppNavigator() {
             const currentRoute = navigationRef.current.getCurrentRoute();
             if (!currentRoute || currentRoute.params?.roomCode !== roomCode) {
               try {
-                // Determine screen name based on game type
-                let screenName = `${gameTypeCapitalized}Room`;
-                if (gameType === 'alias') {
-                  // Alias might be in Setup or Game screen - check saved state
-                  screenName = 'AliasSetup'; // Default to Setup, will auto-navigate to Game if needed
-                } else if (gameType === 'codenames') {
-                  screenName = 'CodenamesSetup'; // Default to Setup, will auto-navigate to Game if needed
-                }
+                // Check if player has a saved name
+                const storage = (await import('../utils/storage')).default;
+                const playerName = await storage.getItem('playerName');
                 
-                navigationRef.current.navigate(gameTypeCapitalized, {
-                  screen: screenName,
-                  params: { roomCode }
-                });
+                if (playerName) {
+                  // Player has a name - navigate directly to room
+                  let screenName = `${gameTypeCapitalized}Room`;
+                  if (gameType === 'alias') {
+                    screenName = 'AliasSetup'; // Will auto-navigate to Game if needed
+                  } else if (gameType === 'codenames') {
+                    screenName = 'CodenamesSetup'; // Will auto-navigate to Game if needed
+                  }
+                  
+                  navigationRef.current.navigate(gameTypeCapitalized, {
+                    screen: screenName,
+                    params: { roomCode }
+                  });
+                } else {
+                  // No player name - navigate to home screen with pre-filled room code
+                  navigationRef.current.navigate(gameTypeCapitalized, {
+                    screen: `${gameTypeCapitalized}Home`,
+                    params: { prefillRoomCode: roomCode }
+                  });
+                }
               } catch (error) {
                 console.warn('⚠️ Error navigating from URL:', error);
               }

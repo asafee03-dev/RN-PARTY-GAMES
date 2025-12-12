@@ -26,6 +26,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
   const [error, setError] = useState(null);
   const [showTeamWords, setShowTeamWords] = useState(false);
   const [forceCloseModal, setForceCloseModal] = useState(false);
+  const [drinkingMode, setDrinkingMode] = useState(false);
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
 
@@ -47,6 +48,12 @@ export default function CodenamesGameScreen({ navigation, route }) {
         }
 
         setCurrentPlayerName(playerName);
+        
+        const savedMode = await storage.getItem('drinkingMode');
+        if (savedMode) {
+          setDrinkingMode(savedMode === 'true');
+        }
+        
         await loadRoom();
         setIsLoading(false);
       } catch (err) {
@@ -811,6 +818,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
           variant="codenames"
           onExit={goBack}
           onRulesPress={() => setShowRulesModal(true)}
+          drinkingMode={drinkingMode}
         />
 
         {/* Drinking Mode Badge */}

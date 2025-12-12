@@ -9,7 +9,7 @@ import { generateUniqueRoomCode } from '../../utils/roomManagement';
 
 const drawIcons = ["🎨", "✏️", "🖌️", "🖍️", "✨"];
 
-export default function DrawHomeScreen({ navigation }) {
+export default function DrawHomeScreen({ navigation, route }) {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [error, setError] = useState('');
@@ -30,7 +30,12 @@ export default function DrawHomeScreen({ navigation }) {
       }
     };
     loadSavedName();
-  }, []);
+    
+    // Check for pre-filled room code from deep link
+    if (route?.params?.prefillRoomCode) {
+      setRoomCode(route.params.prefillRoomCode);
+    }
+  }, [route?.params?.prefillRoomCode]);
 
   // Cleanup listener on unmount
   useEffect(() => {

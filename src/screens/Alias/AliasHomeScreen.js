@@ -14,7 +14,7 @@ const BASE_TEAMS = [
   { name: "קבוצה ירוקה", position: 0, color: TEAM_COLORS[2], players: [] }
 ];
 
-export default function AliasHomeScreen({ navigation }) {
+export default function AliasHomeScreen({ navigation, route }) {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [error, setError] = useState('');
@@ -33,7 +33,12 @@ export default function AliasHomeScreen({ navigation }) {
       }
     };
     loadSavedName();
-  }, []);
+    
+    // Check for pre-filled room code from deep link
+    if (route?.params?.prefillRoomCode) {
+      setRoomCode(route.params.prefillRoomCode);
+    }
+  }, [route?.params?.prefillRoomCode]);
 
   const generateRoomCode = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase();

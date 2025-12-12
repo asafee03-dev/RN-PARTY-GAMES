@@ -428,8 +428,13 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     isSubmittingGuess.current = true;
 
     try {
+      // Lock the needle position immediately to prevent movement
       const angle = global.currentNeedlePosition || 90;
-      const updatedNeedlePositions = { ...(room.needle_positions || {}), [currentPlayerName]: angle };
+      // Update local state immediately to lock the needle
+      const lockedNeedlePositions = { ...(room.needle_positions || {}), [currentPlayerName]: angle };
+      setRoom(prev => ({ ...prev, needle_positions: lockedNeedlePositions }));
+      
+      const updatedNeedlePositions = lockedNeedlePositions;
       
       const clueGiver = room.players[room.current_turn_index]?.name;
       
@@ -768,6 +773,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           variant="frequency"
           onExit={goBack}
           onRulesPress={handleRulesPress}
+          drinkingMode={drinkingMode}
         />
 
         {/* Drinking Mode Badge */}

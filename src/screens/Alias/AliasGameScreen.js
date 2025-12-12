@@ -32,6 +32,7 @@ export default function AliasGameScreen({ navigation, route }) {
   const [timerKey, setTimerKey] = useState(0);
   const [showGoldenPopup, setShowGoldenPopup] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
+  const [drinkingMode, setDrinkingMode] = useState(false);
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
 
@@ -41,6 +42,10 @@ export default function AliasGameScreen({ navigation, route }) {
         const savedName = await storage.getItem('playerName');
         if (savedName) {
           setPlayerName(savedName);
+        }
+        const savedMode = await storage.getItem('drinkingMode');
+        if (savedMode) {
+          setDrinkingMode(savedMode === 'true');
         }
       } catch (e) {
         console.warn('Could not load player name:', e);
@@ -970,6 +975,7 @@ export default function AliasGameScreen({ navigation, route }) {
         <UnifiedTopBar
           roomCode={roomCode}
           variant="alias"
+          drinkingMode={drinkingMode}
           onExit={async () => {
             // Cleanup listeners
             if (unsubscribeRef.current) {

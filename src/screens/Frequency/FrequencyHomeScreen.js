@@ -11,7 +11,7 @@ const PLAYER_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#10B981", "#3B82F6", "#
 
 const waveIcons = ["📻", "📡", "📊", "🎚️", "🎛️", "📈", "📉", "〰️", "🔊", "🎵"];
 
-export default function FrequencyHomeScreen({ navigation }) {
+export default function FrequencyHomeScreen({ navigation, route }) {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [error, setError] = useState('');
@@ -30,7 +30,12 @@ export default function FrequencyHomeScreen({ navigation }) {
       }
     };
     loadSavedName();
-  }, []);
+    
+    // Check for pre-filled room code from deep link
+    if (route?.params?.prefillRoomCode) {
+      setRoomCode(route.params.prefillRoomCode);
+    }
+  }, [route?.params?.prefillRoomCode]);
 
   const generateRoomCode = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase();

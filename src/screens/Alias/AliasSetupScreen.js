@@ -3,10 +3,11 @@ import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import PlayerCard from '../../components/shared/PlayerCard';
+import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
+import RulesModal from '../../components/shared/RulesModal';
 import { db } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import storage from '../../utils/storage';
-import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
@@ -20,6 +21,7 @@ export default function AliasSetupScreen({ navigation, route }) {
   const [isJoiningTeam, setIsJoiningTeam] = useState(false);
   const [isStartingGame, setIsStartingGame] = useState(false);
   const [drinkingMode, setDrinkingMode] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
   const unsubscribeRef = useRef(null);
 
   useEffect(() => {
@@ -424,37 +426,30 @@ export default function AliasSetupScreen({ navigation, route }) {
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <GradientButton
-            title="← חזרה"
-            onPress={() => {
-              const parent = navigation.getParent();
-              if (parent) {
-                parent.reset({
-                  index: 0,
-                  routes: [{ name: 'Home' }]
-                });
-              } else {
-                navigation.navigate('Home');
-              }
-            }}
-            variant="alias"
-            style={styles.backButton}
-          />
-          <View style={styles.roomCodeContainer}>
-            <Pressable onPress={handleCopyRoomCode} style={styles.roomCodePressable}>
-              <Text style={styles.roomCodeLabel}>קוד חדר:</Text>
-              <Text style={styles.roomCode}>{roomCode}</Text>
-            </Pressable>
-            <Pressable
-              onPress={handleCopyRoomLink}
-              style={styles.whiteCopyLinkButton}
-            >
-              <Text style={styles.whiteCopyLinkButtonText}>📋 העתק קישור</Text>
-            </Pressable>
-          </View>
-        </View>
+        {/* Unified Top Bar */}
+        <UnifiedTopBar
+          roomCode={roomCode}
+          variant="alias"
+          onExit={() => {
+            const parent = navigation.getParent();
+            if (parent) {
+              parent.reset({
+                index: 0,
+                routes: [{ name: 'Home' }]
+              });
+            } else {
+              navigation.navigate('Home');
+            }
+          }}
+          onRulesPress={() => setShowRulesModal(true)}
+        />
+
+        {/* Rules Modal */}
+        <RulesModal
+          visible={showRulesModal}
+          onClose={() => setShowRulesModal(false)}
+          variant="alias"
+        />
 
         {/* Compact Toggles Row */}
         <View style={styles.togglesRow}>

@@ -3,10 +3,11 @@ import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
+import RulesModal from '../../components/shared/RulesModal';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
 import storage from '../../utils/storage';
-import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
@@ -15,8 +16,8 @@ export default function SpyRoomScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [room, setRoom] = useState(null);
   const [currentPlayerName, setCurrentPlayerName] = useState('');
-  const [copied, setCopied] = useState(false);
   const [timeLeft, setTimeLeft] = useState(360); // 6 minutes
+  const [showRulesModal, setShowRulesModal] = useState(false);
   const [drinkingMode, setDrinkingMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -551,14 +552,8 @@ export default function SpyRoomScreen({ navigation, route }) {
     }
   };
 
-  const handleCopyRoomCode = async () => {
-    await copyRoomCode(roomCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleCopyRoomLink = async () => {
-    await copyRoomLink(roomCode, 'spy');
+  const handleRulesPress = () => {
+    setShowRulesModal(true);
   };
 
   const goBack = async () => {
@@ -645,30 +640,20 @@ export default function SpyRoomScreen({ navigation, route }) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
-          {/* Centered Room Code */}
-          <View style={styles.headerCenter}>
-            <Pressable onPress={handleCopyRoomCode} style={styles.roomCodeContainer}>
-              <Text style={styles.roomCodeLabel}>קוד חדר:</Text>
-              <Text style={styles.roomCodeText}>{roomCode}</Text>
-              <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
-            </Pressable>
-          </View>
+        {/* Unified Top Bar */}
+        <UnifiedTopBar
+          roomCode={roomCode}
+          variant="spy"
+          onExit={goBack}
+          onRulesPress={handleRulesPress}
+        />
 
-          {/* Right side: Copy Link + Exit */}
-          <View style={styles.headerRight}>
-            <Pressable onPress={handleCopyRoomLink} style={styles.copyLinkButtonCompact}>
-              <Text style={styles.copyLinkIcon}>📋</Text>
-            </Pressable>
-            <GradientButton
-              title="יציאה"
-              onPress={goBack}
-              variant="spy"
-              style={styles.exitButtonHeader}
-            />
-          </View>
-        </View>
+        {/* Rules Modal */}
+        <RulesModal
+          visible={showRulesModal}
+          onClose={() => setShowRulesModal(false)}
+          variant="spy"
+        />
 
         {/* Lobby State */}
         {room.game_status === 'lobby' && (

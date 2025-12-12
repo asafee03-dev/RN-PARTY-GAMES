@@ -359,19 +359,20 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: 24,
-    paddingTop: 16,
+    paddingTop: 8,
   },
   backButton: {
     alignSelf: 'flex-start',
-    marginBottom: 16,
+    marginBottom: 8,
+    marginTop: 16,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 16,
   },
   iconText: {
     fontSize: 80,
-    marginBottom: 16,
+    marginBottom: 0,
   },
   title: {
     fontSize: 48,

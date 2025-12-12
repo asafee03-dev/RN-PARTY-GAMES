@@ -268,14 +268,15 @@ const styles = StyleSheet.create({
   backButton: {
     alignSelf: 'flex-start',
     marginBottom: 16,
+    marginTop: 16,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 16,
   },
   iconText: {
     fontSize: 80,
-    marginBottom: 16,
+    marginBottom: 0,
   },
   title: {
     fontSize: 48,

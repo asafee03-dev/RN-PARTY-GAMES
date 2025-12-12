@@ -3,11 +3,12 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIn
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientButton from '../../components/codenames/GradientButton';
+import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
+import RulesModal from '../../components/shared/RulesModal';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
-import { copyRoomLink } from '../../utils/clipboard';
 
 export default function CodenamesSetupScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -16,9 +17,9 @@ export default function CodenamesSetupScreen({ navigation, route }) {
   const [room, setRoom] = useState(null);
   const [currentPlayerName, setCurrentPlayerName] = useState('');
   const [isHost, setIsHost] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [drinkingMode, setDrinkingMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [showRulesModal, setShowRulesModal] = useState(false);
   const unsubscribeRef = useRef(null);
 
   // Save room state for reconnection on refresh
@@ -419,37 +420,31 @@ export default function CodenamesSetupScreen({ navigation, route }) {
   const canStart = canStartGame();
 
   return (
-    <LinearGradient colors={['#3B82F6', '#06B6D4', '#14B8A6']} style={styles.container}>
+    <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: Math.max(insets.top || 0, 8) }]}>
-          {/* Centered Room Code */}
-          <View style={styles.headerCenter}>
-            {isRivalsMode && (
-              <View style={styles.rivalsBadge}>
-                <Text style={styles.rivalsBadgeText}>⚔️ יריבים</Text>
-              </View>
-            )}
-            <Pressable onPress={copyRoomCode} style={styles.roomCodeContainer}>
-              <Text style={styles.roomCodeLabel}>קוד:</Text>
-              <Text style={styles.roomCodeText}>{roomCode}</Text>
-              <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
-            </Pressable>
-          </View>
+        {/* Unified Top Bar */}
+        <UnifiedTopBar
+          roomCode={roomCode}
+          variant="codenames"
+          onExit={goBack}
+          onRulesPress={() => setShowRulesModal(true)}
+        />
 
-          {/* Right side: Copy Link + Exit */}
-          <View style={styles.headerRight}>
-            <Pressable onPress={handleCopyRoomLink} style={styles.copyLinkButtonCompact}>
-              <Text style={styles.copyLinkIcon}>📋</Text>
-            </Pressable>
-            <GradientButton
-              title="יציאה"
-              onPress={goBack}
-              variant="codenames"
-              style={styles.exitButtonHeader}
-            />
+        {/* Rivals Mode Badge */}
+        {isRivalsMode && (
+          <View style={styles.rivalsBadgeWrapper}>
+            <View style={styles.rivalsBadge}>
+              <Text style={styles.rivalsBadgeText}>⚔️ יריבים</Text>
+            </View>
           </View>
-        </View>
+        )}
+
+        {/* Rules Modal */}
+        <RulesModal
+          visible={showRulesModal}
+          onClose={() => setShowRulesModal(false)}
+          variant="codenames"
+        />
 
         <View style={styles.card}>
           <View style={styles.cardHeader}>
@@ -685,13 +680,14 @@ export default function CodenamesSetupScreen({ navigation, route }) {
           </View>
         </View>
       </ScrollView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#FFFFFF',
   },
   loadingContainer: {
     flex: 1,
@@ -784,6 +780,11 @@ const styles = StyleSheet.create({
   copyButtonText: {
     fontSize: 18,
   },
+  rivalsBadgeWrapper: {
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 8,
+  },
   rivalsBadge: {
     backgroundColor: '#F97316',
     borderRadius: 8,
@@ -796,17 +797,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   card: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    backgroundColor: '#FFFFFF',
     borderRadius: 24,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.1,
     shadowRadius: 12,
-    elevation: 8,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   cardHeader: {
-    backgroundColor: '#3B82F6',
+    backgroundColor: '#D9C3A5', // Codenames theme color - חום בהיר
     padding: 16,
   },
   cardTitle: {
@@ -820,9 +823,9 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   hostInfo: {
-    backgroundColor: '#DBEAFE',
+    backgroundColor: '#F5F0E8',
     borderWidth: 1,
-    borderColor: '#93C5FD',
+    borderColor: '#D9C3A5', // Codenames theme color
     borderRadius: 16,
     padding: 16,
     alignItems: 'center',
@@ -831,11 +834,11 @@ const styles = StyleSheet.create({
   hostText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1E40AF',
+    color: '#2C3E50',
   },
   hostSubtext: {
     fontSize: 14,
-    color: '#475569',
+    color: '#374151',
     textAlign: 'center',
   },
   drinkingModeContainer: {
@@ -865,9 +868,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   guestInfo: {
-    backgroundColor: '#DBEAFE',
+    backgroundColor: '#F5F0E8',
     borderWidth: 1,
-    borderColor: '#93C5FD',
+    borderColor: '#D9C3A5', // Codenames theme color
     borderRadius: 16,
     padding: 16,
     alignItems: 'center',
@@ -875,11 +878,11 @@ const styles = StyleSheet.create({
   guestText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1E40AF',
+    color: '#2C3E50',
   },
   guestSubtext: {
     fontSize: 14,
-    color: '#475569',
+    color: '#374151',
     marginTop: 4,
     textAlign: 'center',
   },
@@ -986,6 +989,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 32,
     gap: 16,
+    backgroundColor: '#F5F0E8',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#D9C3A5', // Codenames theme color
   },
   rivalsIcon: {
     fontSize: 64,
@@ -993,7 +1000,7 @@ const styles = StyleSheet.create({
   rivalsTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#374151',
+    color: '#2C3E50',
   },
   rivalsSubtext: {
     fontSize: 14,
@@ -1004,7 +1011,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   startButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#D9C3A5', // Codenames theme color - חום בהיר
     borderRadius: 16,
     padding: 20,
     flexDirection: 'row',
@@ -1026,9 +1033,9 @@ const styles = StyleSheet.create({
   readyBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#D1FAE5',
+    backgroundColor: '#F5F0E8',
     borderWidth: 2,
-    borderColor: '#10B981',
+    borderColor: '#D9C3A5', // Codenames theme color
     borderRadius: 16,
     padding: 12,
     gap: 8,
@@ -1037,18 +1044,18 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#10B981',
+    backgroundColor: '#D9C3A5', // Codenames theme color
   },
   readyText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#065F46',
+    color: '#2C3E50',
   },
   warningBadge: {
     flexDirection: 'row',
     backgroundColor: '#FEF3C7',
     borderWidth: 2,
-    borderColor: '#F59E0B',
+    borderColor: '#D9C3A5', // Codenames theme color
     borderRadius: 16,
     padding: 12,
     gap: 12,
@@ -1063,27 +1070,27 @@ const styles = StyleSheet.create({
   warningTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#92400E',
+    color: '#2C3E50',
     marginBottom: 4,
   },
   warningSubtext: {
     fontSize: 12,
-    color: '#92400E',
+    color: '#374151',
   },
   warningItem: {
     fontSize: 14,
-    color: '#92400E',
+    color: '#374151',
   },
   rivalsInfoBadge: {
-    backgroundColor: '#EDE9FE',
+    backgroundColor: '#F5F0E8',
     borderWidth: 2,
-    borderColor: '#A78BFA',
+    borderColor: '#D9C3A5', // Codenames theme color
     borderRadius: 16,
     padding: 12,
     alignItems: 'center',
   },
   rivalsInfoText: {
     fontSize: 14,
-    color: '#6D28D9',
+    color: '#2C3E50',
   },
 });

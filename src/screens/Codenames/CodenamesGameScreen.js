@@ -10,6 +10,8 @@ import TeamInfo from '../../components/codenames/TeamInfo';
 import RivalsTimer from '../../components/codenames/RivalsTimer';
 import TeamWordsPanel from '../../components/codenames/TeamWordsPanel';
 import GradientButton from '../../components/codenames/GradientButton';
+import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
+import RulesModal from '../../components/shared/RulesModal';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
@@ -19,8 +21,8 @@ export default function CodenamesGameScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [room, setRoom] = useState(null);
   const [currentPlayerName, setCurrentPlayerName] = useState('');
-  const [copied, setCopied] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [showRulesModal, setShowRulesModal] = useState(false);
   const [error, setError] = useState(null);
   const [showTeamWords, setShowTeamWords] = useState(false);
   const [forceCloseModal, setForceCloseModal] = useState(false);
@@ -753,12 +755,14 @@ export default function CodenamesGameScreen({ navigation, route }) {
     }
   };
 
+  const THEME_COLOR = '#D9C3A5'; // חום בהיר - Codenames theme color
+
   if (error) {
     return (
-      <LinearGradient colors={['#3B82F6', '#06B6D4', '#14B8A6']} style={styles.errorContainer}>
+      <View style={styles.errorContainer}>
         <Text style={styles.errorTitle}>שגיאה בטעינת המשחק</Text>
         <Text style={styles.errorMessage}>לא הצלחנו לטעון את משחק שם טוב</Text>
-        <TouchableOpacity style={styles.errorButton} onPress={() => {
+        <TouchableOpacity style={[styles.errorButton, { backgroundColor: THEME_COLOR }]} onPress={() => {
           const parent = navigation.getParent();
           if (parent) {
             parent.reset({
@@ -771,7 +775,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
         }}>
           <Text style={styles.errorButtonText}>חזרה למסך הבית</Text>
         </TouchableOpacity>
-      </LinearGradient>
+      </View>
     );
   }
 
@@ -799,38 +803,31 @@ export default function CodenamesGameScreen({ navigation, route }) {
   const blueWordsLeft = countWordsLeft('blue');
 
   return (
-    <LinearGradient colors={['#3B82F6', '#06B6D4', '#14B8A6']} style={styles.container}>
+    <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
-          {/* Centered Room Code */}
-          <View style={styles.headerCenter}>
-            {room.drinking_popup !== null && (
-              <View style={styles.drinkingBadge}>
-                <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה</Text>
-              </View>
-            )}
-            <View style={styles.roomCodeContainer}>
-              <Text style={styles.roomCodeLabel}>קוד:</Text>
-              <View style={styles.roomCodeBadge}>
-                <Text style={styles.roomCodeText}>{roomCode}</Text>
-              </View>
-              <TouchableOpacity onPress={copyRoomCode} style={styles.copyButton}>
-                <Text style={styles.copyButtonText}>{copied ? '✓' : '📋'}</Text>
-              </TouchableOpacity>
+        {/* Unified Top Bar */}
+        <UnifiedTopBar
+          roomCode={roomCode}
+          variant="codenames"
+          onExit={goBack}
+          onRulesPress={() => setShowRulesModal(true)}
+        />
+
+        {/* Drinking Mode Badge */}
+        {room.drinking_popup !== null && (
+          <View style={styles.drinkingBadgeWrapper}>
+            <View style={styles.drinkingBadge}>
+              <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה</Text>
             </View>
           </View>
+        )}
 
-          {/* Right side: Exit */}
-          <View style={styles.headerRight}>
-            <GradientButton
-              title="יציאה"
-              onPress={goBack}
-              variant="codenames"
-              style={styles.exitButtonHeader}
-            />
-          </View>
-        </View>
+        {/* Rules Modal */}
+        <RulesModal
+          visible={showRulesModal}
+          onClose={() => setShowRulesModal(false)}
+          variant="codenames"
+        />
 
         {/* Drinking Mode Popup */}
         {room.drinking_popup && (
@@ -1024,13 +1021,14 @@ export default function CodenamesGameScreen({ navigation, route }) {
           />
         </View>
       </ScrollView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#FFFFFF', // White background
   },
   loadingContainer: {
     flex: 1,
@@ -1038,7 +1036,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    color: '#FFFFFF',
+    color: '#374151', // Dark gray for white background
     fontSize: 20,
     marginTop: 16,
   },
@@ -1051,12 +1049,12 @@ const styles = StyleSheet.create({
   errorTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#374151', // Dark gray for white background
     marginBottom: 12,
   },
   errorMessage: {
     fontSize: 16,
-    color: '#FFFFFF',
+    color: '#6B7280', // Gray for white background
     textAlign: 'center',
     marginBottom: 24,
   },
@@ -1067,7 +1065,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   errorButtonText: {
-    color: '#3B82F6',
+    color: '#FFFFFF', // White text on theme color background
     fontSize: 16,
     fontWeight: '600',
   },
@@ -1096,7 +1094,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   backButtonText: {
-    color: '#FFFFFF',
+    color: '#374151', // Dark gray for white background
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1112,8 +1110,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     minWidth: 60,
   },
+  drinkingBadgeWrapper: {
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 8,
+  },
   drinkingBadge: {
-    backgroundColor: '#F97316',
+    backgroundColor: '#D9C3A5', // Codenames theme color
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -1174,7 +1177,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#F97316',
+    color: '#D9C3A5', // Codenames theme color
   },
   modalMessage: {
     fontSize: 20,
@@ -1187,10 +1190,10 @@ const styles = StyleSheet.create({
   modalSubtitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#F97316',
+    color: '#D9C3A5', // Codenames theme color
   },
   modalButton: {
-    backgroundColor: '#F97316',
+    backgroundColor: '#D9C3A5', // Codenames theme color
     borderRadius: 12,
     paddingHorizontal: 32,
     paddingVertical: 16,
@@ -1225,7 +1228,7 @@ const styles = StyleSheet.create({
   },
   winnerButton: {
     width: '100%',
-    backgroundColor: '#2563EB',
+    backgroundColor: '#D9C3A5', // Codenames theme color
     borderRadius: 12,
     padding: 16,
     minHeight: 48,
@@ -1235,7 +1238,7 @@ const styles = StyleSheet.create({
   winnerButtonOutline: {
     backgroundColor: 'transparent',
     borderWidth: 2,
-    borderColor: '#2563EB',
+    borderColor: '#D9C3A5', // Codenames theme color
   },
   winnerButtonText: {
     color: '#FFFFFF',
@@ -1244,7 +1247,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   winnerButtonTextOutline: {
-    color: '#2563EB',
+    color: '#D9C3A5', // Codenames theme color
   },
   winnerButtonDisabled: {
     opacity: 0.5,
@@ -1267,13 +1270,13 @@ const styles = StyleSheet.create({
   toggleButton: {
     backgroundColor: '#FFFFFF',
     borderWidth: 2,
-    borderColor: '#A78BFA',
+    borderColor: '#D9C3A5', // Codenames theme color
     borderRadius: 12,
     padding: 12,
   },
   toggleButtonText: {
     fontSize: 14,
-    color: '#6B21A8',
+    color: '#8B6F47', // Darker brown for text
     textAlign: 'center',
   },
   statusCard: {
@@ -1328,7 +1331,7 @@ const styles = StyleSheet.create({
     color: '#2563EB',
   },
   endTurnButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#D9C3A5', // Codenames theme color
     borderRadius: 8,
     padding: 10,
     marginTop: 4,

@@ -9,6 +9,8 @@ import TimeUpPopup from '../../components/alias/TimeUpPopup';
 import GoldenWordPopup from '../../components/alias/GoldenWordPopup';
 import GoldenRoundCard from '../../components/alias/GoldenRoundCard';
 import RoundSummary from '../../components/alias/RoundSummary';
+import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
+import RulesModal from '../../components/shared/RulesModal';
 import { db } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, collection, getDocs } from 'firebase/firestore';
 import { generateCards } from '../../logic/alias';
@@ -29,6 +31,7 @@ export default function AliasGameScreen({ navigation, route }) {
   const [timeIsUp, setTimeIsUp] = useState(false);
   const [timerKey, setTimerKey] = useState(0);
   const [showGoldenPopup, setShowGoldenPopup] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
 
@@ -963,40 +966,46 @@ export default function AliasGameScreen({ navigation, route }) {
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
-          <GradientButton
-            title="← יציאה"
-            onPress={async () => {
-              // Cleanup listeners
-              if (unsubscribeRef.current) {
-                unsubscribeRef.current();
-                unsubscribeRef.current = null;
-              }
-              
-              // Cleanup room state
-              await clearCurrentRoom();
-              
-              // Navigate to main menu using reset to clear the stack
-              const parent = navigation.getParent();
-              if (parent) {
-                parent.reset({
-                  index: 0,
-                  routes: [{ name: 'Home' }]
-                });
-              } else {
-                // Fallback: navigate to Home
-                navigation.navigate('Home');
-              }
-            }}
-            variant="alias"
-            style={styles.backButton}
-          />
-          <View style={styles.headerInfo}>
-            <Text style={styles.roomCodeText}>קוד: {roomCode}</Text>
-            <Text style={styles.scoreText}>ניקוד: {room.current_round_score}</Text>
-          </View>
+        {/* Unified Top Bar */}
+        <UnifiedTopBar
+          roomCode={roomCode}
+          variant="alias"
+          onExit={async () => {
+            // Cleanup listeners
+            if (unsubscribeRef.current) {
+              unsubscribeRef.current();
+              unsubscribeRef.current = null;
+            }
+            
+            // Cleanup room state
+            await clearCurrentRoom();
+            
+            // Navigate to main menu using reset to clear the stack
+            const parent = navigation.getParent();
+            if (parent) {
+              parent.reset({
+                index: 0,
+                routes: [{ name: 'Home' }]
+              });
+            } else {
+              // Fallback: navigate to Home
+              navigation.navigate('Home');
+            }
+          }}
+          onRulesPress={() => setShowRulesModal(true)}
+        />
+
+        {/* Score Display */}
+        <View style={styles.scoreDisplay}>
+          <Text style={styles.scoreText}>ניקוד: {room.current_round_score}</Text>
         </View>
+
+        {/* Rules Modal */}
+        <RulesModal
+          visible={showRulesModal}
+          onClose={() => setShowRulesModal(false)}
+          variant="alias"
+        />
 
         {/* Team Info */}
         <View style={styles.teamInfo}>
@@ -1208,6 +1217,12 @@ const styles = StyleSheet.create({
   },
   headerInfo: {
     alignItems: 'flex-end',
+  },
+  scoreDisplay: {
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginBottom: 8,
   },
   roomCodeText: {
     color: '#4FA8FF', // Alias theme color - כחול בהיר

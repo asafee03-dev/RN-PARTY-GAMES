@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, onSnapshot, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -6,8 +6,9 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import DrawCanvas from '../../components/draw/DrawCanvas';
 import Timer from '../../components/game/Timer';
+import RulesModal from '../../components/shared/RulesModal';
+import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
 import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
 import storage from '../../utils/storage';
 
@@ -27,7 +28,6 @@ export default function DrawRoomScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [room, setRoom] = useState(null);
   const [currentPlayerName, setCurrentPlayerName] = useState('');
-  const [copied, setCopied] = useState(false);
   const [selectedColor, setSelectedColor] = useState('#000000');
   const [toolType, setToolType] = useState('pencil');
   const [brushSize, setBrushSize] = useState(3);
@@ -38,6 +38,7 @@ export default function DrawRoomScreen({ navigation, route }) {
   const [error, setError] = useState(null);
   const [timeRemaining, setTimeRemaining] = useState(60);
   const [forceCloseModal, setForceCloseModal] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
 
   const timerCheckInterval = useRef(null);
   const unsubscribeRef = useRef(null);
@@ -118,7 +119,7 @@ export default function DrawRoomScreen({ navigation, route }) {
     }
 
     loadRoom();
-    setupRealtimeListener();
+    // setupRealtimeListener will be called from loadRoom after room is loaded
 
     return () => {
       // Remove player from room on unmount
@@ -182,14 +183,19 @@ export default function DrawRoomScreen({ navigation, route }) {
     return unsubscribe;
   }, [navigation]);
 
-  const setupRealtimeListener = () => {
+  const setupRealtimeListener = (roomId) => {
     // Prevent duplicate listeners
     if (unsubscribeRef.current) {
       unsubscribeRef.current();
       unsubscribeRef.current = null;
     }
 
-    const roomRef = doc(db, 'DrawRoom', roomCode);
+    if (!roomId) {
+      console.warn('⚠️ Cannot setup listener: roomId is missing');
+      return;
+    }
+
+    const roomRef = doc(db, 'DrawRoom', roomId);
     
     unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
@@ -432,16 +438,19 @@ export default function DrawRoomScreen({ navigation, route }) {
       setIsLoading(true);
       await waitForFirestoreReady();
       
-      const roomRef = doc(db, 'DrawRoom', roomCode);
-      const roomSnap = await getDoc(roomRef);
+      // Query by room_code field instead of document ID
+      const q = query(collection(db, 'DrawRoom'), where('room_code', '==', roomCode.toUpperCase()));
+      const querySnapshot = await getDocs(q);
       
-      if (!roomSnap.exists()) {
+      if (querySnapshot.empty) {
         console.warn('❌ Room not found with code:', roomCode);
         await clearCurrentRoom();
         Alert.alert('שגיאה', 'החדר לא נמצא');
         navigation.goBack();
         return;
       }
+      
+      const roomSnap = querySnapshot.docs[0];
       
       const roomData = { id: roomSnap.id, ...roomSnap.data() };
       console.log('✅ Room loaded successfully:', roomData.id, 'with code:', roomData.room_code);
@@ -458,12 +467,17 @@ export default function DrawRoomScreen({ navigation, route }) {
         const updatedPlayers = [...(roomData.players || []), { name: playerName, score: 0 }];
         console.log('🔵 Adding player to Draw room:', playerName);
         try {
-          await updateDoc(roomRef, { players: updatedPlayers });
-          const updatedSnapshot = await getDoc(roomRef);
+          const roomDocRef = doc(db, 'DrawRoom', roomData.id);
+          await updateDoc(roomDocRef, { players: updatedPlayers });
+          const updatedSnapshot = await getDoc(roomDocRef);
           if (updatedSnapshot.exists()) {
             const updatedRoom = { id: updatedSnapshot.id, ...updatedSnapshot.data() };
             setRoom(updatedRoom);
             setIsLoading(false);
+            // Setup realtime listener with room ID
+            if (updatedRoom.id) {
+              setupRealtimeListener(updatedRoom.id);
+            }
             return;
           }
         } catch (updateErr) {
@@ -481,6 +495,11 @@ export default function DrawRoomScreen({ navigation, route }) {
       
       setRoom(roomData);
       setIsLoading(false);
+      
+      // Setup realtime listener with room ID (not room code)
+      if (roomData.id) {
+        setupRealtimeListener(roomData.id);
+      }
     } catch (error) {
       console.error('❌ Error loading room:', error);
       Alert.alert('שגיאה', 'לא הצלחנו לטעון את החדר');
@@ -823,14 +842,8 @@ export default function DrawRoomScreen({ navigation, route }) {
     }
   };
 
-  const handleCopyRoomCode = async () => {
-    await copyRoomCode(roomCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleCopyRoomLink = async () => {
-    await copyRoomLink(roomCode, 'draw');
+  const handleRulesPress = () => {
+    setShowRulesModal(true);
   };
 
   const resetGame = async () => {
@@ -1011,30 +1024,20 @@ export default function DrawRoomScreen({ navigation, route }) {
         nestedScrollEnabled={true}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
-          {/* Centered Room Code */}
-          <View style={styles.headerCenter}>
-            <Pressable onPress={handleCopyRoomCode} style={styles.roomCodeContainer}>
-              <Text style={styles.roomCodeLabel}>קוד:</Text>
-              <Text style={styles.roomCodeText}>{roomCode}</Text>
-              <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
-            </Pressable>
-          </View>
+        {/* Unified Top Bar */}
+        <UnifiedTopBar
+          roomCode={roomCode}
+          variant="draw"
+          onExit={goBack}
+          onRulesPress={handleRulesPress}
+        />
 
-          {/* Right side: Copy Link + Exit */}
-          <View style={styles.headerRight}>
-            <Pressable onPress={handleCopyRoomLink} style={styles.copyLinkButtonCompact}>
-              <Text style={styles.copyLinkIcon}>📋</Text>
-            </Pressable>
-            <GradientButton
-              title="יציאה"
-              onPress={goBack}
-              variant="draw"
-              style={styles.exitButtonHeader}
-            />
-          </View>
-        </View>
+        {/* Rules Modal */}
+        <RulesModal
+          visible={showRulesModal}
+          onClose={() => setShowRulesModal(false)}
+          variant="draw"
+        />
 
         {/* Lobby State */}
         {room.game_status === 'lobby' && (
@@ -1135,10 +1138,13 @@ export default function DrawRoomScreen({ navigation, route }) {
               </View>
             )}
 
-            {/* Canvas + Sidebar Row */}
-            <View style={styles.canvasSidebarRow}>
-              {/* Canvas - LEFT */}
-              <View style={styles.canvasWrapper}>
+              {/* Canvas - CENTER (full width) */}
+            <View 
+              style={styles.canvasWrapper}
+              onStartShouldSetResponder={() => isMyTurn()}
+              onMoveShouldSetResponder={() => isMyTurn()}
+              onResponderTerminationRequest={() => false}
+            >
                 <View 
                   style={styles.canvasContainer} 
                   collapsable={false}
@@ -1156,32 +1162,9 @@ export default function DrawRoomScreen({ navigation, route }) {
                 {/* Bottom Tools - Only for drawer */}
                 {isMyTurn() && (
                   <View style={styles.bottomToolsContainer}>
-                    {/* Row 1: Brush Sizes (Centered) */}
-                    <View style={styles.brushSizesRow}>
-                      {[3, 6, 9].map((size) => (
-                        <Pressable
-                          key={size}
-                          onPress={() => setBrushSize(size)}
-                          style={[
-                            styles.brushSizeButton,
-                            brushSize === size && styles.brushSizeButtonActive
-                          ]}
-                        >
-                          <View
-                            style={[
-                              styles.brushSizeIndicator,
-                              { width: size * 2, height: size * 2, borderRadius: size },
-                              brushSize === size && styles.brushSizeIndicatorActive,
-                              toolType === 'eraser' && styles.brushSizeIndicatorEraser
-                            ]}
-                          />
-                        </Pressable>
-                      ))}
-                    </View>
-
-                    {/* Row 2: Colors + Tool Toggle + Action Buttons */}
-                    <View style={styles.toolsRow2}>
-                      {/* Left: Tool Toggle */}
+                    {/* Top Row: Left (Tool Toggle), Center (Brush Sizes), Right (Undo + Clear) */}
+                    <View style={styles.toolsTopRow}>
+                      {/* Left Side: Tool Toggle */}
                       <View style={styles.toolToggleContainer}>
                         <Pressable
                           onPress={() => setToolType('pencil')}
@@ -1209,39 +1192,31 @@ export default function DrawRoomScreen({ navigation, route }) {
                         </Pressable>
                       </View>
 
-                      {/* Center: Colors */}
-                      {toolType === 'pencil' && (
-                        <View style={styles.colorsRow}>
-                          {['#000000', '#EF4444', '#F59E0B', '#FCD34D', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#6B7280'].map((color) => (
-                            <Pressable
-                              key={color}
-                              onPress={() => setSelectedColor(color)}
+                      {/* Center: Brush Sizes */}
+                      <View style={styles.brushSizesRow}>
+                        {[3, 6, 9].map((size) => (
+                          <Pressable
+                            key={size}
+                            onPress={() => setBrushSize(size)}
+                            style={[
+                              styles.brushSizeButton,
+                              brushSize === size && styles.brushSizeButtonActive
+                            ]}
+                          >
+                            <View
                               style={[
-                                styles.colorButtonCompact,
-                                { backgroundColor: color },
-                                color === '#FFFFFF' && styles.colorButtonWhite,
-                                selectedColor === color && styles.colorButtonSelected
+                                styles.brushSizeIndicator,
+                                { width: size * 2, height: size * 2, borderRadius: size },
+                                brushSize === size && styles.brushSizeIndicatorActive,
+                                toolType === 'eraser' && styles.brushSizeIndicatorEraser
                               ]}
-                            >
-                              {selectedColor === color && (
-                                <View style={styles.colorCheckmark}>
-                                  <View style={styles.colorCheckmarkInner} />
-                                </View>
-                              )}
-                            </Pressable>
-                          ))}
-                        </View>
-                      )}
+                            />
+                          </Pressable>
+                        ))}
+                      </View>
 
-                      {/* Right: Clear + Undo */}
+                      {/* Right Side: Undo + Clear All */}
                       <View style={styles.actionButtonsContainer}>
-                        <GradientButton
-                          title="🧹 נקה"
-                          onPress={handleClearAll}
-                          variant="draw"
-                          style={styles.actionButton}
-                          disabled={localStrokes.length === 0}
-                        />
                         <GradientButton
                           title="↶ בטל"
                           onPress={handleUndo}
@@ -1249,8 +1224,39 @@ export default function DrawRoomScreen({ navigation, route }) {
                           style={styles.actionButton}
                           disabled={localStrokes.length === 0}
                         />
+                        <GradientButton
+                          title="🧹 נקה"
+                          onPress={handleClearAll}
+                          variant="draw"
+                          style={styles.actionButton}
+                          disabled={localStrokes.length === 0}
+                        />
                       </View>
                     </View>
+
+                    {/* Bottom Row: All Colors (only when pencil is selected) */}
+                    {toolType === 'pencil' && (
+                      <View style={styles.colorsRow}>
+                        {['#000000', '#EF4444', '#F59E0B', '#FCD34D', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#6B7280'].map((color) => (
+                          <Pressable
+                            key={color}
+                            onPress={() => setSelectedColor(color)}
+                            style={[
+                              styles.colorButtonCompact,
+                              { backgroundColor: color },
+                              color === '#FFFFFF' && styles.colorButtonWhite,
+                              selectedColor === color && styles.colorButtonSelected
+                            ]}
+                          >
+                            {selectedColor === color && (
+                              <View style={styles.colorCheckmark}>
+                                <View style={styles.colorCheckmarkInner} />
+                              </View>
+                            )}
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
                   </View>
                 )}
 
@@ -1280,84 +1286,94 @@ export default function DrawRoomScreen({ navigation, route }) {
                 )}
               </View>
 
-              {/* Sidebar - Guesses and Scoreboard - RIGHT */}
-              <View style={styles.sidebar}>
-              {/* Shared Guesses Box */}
-              {room.game_status === 'playing' && !room.show_round_summary && (
-                <View style={styles.guessesCard}>
+            {/* Bottom Section - Players and Guesses */}
+            {room.game_status === 'playing' && !room.show_round_summary && (
+              <View style={styles.bottomSection}>
+                {/* Shared Guesses Box */}
+                <View style={styles.guessesCardBottom}>
                   <View style={styles.guessesHeader}>
                     <Text style={styles.guessesTitle}>📤 ניחושים</Text>
                   </View>
-                  <ScrollView style={styles.guessesList} nestedScrollEnabled>
+                  <ScrollView 
+                    style={styles.guessesListBottom} 
+                    nestedScrollEnabled
+                    horizontal={true}
+                    showsHorizontalScrollIndicator={false}
+                  >
                     {allGuesses.length === 0 ? (
                       <Text style={styles.noGuessesText}>עדיין אין ניחושים...</Text>
                     ) : (
-                      allGuesses.map((guess, idx) => {
-                        const normalizedWord = room.current_word?.toLowerCase().trim();
-                        const normalizedGuess = guess.guess?.toLowerCase().trim();
-                        const isCorrect = normalizedWord && normalizedGuess === normalizedWord;
-                        return (
-                          <View
-                            key={idx}
-                            style={[styles.guessItem, isCorrect && styles.guessItemCorrect]}
-                          >
-                            <View style={styles.guessItemContent}>
-                              <Text style={styles.guessPlayerName}>{guess.playerName}:</Text>
-                              <Text style={[styles.guessText, isCorrect && styles.guessTextCorrect]}>
-                                {guess.guess}
-                              </Text>
+                      <View style={styles.guessesHorizontalContainer}>
+                        {allGuesses.map((guess, idx) => {
+                          const normalizedWord = room.current_word?.toLowerCase().trim();
+                          const normalizedGuess = guess.guess?.toLowerCase().trim();
+                          const isCorrect = normalizedWord && normalizedGuess === normalizedWord;
+                          return (
+                            <View
+                              key={idx}
+                              style={[styles.guessItemBottom, isCorrect && styles.guessItemCorrect]}
+                            >
+                              <View style={styles.guessItemContent}>
+                                <Text style={styles.guessPlayerName}>{guess.playerName}:</Text>
+                                <Text style={[styles.guessText, isCorrect && styles.guessTextCorrect]}>
+                                  {guess.guess}
+                                </Text>
+                              </View>
+                              {isCorrect && (
+                                <Text style={styles.checkmark}>✓</Text>
+                              )}
                             </View>
-                            {isCorrect && (
-                              <Text style={styles.checkmark}>✓</Text>
-                            )}
-                          </View>
-                        );
-                      })
+                          );
+                        })}
+                      </View>
                     )}
                   </ScrollView>
                 </View>
-              )}
 
-              {/* Players Scoreboard */}
-              <View style={styles.scoreboardCard}>
-                <View style={styles.scoreboardHeader}>
-                  <Text style={styles.scoreboardTitle}>🏆 שחקנים</Text>
-                </View>
-                <ScrollView 
-                  style={styles.scoreboardList}
-                  showsVerticalScrollIndicator={false}
-                  nestedScrollEnabled
-                >
-                  {[...room.players].sort((a, b) => b.score - a.score).map((player, idx) => {
-                    const isCurrentTurn = room.players[room.current_turn_index]?.name === player.name;
-                    
-                    return (
-                      <View
-                        key={player.name}
-                        style={[styles.scoreboardPlayerCard, isCurrentTurn && styles.scoreboardPlayerCardActive]}
-                      >
-                        <View style={styles.scoreboardPlayerContent}>
-                          <View style={styles.scoreboardRankRow}>
-                            <Text style={styles.scoreboardRank}>#{idx + 1}</Text>
-                            {idx === 0 && player.score > 0 && (
-                              <Text style={styles.trophyIcon}>🏆</Text>
-                            )}
-                          </View>
-                          <Text style={styles.scoreboardPlayerName}>{player.name}</Text>
-                          {isCurrentTurn && (
-                            <View style={styles.drawingBadge}>
-                              <Text style={styles.drawingBadgeText}>🎨 מצייר</Text>
+                {/* Players Scoreboard */}
+                <View style={styles.scoreboardCardBottom}>
+                  <View style={styles.scoreboardHeader}>
+                    <Text style={styles.scoreboardTitle}>🏆 שחקנים</Text>
+                  </View>
+                  <ScrollView 
+                    style={styles.scoreboardListBottom}
+                    showsVerticalScrollIndicator={false}
+                    nestedScrollEnabled
+                    horizontal={true}
+                    showsHorizontalScrollIndicator={false}
+                  >
+                    <View style={styles.scoreboardHorizontalContainer}>
+                      {[...room.players].sort((a, b) => b.score - a.score).map((player, idx) => {
+                        const isCurrentTurn = room.players[room.current_turn_index]?.name === player.name;
+                        
+                        return (
+                          <View
+                            key={player.name}
+                            style={[styles.scoreboardPlayerCardBottom, isCurrentTurn && styles.scoreboardPlayerCardActive]}
+                          >
+                            <View style={styles.scoreboardPlayerContent}>
+                              <View style={styles.scoreboardRankRow}>
+                                <Text style={styles.scoreboardRank}>#{idx + 1}</Text>
+                                {idx === 0 && player.score > 0 && (
+                                  <Text style={styles.trophyIcon}>🏆</Text>
+                                )}
+                              </View>
+                              <Text style={styles.scoreboardPlayerName} numberOfLines={1}>{player.name}</Text>
+                              {isCurrentTurn && (
+                                <View style={styles.drawingBadge}>
+                                  <Text style={styles.drawingBadgeText}>🎨 מצייר</Text>
+                                </View>
+                              )}
+                              <Text style={styles.scoreboardScore}>{player.score}</Text>
                             </View>
-                          )}
-                          <Text style={styles.scoreboardScore}>{player.score}</Text>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </ScrollView>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                </View>
               </View>
-            </View>
-            </View>
+            )}
           </View>
         )}
 
@@ -1459,7 +1475,7 @@ export default function DrawRoomScreen({ navigation, route }) {
                   </Text>
                 </View>
 
-                {/* Drawing - Smaller */}
+                {/* Drawing - Full Display */}
                 <View style={styles.drawingSection}>
                   <Text style={styles.drawingSectionTitle}>הציור:</Text>
                   <View style={styles.drawingDisplay}>
@@ -1863,9 +1879,10 @@ const styles = StyleSheet.create({
   gameContainer: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     gap: 8,
     paddingVertical: 8,
+    paddingHorizontal: 4,
   },
   topBar: {
     flexDirection: 'row',
@@ -2056,30 +2073,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   canvasWrapper: {
-    flex: 1,
-    minWidth: 0,
+    width: '100%',
     alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    minHeight: 0,
   },
   canvasContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 2,
+    padding: 4,
     width: '100%',
-    maxHeight: '50%',
+    maxWidth: '100%',
+    flex: 1,
+    minHeight: 200,
     aspectRatio: 1,
   },
   bottomToolsContainer: {
     width: '100%',
-    paddingVertical: 4,
-    paddingHorizontal: 2,
-    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    gap: 8,
+  },
+  toolsTopRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    gap: 4,
   },
   brushSizesRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 8,
+    flex: 1,
+    maxWidth: 150,
   },
   brushSizeButton: {
     width: 36,
@@ -2106,13 +2135,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#9CA3AF',
   },
-  toolsRow2: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    gap: 4,
-  },
   toolToggleContainer: {
     flexDirection: 'row',
     gap: 2,
@@ -2121,6 +2143,7 @@ const styles = StyleSheet.create({
     padding: 3,
     borderWidth: 2,
     borderColor: '#E5E7EB',
+    flexShrink: 0,
   },
   toolToggleButton: {
     paddingVertical: 4,
@@ -2142,8 +2165,9 @@ const styles = StyleSheet.create({
     gap: 4,
     alignItems: 'center',
     justifyContent: 'center',
-    flex: 1,
-    flexWrap: 'nowrap',
+    flexWrap: 'wrap',
+    width: '100%',
+    paddingHorizontal: 8,
   },
   colorButtonCompact: {
     width: 24,
@@ -2213,8 +2237,8 @@ const styles = StyleSheet.create({
     minWidth: 50,
   },
   sidebar: {
-    width: 100,
-    maxWidth: 100,
+    width: 80,
+    maxWidth: 80,
     gap: 4,
     flexShrink: 0,
   },
@@ -2500,10 +2524,13 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#C48CFF', // Draw theme color
     borderRadius: 10,
-    overflow: 'hidden',
     backgroundColor: '#FFFFFF',
-    height: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
     width: '100%',
+    aspectRatio: 1,
+    maxWidth: '100%',
+    padding: 8,
   },
   guessesSection: {
     gap: 4,
@@ -2733,5 +2760,74 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     textAlign: 'center',
     marginTop: 4,
+  },
+  bottomSection: {
+    width: '100%',
+    paddingHorizontal: 4,
+    paddingTop: 8,
+    gap: 8,
+    maxHeight: 200,
+  },
+  guessesCardBottom: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    maxHeight: 100,
+  },
+  guessesListBottom: {
+    maxHeight: 80,
+    padding: 6,
+  },
+  guessesHorizontalContainer: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingVertical: 4,
+  },
+  guessItemBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    minWidth: 120,
+    maxWidth: 200,
+  },
+  scoreboardCardBottom: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    maxHeight: 100,
+  },
+  scoreboardListBottom: {
+    maxHeight: 80,
+    padding: 6,
+  },
+  scoreboardHorizontalContainer: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingVertical: 4,
+  },
+  scoreboardPlayerCardBottom: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    padding: 6,
+    minWidth: 80,
+    maxWidth: 120,
   },
 });

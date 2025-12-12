@@ -5,10 +5,11 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import FrequencyGauge from '../../components/frequency/FrequencyGauge';
 import ScoreBoard from '../../components/frequency/ScoreBoard';
+import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
+import RulesModal from '../../components/shared/RulesModal';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
 import storage from '../../utils/storage';
-import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
@@ -24,8 +25,8 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const [isAdvancingTurn, setIsAdvancingTurn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [copied, setCopied] = useState(false);
   const [forceCloseModal, setForceCloseModal] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
 
   const needleUpdateTimeout = useRef(null);
   const isProcessingReveal = useRef(false);
@@ -667,14 +668,8 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     }
   };
 
-  const handleCopyRoomCode = async () => {
-    await copyRoomCode(roomCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleCopyRoomLink = async () => {
-    await copyRoomLink(roomCode, 'frequency');
+  const handleRulesPress = () => {
+    setShowRulesModal(true);
   };
 
   const goBack = async () => {
@@ -767,35 +762,29 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
-          {/* Centered Room Code */}
-          <View style={styles.headerCenter}>
-            {drinkingMode && (
-              <View style={styles.drinkingBadge}>
-                <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה</Text>
-              </View>
-            )}
-            <Pressable onPress={handleCopyRoomCode} style={styles.roomCodeContainer}>
-              <Text style={styles.roomCodeLabel}>קוד:</Text>
-              <Text style={styles.roomCodeText}>{roomCode}</Text>
-              <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
-            </Pressable>
-          </View>
+        {/* Unified Top Bar */}
+        <UnifiedTopBar
+          roomCode={roomCode}
+          variant="frequency"
+          onExit={goBack}
+          onRulesPress={handleRulesPress}
+        />
 
-          {/* Right side: Copy Link + Exit */}
-          <View style={styles.headerRight}>
-            <Pressable onPress={handleCopyRoomLink} style={styles.copyLinkButtonCompact}>
-              <Text style={styles.copyLinkIcon}>📋</Text>
-            </Pressable>
-            <GradientButton
-              title="יציאה"
-              onPress={goBack}
-              variant="frequency"
-              style={styles.exitButtonHeader}
-            />
+        {/* Drinking Mode Badge */}
+        {drinkingMode && (
+          <View style={styles.drinkingBadgeWrapper}>
+            <View style={styles.drinkingBadge}>
+              <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה</Text>
+            </View>
           </View>
-        </View>
+        )}
+
+        {/* Rules Modal */}
+        <RulesModal
+          visible={showRulesModal}
+          onClose={() => setShowRulesModal(false)}
+          variant="frequency"
+        />
 
         {/* Lobby State */}
         {room.game_status === 'lobby' && (
@@ -1205,6 +1194,11 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
     minWidth: 60,
+  },
+  drinkingBadgeWrapper: {
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 8,
   },
   drinkingBadge: {
     backgroundColor: '#F97316',

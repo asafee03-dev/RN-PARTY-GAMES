@@ -117,12 +117,19 @@ export default function CodenamesGameScreen({ navigation, route }) {
       if (snapshot.exists()) {
         const updatedRoom = { id: snapshot.id, ...snapshot.data() };
         
-        // If game returned to setup, navigate back to setup
+        // If game returned to setup, close modal and navigate back to setup
         if (updatedRoom.game_status === 'setup') {
-          navigation.navigate('CodenamesSetup', { 
-            roomCode, 
-            gameMode: updatedRoom.game_mode || 'friends' 
-          });
+          // Close modal immediately for all players
+          setForceCloseModal(true);
+          // Update room state first
+          setRoom(updatedRoom);
+          // Small delay to ensure modal closes before navigation
+          setTimeout(() => {
+            navigation.navigate('CodenamesSetup', { 
+              roomCode, 
+              gameMode: updatedRoom.game_mode || 'friends' 
+            });
+          }, 150);
           return;
         }
         
@@ -174,11 +181,17 @@ export default function CodenamesGameScreen({ navigation, route }) {
   }, [navigation]);
 
   // Reset force close modal flag when game status changes back to setup
+  // Also close modal automatically for all players when game resets to setup
   useEffect(() => {
-    if (room?.game_status === 'setup' && forceCloseModal) {
-      setForceCloseModal(false);
+    if (room?.game_status === 'setup') {
+      // Close modal for all players when game resets to setup
+      setForceCloseModal(true);
+      // Reset flag after a short delay
+      setTimeout(() => {
+        setForceCloseModal(false);
+      }, 100);
     }
-  }, [room?.game_status, forceCloseModal]);
+  }, [room?.game_status]);
 
   // Setup auto-deletion when game ends
   useEffect(() => {
@@ -709,6 +722,9 @@ export default function CodenamesGameScreen({ navigation, route }) {
     // Also update local room state immediately to close modal
     setRoom(prev => prev ? { ...prev, game_status: 'setup', winner_team: null } : prev);
     
+    // Force a re-render to ensure modal closes
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
     const resetRedTeam = {
       ...room.red_team,
       revealed_words: []
@@ -738,8 +754,8 @@ export default function CodenamesGameScreen({ navigation, route }) {
       });
       console.log('✅ Game reset successfully - all state cleared');
       
-      // Small delay to ensure modal closes before navigation
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Ensure modal is fully closed before navigation - longer delay to ensure UI updates
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       // Navigate immediately using replace to ensure clean navigation
       navigation.replace('CodenamesSetup', { 
@@ -874,7 +890,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
         {/* Winner Modal */}
         {room && room.game_status === 'finished' && !forceCloseModal && room.winner_team && (
           <Modal
-            visible={true}
+            visible={room.game_status === 'finished' && !forceCloseModal && !!room.winner_team}
             transparent={true}
             animationType="fade"
             onRequestClose={() => {}}

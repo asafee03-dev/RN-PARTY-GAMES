@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "party-games-native",
+    "name": "PARTY GAMES",
     "slug": "party-games-native",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,9 +8,12 @@
     "scheme": "partygamesnative",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "main": "App.js",
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.asafmanor.partygames",
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -40,10 +43,23 @@
           }
         }
       ],
-      "expo-router"
+      "expo-router",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "iosAppId": "ca-app-pub-2071998287051065~8129109675",
+          "androidAppId": "ca-app-pub-2071998287051065~5934384693"
+        }
+      ]
     ],
     "experiments": {
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "82f79bc0-6c5a-4b51-9e41-c65ef51edbfb"
+      }
     }
   }
 }

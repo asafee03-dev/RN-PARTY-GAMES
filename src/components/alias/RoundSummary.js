@@ -44,21 +44,26 @@ export default function RoundSummary({
           const isGoldenWord = card.isGoldenWord;
           
           return (
-            <View key={index} style={styles.cardItem}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardNumber}>#{card.cardNumber}</Text>
-                <View style={styles.cardStatus}>
-                  {card.status === 'correct' ? (
-                    <Text style={styles.correctBadge}>✓ נכון</Text>
-                  ) : (
-                    <Text style={styles.skippedBadge}>✗ דולג</Text>
-                  )}
+            <View key={index} style={styles.wordCardContainer}>
+              <View style={styles.wordCard}>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardNumber}>#{card.cardNumber}</Text>
+                  <View style={styles.cardStatus}>
+                    {card.status === 'correct' ? (
+                      <View style={styles.correctBadge}>
+                        <Text style={styles.badgeText}>✓ נכון</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.skippedBadge}>
+                        <Text style={styles.badgeText}>✗ דולג</Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
-              </View>
-              
-              <Text style={styles.cardWord}>
-                {card.words || card.word || ''}
-              </Text>
+                
+                <Text style={styles.cardWord}>
+                  {card.words || card.word || ''}
+                </Text>
               
               {/* Last word - can change team */}
               {isLastWord && (
@@ -124,20 +129,21 @@ export default function RoundSummary({
                 </View>
               )}
               
-              {/* Toggle button for regular cards */}
-              {canToggle && (
-                <Pressable
-                  style={[
-                    styles.toggleButton,
-                    card.status === 'correct' ? styles.toggleButtonCorrect : styles.toggleButtonSkipped
-                  ]}
-                  onPress={() => onToggleCardStatus(index)}
-                >
-                  <Text style={styles.toggleButtonText}>
-                    {card.status === 'correct' ? 'לשנות לדולג' : 'לשנות לנכון'}
-                  </Text>
-                </Pressable>
-              )}
+                {/* Toggle button for regular cards */}
+                {canToggle && (
+                  <Pressable
+                    style={[
+                      styles.toggleButton,
+                      card.status === 'correct' ? styles.toggleButtonCorrect : styles.toggleButtonSkipped
+                    ]}
+                    onPress={() => onToggleCardStatus(index)}
+                  >
+                    <Text style={styles.toggleButtonText}>
+                      {card.status === 'correct' ? 'לשנות לדולג' : 'לשנות לנכון'}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
             </View>
           );
         })}
@@ -209,6 +215,21 @@ const styles = StyleSheet.create({
     maxHeight: 400,
     marginBottom: 20,
   },
+  wordCardContainer: {
+    marginBottom: 16,
+  },
+  wordCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+    borderWidth: 3,
+    borderColor: '#4FA8FF', // Alias theme color - כחול בהיר
+  },
   cardItem: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -231,28 +252,35 @@ const styles = StyleSheet.create({
   },
   correctBadge: {
     backgroundColor: '#10B981',
-    color: '#FFFFFF',
     paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    fontSize: 12,
-    fontWeight: '600',
+    paddingVertical: 6,
+    borderRadius: 16,
+    minWidth: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   skippedBadge: {
     backgroundColor: '#EF4444',
-    color: '#FFFFFF',
     paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    minWidth: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   cardWord: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 24,
+    fontWeight: 'bold',
     color: '#2C3E50',
+    marginTop: 12,
     marginBottom: 12,
-    textAlign: 'right',
+    textAlign: 'center',
+    minHeight: 40,
   },
   teamSelector: {
     marginTop: 12,

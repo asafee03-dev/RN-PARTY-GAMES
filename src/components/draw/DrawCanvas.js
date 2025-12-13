@@ -4,7 +4,8 @@ import Svg, { Path, G } from 'react-native-svg';
 
 const { width, height } = Dimensions.get('window');
 // Canvas takes 70-80% of screen height on mobile, centered and large
-const CANVAS_SIZE = Math.min(width - 20, height * 0.75, 600); // 75% of height, max 600px
+// Use consistent size calculation to ensure canvas fits in same space on mobile
+const CANVAS_SIZE = Math.min(width - 40, height * 0.7, 600); // 70% of height, max 600px, with padding
 const CANVAS_WIDTH = CANVAS_SIZE;
 const CANVAS_HEIGHT = CANVAS_SIZE;
 
@@ -347,6 +348,16 @@ const DrawCanvas = forwardRef(({
       onStartShouldSetResponder={() => !disabledRef.current}
       onMoveShouldSetResponder={() => !disabledRef.current}
       onResponderTerminationRequest={() => false}
+      onTouchStart={(e) => {
+        if (!disabledRef.current) {
+          e.stopPropagation();
+        }
+      }}
+      onTouchMove={(e) => {
+        if (!disabledRef.current) {
+          e.stopPropagation();
+        }
+      }}
     >
       <Svg
         ref={svgRef}
@@ -405,6 +416,8 @@ const styles = StyleSheet.create({
     touchAction: 'none',
     // Ensure canvas captures all touch events
     pointerEvents: 'box-only',
+    // Prevent parent scroll when touching canvas
+    zIndex: 10,
   },
   svg: {
     flex: 1,

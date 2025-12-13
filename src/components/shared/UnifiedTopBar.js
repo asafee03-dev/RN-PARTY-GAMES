@@ -81,7 +81,7 @@ export default function UnifiedTopBar({
         )}
 
         {/* Rules Button */}
-        {showRules && (
+        {showRules && onRulesPress && (
           <Pressable onPress={onRulesPress} style={[styles.rulesButton, { backgroundColor: themeColor }]}>
             <Text style={styles.rulesText}>חוקים</Text>
           </Pressable>

@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, TextInput, Switch } from 'react-native';
+import { doc, getDoc, onSnapshot, updateDoc } from 'firebase/firestore';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import PlayerCard from '../../components/shared/PlayerCard';
-import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
+import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import { db } from '../../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
+import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
 import storage from '../../utils/storage';
-import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
 
@@ -195,6 +195,14 @@ export default function AliasSetupScreen({ navigation, route }) {
         return;
       }
 
+      // Check if team already has a player (only one player allowed per team)
+      const currentPlayers = team.players && Array.isArray(team.players) ? team.players.filter(p => p && p.trim().length > 0) : [];
+      if (currentPlayers.length > 0 && !currentPlayers.includes(playerName)) {
+        Alert.alert('שגיאה', 'הקבוצה כבר מלאה. כל קבוצה יכולה להכיל שחקן אחד בלבד.');
+        setIsJoiningTeam(false);
+        return;
+      }
+
       // Remove player from all teams first
       updatedTeams.forEach(t => {
         if (t.players && Array.isArray(t.players)) {
@@ -302,9 +310,27 @@ export default function AliasSetupScreen({ navigation, route }) {
     try {
       const updatedTeams = [...room.teams];
       const newTeamIndex = updatedTeams.length;
+      
+      // Get all colors currently used by existing teams
+      const usedColors = updatedTeams.map(team => team.color).filter(Boolean);
+      
+      // Find the first available color that's not already used
+      let selectedColor = null;
+      for (const color of TEAM_COLORS) {
+        if (!usedColors.includes(color)) {
+          selectedColor = color;
+          break;
+        }
+      }
+      
+      // Fallback to a color by index if all colors are used (shouldn't happen)
+      if (!selectedColor) {
+        selectedColor = TEAM_COLORS[newTeamIndex % TEAM_COLORS.length];
+      }
+      
       const newTeam = {
         name: `קבוצה ${newTeamIndex + 1}`,
-        color: TEAM_COLORS[newTeamIndex % TEAM_COLORS.length],
+        color: selectedColor,
         players: []
       };
       updatedTeams.push(newTeam);
@@ -511,7 +537,8 @@ export default function AliasSetupScreen({ navigation, route }) {
             const isPlayerInTeam = team.players && Array.isArray(team.players) && team.players.includes(playerName);
             const teamColor = (team.color && typeof team.color === 'string') ? team.color : TEAM_COLORS[index % TEAM_COLORS.length];
             const teamName = (team.name && typeof team.name === 'string') ? team.name : `קבוצה ${index + 1}`;
-            const playerCount = (team.players && Array.isArray(team.players)) ? team.players.length : 0;
+            const playerCount = (team.players && Array.isArray(team.players)) ? team.players.filter(p => p && p.trim().length > 0).length : 0;
+            const isTeamFull = playerCount >= 1; // Only one player allowed per team
 
             return (
               <View key={`team-${index}`} style={[styles.teamCard, { borderColor: teamColor }]}>
@@ -559,6 +586,10 @@ export default function AliasSetupScreen({ navigation, route }) {
                         style={styles.teamButton}
                         disabled={isJoiningTeam}
                       />
+                    ) : isTeamFull ? (
+                      <View style={styles.teamFullContainer}>
+                        <Text style={styles.teamFullText}>הקבוצה מלאה</Text>
+                      </View>
                     ) : (
                       <Pressable
                         onPress={() => handleJoinTeam(index)}
@@ -828,6 +859,19 @@ const styles = StyleSheet.create({
   },
   whiteTeamButtonText: {
     color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  teamFullContainer: {
+    width: '100%',
+    backgroundColor: '#E0E0E0',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  teamFullText: {
+    color: '#666',
     fontSize: 16,
     fontWeight: '600',
   },

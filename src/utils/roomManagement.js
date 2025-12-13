@@ -1,5 +1,5 @@
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { doc, deleteDoc, getDoc, query, collection, where, getDocs, onSnapshot } from 'firebase/firestore';
 
 /**
  * Room deletion utility functions
@@ -162,9 +162,42 @@ export function setupEmptyRoomAutoDeletion(collectionName, roomId) {
       playerCount = roomData.players.filter(p => p && p.name).length;
     } else if (roomData.teams && Array.isArray(roomData.teams)) {
       // For games with teams (like Alias)
+      // In Alias, players can be stored as strings or objects with name property
       playerCount = roomData.teams.reduce((count, team) => {
-        return count + (team.players && Array.isArray(team.players) ? team.players.filter(p => p && p.name).length : 0);
+        if (!team.players || !Array.isArray(team.players)) {
+          return count;
+        }
+        // Handle both string players (Alias) and object players
+        const teamPlayerCount = team.players.filter(p => {
+          if (!p) return false;
+          // If player is a string, count it
+          if (typeof p === 'string' && p.trim().length > 0) {
+            return true;
+          }
+          // If player is an object with a name property, count it
+          if (typeof p === 'object' && p.name) {
+            return true;
+          }
+          return false;
+        }).length;
+        return count + teamPlayerCount;
       }, 0);
+      
+      // Also count the host as a player (for Alias, host might not be in a team yet)
+      if (roomData.host_name && typeof roomData.host_name === 'string' && roomData.host_name.trim().length > 0) {
+        // Check if host is already counted in teams
+        const hostInTeam = roomData.teams.some(team => 
+          team.players && Array.isArray(team.players) && 
+          team.players.some(p => {
+            if (typeof p === 'string') return p === roomData.host_name;
+            if (typeof p === 'object' && p.name) return p.name === roomData.host_name;
+            return false;
+          })
+        );
+        if (!hostInTeam) {
+          playerCount += 1;
+        }
+      }
     } else if (roomData.red_team || roomData.blue_team) {
       // For Codenames
       const redPlayers = roomData.red_team?.guessers?.length || 0;
@@ -174,10 +207,16 @@ export function setupEmptyRoomAutoDeletion(collectionName, roomId) {
       playerCount = redPlayers + bluePlayers + redSpymaster + blueSpymaster;
     }
 
-    if (playerCount === 0) {
-      console.log(`🗑️ Auto-deleting room ${roomId} - all players left`);
+    // Don't delete rooms that are in setup phase (players might still be joining)
+    // Only delete if room is empty AND not in setup/lobby state
+    const isInSetupPhase = roomData.game_status === 'setup' || roomData.game_status === 'lobby';
+    
+    if (playerCount === 0 && !isInSetupPhase) {
+      console.log(`🗑️ Auto-deleting room ${roomId} - all players left and game is not in setup phase`);
       await deleteRoom(collectionName, roomId);
       unsubscribe(); // Stop listening after deletion
+    } else if (playerCount === 0 && isInSetupPhase) {
+      console.log(`ℹ️ Room ${roomId} is empty but in setup phase, skipping auto-deletion`);
     }
   }, (error) => {
     console.error(`❌ Error in empty room listener:`, error);

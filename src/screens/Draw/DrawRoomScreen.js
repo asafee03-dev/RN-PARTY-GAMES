@@ -1110,6 +1110,7 @@ export default function DrawRoomScreen({ navigation, route }) {
         showsVerticalScrollIndicator={false}
         nestedScrollEnabled={true}
         keyboardShouldPersistTaps="handled"
+        scrollEnabled={!isMyTurn() || !room || room.show_round_summary}
       >
         {/* Unified Top Bar */}
         <UnifiedTopBar
@@ -1229,9 +1230,19 @@ export default function DrawRoomScreen({ navigation, route }) {
               {/* Canvas - CENTER (full width) */}
             <View 
               style={styles.canvasWrapper}
-              onStartShouldSetResponder={() => isMyTurn()}
-              onMoveShouldSetResponder={() => isMyTurn()}
+              onStartShouldSetResponder={() => isMyTurn() && !room?.show_round_summary}
+              onMoveShouldSetResponder={() => isMyTurn() && !room?.show_round_summary}
               onResponderTerminationRequest={() => false}
+              onTouchStart={(e) => {
+                if (isMyTurn() && !room?.show_round_summary) {
+                  e.stopPropagation();
+                }
+              }}
+              onTouchMove={(e) => {
+                if (isMyTurn() && !room?.show_round_summary) {
+                  e.stopPropagation();
+                }
+              }}
             >
                 <View 
                   style={styles.canvasContainer} 
@@ -1538,6 +1549,7 @@ export default function DrawRoomScreen({ navigation, route }) {
                   style={styles.summaryScrollContent}
                   contentContainerStyle={styles.summaryScrollContainer}
                   showsVerticalScrollIndicator={true}
+                  nestedScrollEnabled={true}
                 >
                   <View style={styles.summaryHeader}>
                     <Text style={styles.summaryTitle}>סיכום הסבב</Text>
@@ -2176,6 +2188,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flex: 1,
     minHeight: 0,
+    // Prevent scrolling when touching canvas
+    zIndex: 10,
   },
   canvasContainer: {
     alignItems: 'center',
@@ -2186,6 +2200,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 200,
     aspectRatio: 1,
+    maxHeight: '100%',
   },
   bottomToolsContainer: {
     width: '100%',
@@ -2508,17 +2523,20 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     width: '100%',
     maxWidth: 500,
-    maxHeight: '85%',
+    maxHeight: '90%',
     overflow: 'hidden',
     flexDirection: 'column',
+    flex: 1,
   },
   summaryScrollContent: {
     flex: 1,
+    minHeight: 200,
   },
   summaryScrollContainer: {
     padding: 16,
-    gap: 10,
+    gap: 12,
     paddingBottom: 8,
+    flexGrow: 1,
   },
   summaryButtonContainer: {
     padding: 16,
@@ -2572,13 +2590,14 @@ const styles = StyleSheet.create({
   },
   summaryHeader: {
     backgroundColor: '#C48CFF', // Draw theme color
-    padding: 8,
+    padding: 12,
     borderRadius: 10,
     alignItems: 'center',
+    marginBottom: 8,
   },
   summaryTitle: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 18,
     fontWeight: '700',
   },
   winnerCard: {
@@ -2586,15 +2605,16 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#C48CFF', // Draw theme color
     borderRadius: 10,
-    padding: 8,
-    gap: 6,
+    padding: 12,
+    gap: 8,
     alignItems: 'center',
+    marginBottom: 8,
   },
   trophyIconLarge: {
-    fontSize: 24,
+    fontSize: 32,
   },
   winnerTitle: {
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: '700',
     color: '#059669',
     textAlign: 'center',
@@ -2634,10 +2654,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   drawingSection: {
-    gap: 4,
+    gap: 8,
+    marginBottom: 8,
   },
   drawingSectionTitle: {
-    fontSize: 11,
+    fontSize: 16,
     fontWeight: '700',
     color: '#1F2937',
     textAlign: 'center',
@@ -2652,15 +2673,19 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 1,
     maxWidth: '100%',
+    minHeight: 200,
+    maxHeight: 350,
     padding: 8,
   },
   guessesSection: {
-    gap: 4,
+    gap: 8,
+    marginBottom: 8,
   },
   guessesSectionTitle: {
-    fontSize: 11,
+    fontSize: 16,
     fontWeight: '700',
     color: '#1F2937',
+    marginBottom: 4,
   },
   summaryGuessesList: {
     gap: 4,
@@ -2685,7 +2710,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#D1D5DB',
     borderRadius: 8,
-    padding: 6,
+    padding: 10,
+    marginBottom: 4,
   },
   summaryGuessItemCorrect: {
     backgroundColor: '#D1FAE5',
@@ -2698,17 +2724,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   summaryGuessPlayerName: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: '700',
     color: '#1F2937',
   },
   summaryGuessLabel: {
-    fontSize: 10,
+    fontSize: 12,
     color: '#6B7280',
   },
   summaryGuessText: {
-    fontSize: 10,
+    fontSize: 14,
     color: '#374151',
+    fontWeight: '600',
   },
   summaryGuessTextCorrect: {
     color: '#059669',
@@ -2719,12 +2746,14 @@ const styles = StyleSheet.create({
     color: '#C48CFF', // Draw theme color
   },
   scoresSection: {
-    gap: 4,
+    gap: 8,
+    marginBottom: 8,
   },
   scoresSectionTitle: {
-    fontSize: 11,
+    fontSize: 16,
     fontWeight: '700',
     color: '#1F2937',
+    marginBottom: 4,
   },
   scoresGrid: {
     flexDirection: 'row',

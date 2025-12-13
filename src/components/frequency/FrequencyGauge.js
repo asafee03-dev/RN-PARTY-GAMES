@@ -284,6 +284,16 @@ export default function FrequencyGauge({
         onStartShouldSetResponder={() => canMove}
         onMoveShouldSetResponder={() => canMove}
         onResponderTerminationRequest={() => false}
+        onTouchStart={(e) => {
+          if (canMove) {
+            e.stopPropagation();
+          }
+        }}
+        onTouchMove={(e) => {
+          if (canMove) {
+            e.stopPropagation();
+          }
+        }}
       >
         <View style={styles.svgWrapper}>
           <Svg width={GAUGE_WIDTH} height={GAUGE_HEIGHT} viewBox={`0 0 ${GAUGE_WIDTH} ${GAUGE_HEIGHT}`}>
@@ -457,7 +467,7 @@ const styles = StyleSheet.create({
   legendText: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#E5E7EB',
+    color: '#0A1A3A', // Frequency theme color - כחול כהה
   },
   sectorNumber: {
     position: 'absolute',

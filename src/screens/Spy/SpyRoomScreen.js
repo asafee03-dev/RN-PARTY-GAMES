@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, Modal, Switch, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, Modal, Switch, TouchableOpacity, Platform, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
@@ -23,6 +23,8 @@ export default function SpyRoomScreen({ navigation, route }) {
   const [error, setError] = useState(null);
   const [showLocations, setShowLocations] = useState(false);
   const [numberOfSpies, setNumberOfSpies] = useState(1);
+  const [spyGuess, setSpyGuess] = useState('');
+  const [spyGuessSubmitted, setSpyGuessSubmitted] = useState(false);
 
   const timerInterval = useRef(null);
   const unsubscribeRef = useRef(null);
@@ -555,6 +557,52 @@ export default function SpyRoomScreen({ navigation, route }) {
     }
   };
 
+  const submitSpyGuess = async (guess) => {
+    if (!room || room.game_status !== 'playing' || !currentPlayerName || !isSpy) return;
+    if (!guess || !guess.trim()) {
+      Alert.alert('שגיאה', 'אנא הכנס ניחוש');
+      return;
+    }
+
+    if (room.spy_guess) {
+      Alert.alert('שגיאה', 'כבר שלחת ניחוש');
+      return;
+    }
+
+    const trimmedGuess = guess.trim();
+    setSpyGuessSubmitted(true);
+
+    try {
+      const roomRef = doc(db, 'SpyRoom', room.id);
+      const correctLocation = room.chosen_location || '';
+      const isCorrect = trimmedGuess.toLowerCase() === correctLocation.toLowerCase();
+      
+      // Save the guess and result
+      await updateDoc(roomRef, {
+        spy_guess: trimmedGuess,
+        spy_guess_correct: isCorrect,
+        spy_guess_player: currentPlayerName
+      });
+
+      // End the game automatically
+      await updateDoc(roomRef, {
+        game_status: 'finished'
+      });
+
+      if (isCorrect) {
+        Alert.alert('🎉 ניצחון!', `צדקת! המיקום היה: ${correctLocation}\nהמשחק הסתיים - המרגל ניצח!`);
+      } else {
+        Alert.alert('❌ טעות', `הניחוש שלך שגוי.\nהמיקום היה: ${correctLocation}\nהמשחק הסתיים - המרגל הפסיד!`);
+      }
+
+      console.log('✅ Spy guess submitted:', trimmedGuess, 'Correct:', isCorrect);
+    } catch (error) {
+      console.error('❌ Error submitting spy guess:', error);
+      setSpyGuessSubmitted(false);
+      Alert.alert('שגיאה', 'שגיאה בשליחת הניחוש. נסה שוב.');
+    }
+  };
+
   const endGame = async (roomData = null) => {
     const roomToUse = roomData || room;
     if (!roomToUse || !roomToUse.id) return;
@@ -609,8 +657,14 @@ export default function SpyRoomScreen({ navigation, route }) {
         chosen_location: null,
         all_locations: null,
         eliminated_locations: null,
-        all_votes_submitted: false
+        all_votes_submitted: false,
+        spy_guess: null,
+        spy_guess_correct: null,
+        spy_guess_player: null
       });
+      // Reset local state
+      setSpyGuess('');
+      setSpyGuessSubmitted(false);
       console.log('✅ Game reset successfully - all state cleared');
     } catch (error) {
       console.error('❌ Error resetting game:', error);
@@ -1005,6 +1059,47 @@ export default function SpyRoomScreen({ navigation, route }) {
                 />
               )}
 
+              {/* Spy Guess Input - Only for Spy */}
+              {isSpy && !room.spy_guess && !spyGuessSubmitted && room.game_status === 'playing' && (
+                <View style={styles.spyGuessCard}>
+                  <View style={styles.spyGuessHeader}>
+                    <Text style={styles.spyGuessTitle}>🎯 ניחוש המרגל</Text>
+                  </View>
+                  <View style={styles.spyGuessContent}>
+                    <Text style={styles.spyGuessDescription}>
+                      יש לך ניחוש אחד בלבד!{'\n'}
+                      אם תצדק - תוכל לנצח את המשחק!
+                    </Text>
+                    <TextInput
+                      style={styles.spyGuessInput}
+                      placeholder="הכנס את הניחוש שלך..."
+                      placeholderTextColor="#9CA3AF"
+                      value={spyGuess}
+                      onChangeText={setSpyGuess}
+                      editable={!spyGuessSubmitted}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <GradientButton
+                      title="שלח ניחוש"
+                      onPress={() => submitSpyGuess(spyGuess)}
+                      variant="spy"
+                      style={styles.spyGuessButton}
+                      disabled={!spyGuess.trim() || spyGuessSubmitted}
+                    />
+                  </View>
+                </View>
+              )}
+
+              {/* Show submitted guess status */}
+              {isSpy && (room.spy_guess || spyGuessSubmitted) && room.game_status === 'playing' && (
+                <View style={styles.spyGuessSubmittedCard}>
+                  <Text style={styles.spyGuessSubmittedText}>
+                    ✓ ניחוש נשלח: {room.spy_guess || spyGuess}
+                  </Text>
+                </View>
+              )}
+
               {/* Locations List - Only for Spy */}
               {isSpy && (
                 <View style={styles.locationsCard}>
@@ -1078,6 +1173,24 @@ export default function SpyRoomScreen({ navigation, route }) {
                 <Text style={styles.locationRevealName}>{room.chosen_location}</Text>
               </View>
 
+              {/* Spy Guess Result - Show if spy guessed and was wrong */}
+              {room.spy_guess && room.spy_guess_correct === false && (
+                <View style={styles.spyGuessResultCard}>
+                  <Text style={styles.spyGuessResultLabel}>ניחוש המרגל:</Text>
+                  <Text style={styles.spyGuessResultText}>{room.spy_guess}</Text>
+                  <Text style={styles.spyGuessResultStatus}>❌ ניחוש שגוי</Text>
+                </View>
+              )}
+
+              {/* Spy Guess Result - Show if spy guessed and was correct */}
+              {room.spy_guess && room.spy_guess_correct === true && (
+                <View style={styles.spyGuessResultCardCorrect}>
+                  <Text style={styles.spyGuessResultLabel}>ניחוש המרגל:</Text>
+                  <Text style={styles.spyGuessResultText}>{room.spy_guess}</Text>
+                  <Text style={styles.spyGuessResultStatusCorrect}>✅ ניחוש נכון - המרגל ניצח!</Text>
+                </View>
+              )}
+
               {/* Voting Results */}
               <View style={styles.votingResultsCard}>
                 <Text style={styles.votingResultsTitle}>תוצאות ההצבעה:</Text>
@@ -1097,10 +1210,23 @@ export default function SpyRoomScreen({ navigation, route }) {
                   const spyVotes = voteCounts.filter(v => v.wasSpy).map(v => v.votes);
                   const maxSpyVotes = spyVotes.length > 0 ? Math.max(...spyVotes) : 0;
                   
-                  // Spies win if at least one spy has fewer votes than the max (not caught)
-                  // Spies lose if all spies have the max votes (all caught)
-                  const allSpiesCaught = spyVotes.length > 0 && spyVotes.every(v => v === maxVotes && maxVotes > 0);
-                  const spyWon = !allSpiesCaught;
+                  // Check if spy guessed
+                  const spyGuessed = room.spy_guess && room.spy_guess.trim() !== '';
+                  const spyGuessedCorrectly = room.spy_guess_correct === true;
+                  const spyGuessedIncorrectly = room.spy_guess_correct === false;
+                  
+                  // Determine winner based on spy guess:
+                  // 1. If spy guessed correctly → spy wins
+                  // 2. If spy guessed incorrectly → spy loses (regardless of votes)
+                  // 3. If spy didn't guess → use normal voting logic
+                  let spyWon;
+                  if (spyGuessed) {
+                    spyWon = spyGuessedCorrectly;
+                  } else {
+                    // Normal voting logic: spies win if at least one spy has fewer votes than the max (not caught)
+                    const allSpiesCaught = spyVotes.length > 0 && spyVotes.every(v => v === maxVotes && maxVotes > 0);
+                    spyWon = !allSpiesCaught;
+                  }
                   
                   return (
                     <>
@@ -1981,5 +2107,103 @@ const styles = StyleSheet.create({
     color: '#374151',
     textAlign: 'center',
     fontWeight: '600',
+  },
+  spyGuessCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    marginBottom: 16,
+  },
+  spyGuessHeader: {
+    backgroundColor: '#DC2626',
+    padding: 16,
+    alignItems: 'center',
+  },
+  spyGuessTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  spyGuessContent: {
+    padding: 20,
+    gap: 16,
+  },
+  spyGuessDescription: {
+    fontSize: 14,
+    color: '#374151',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  spyGuessInput: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#DC2626',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: '#1F2937',
+    textAlign: 'right',
+  },
+  spyGuessButton: {
+    marginTop: 8,
+  },
+  spyGuessSubmittedCard: {
+    backgroundColor: '#D1FAE5',
+    borderWidth: 2,
+    borderColor: '#10B981',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  spyGuessSubmittedText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  spyGuessResultCard: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 2,
+    borderColor: '#EF4444',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    gap: 8,
+  },
+  spyGuessResultCardCorrect: {
+    backgroundColor: '#D1FAE5',
+    borderWidth: 2,
+    borderColor: '#10B981',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    gap: 8,
+  },
+  spyGuessResultLabel: {
+    fontSize: 16,
+    color: '#374151',
+    fontWeight: '600',
+  },
+  spyGuessResultText: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+  spyGuessResultStatus: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#DC2626',
+    marginTop: 8,
+  },
+  spyGuessResultStatusCorrect: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#10B981',
+    marginTop: 8,
   },
 });

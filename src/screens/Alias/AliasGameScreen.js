@@ -1048,16 +1048,18 @@ export default function AliasGameScreen({ navigation, route }) {
         {/* Game Content */}
         {room.round_active ? (
           <View style={styles.gameContent}>
-            {/* Timer */}
-            <View style={styles.timerContainer}>
-              <AliasTimer
-                key={timerKey}
-                duration={60}
-                startTime={room.round_start_time}
-                onTimeUp={handleTimeUpWrapper}
-                compact={false}
-              />
-            </View>
+            {/* Timer - only for playing team */}
+            {isMyTurn() && !room.current_word_is_golden && (
+              <View style={styles.timerContainer}>
+                <AliasTimer
+                  key={timerKey}
+                  duration={60}
+                  startTime={room.round_start_time}
+                  onTimeUp={handleTimeUpWrapper}
+                  compact={false}
+                />
+              </View>
+            )}
 
             {/* Progress Info for Playing Team */}
             {isMyTurn() && (
@@ -1078,8 +1080,8 @@ export default function AliasGameScreen({ navigation, route }) {
               </View>
             )}
 
-            {/* Time Up Popup */}
-            {timeIsUp && (
+            {/* Time Up Popup - only for playing team */}
+            {timeIsUp && isMyTurn() && (
               <TimeUpPopup
                 isMyTurn={isMyTurn()}
                 room={room}
@@ -1110,29 +1112,23 @@ export default function AliasGameScreen({ navigation, route }) {
               />
             )}
 
-            {/* Golden Word Popup for non-playing players */}
+            {/* Golden Word Popup for non-playing players - show automatically */}
             {room.current_word_is_golden && !isMyTurn() && !timeIsUp && (
               <GoldenWordPopup 
-                visible={showGoldenPopup} 
+                visible={true} 
                 onClose={() => setShowGoldenPopup(false)} 
               />
             )}
 
-            {/* Regular Word Card - only if not golden word */}
-            {!room.current_word_is_golden && !timeIsUp && (
+            {/* Regular Word Card - only if not golden word and it's my turn */}
+            {!room.current_word_is_golden && !timeIsUp && isMyTurn() && (
               <View style={styles.wordCard}>
                 <Text style={styles.wordText}>{currentWord}</Text>
                 <Text style={styles.cardNumber}>מילה {currentCardIndex + 1}</Text>
               </View>
             )}
 
-            {/* Frozen Word (Time Up) */}
-            {timeIsUp && !isMyTurn() && (
-              <View style={styles.wordCard}>
-                <Text style={styles.wordText}>{room.last_word_on_time_up || currentWord}</Text>
-                <Text style={styles.frozenText}>מילה קפואה</Text>
-              </View>
-            )}
+            {/* Frozen Word (Time Up) - removed for non-playing teams */}
 
             {/* Action Buttons - only for regular words (not golden) */}
             {isMyTurn() && !timeIsUp && !room.current_word_is_golden && (
@@ -1152,7 +1148,7 @@ export default function AliasGameScreen({ navigation, route }) {
               </View>
             )}
 
-            {/* Waiting Message */}
+            {/* Waiting Message - only show timer if not golden word */}
             {!isMyTurn() && !room.current_word_is_golden && !timeIsUp && (
               <View style={styles.waitingContainer}>
                 <AliasTimer
@@ -1166,6 +1162,35 @@ export default function AliasGameScreen({ navigation, route }) {
                 </Text>
                 <Text style={styles.waitingSubtext}>
                   ממתינים עד שהתור שלהם יסתיים...
+                </Text>
+                
+                {/* ריבוע תשובות נכונות */}
+                <View style={styles.scoreBox}>
+                  <Text style={styles.scoreBoxText}>
+                    תשובות נכונות: {room.current_round_score}
+                  </Text>
+                </View>
+
+                {/* ריבוע התקדמות */}
+                <View style={styles.progressBox}>
+                  <Text style={styles.progressBoxText}>
+                    התקדמות: {progress.moved >= 0 ? '+' : ''}{progress.moved}
+                  </Text>
+                  <Text style={styles.progressBoxSubtext}>
+                    {progress.currentPos + 1}/60
+                  </Text>
+                </View>
+              </View>
+            )}
+            
+            {/* Waiting Message for Golden Word - show info but no timer (popup handles it) */}
+            {!isMyTurn() && room.current_word_is_golden && !timeIsUp && (
+              <View style={styles.waitingContainer}>
+                <Text style={styles.waitingText}>
+                  {currentTeam?.name} משחקת כעת
+                </Text>
+                <Text style={styles.waitingSubtext}>
+                  מילת זהב! גם אתם יכולים לנחש
                 </Text>
                 
                 {/* ריבוע תשובות נכונות */}

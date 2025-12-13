@@ -766,6 +766,8 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!room || room.game_status !== 'playing' || isMyTurn() || hasPlayerSubmittedGuess(room, currentPlayerName)}
+        nestedScrollEnabled={true}
       >
         {/* Unified Top Bar */}
         <UnifiedTopBar
@@ -999,7 +1001,22 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                 )}
               </View>
 
-              <View style={styles.gaugeContainer}>
+              <View 
+                style={styles.gaugeContainer}
+                onStartShouldSetResponder={() => !isMyTurn() && !hasPlayerSubmittedGuess(room, currentPlayerName) && room.game_status === 'playing'}
+                onMoveShouldSetResponder={() => !isMyTurn() && !hasPlayerSubmittedGuess(room, currentPlayerName) && room.game_status === 'playing'}
+                onResponderTerminationRequest={() => false}
+                onTouchStart={(e) => {
+                  if (!isMyTurn() && !hasPlayerSubmittedGuess(room, currentPlayerName) && room.game_status === 'playing') {
+                    e.stopPropagation();
+                  }
+                }}
+                onTouchMove={(e) => {
+                  if (!isMyTurn() && !hasPlayerSubmittedGuess(room, currentPlayerName) && room.game_status === 'playing') {
+                    e.stopPropagation();
+                  }
+                }}
+              >
                 <FrequencyGauge
                   leftLabel={room.current_topic?.left_side || ''}
                   rightLabel={room.current_topic?.right_side || ''}
@@ -1371,7 +1388,7 @@ const styles = StyleSheet.create({
   playerCardName: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#1F2937',
+    color: '#0A1A3A', // Frequency theme color - כחול כהה
   },
   crownIconSmall: {
     fontSize: 12,
@@ -1435,6 +1452,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     // Prevent scroll when interacting with gauge
     touchAction: 'none',
+    zIndex: 10,
   },
   progressCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
@@ -1466,7 +1484,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   submittedPlayerText: {
-    color: '#FFFFFF',
+    color: '#0A1A3A', // Frequency theme color - כחול כהה
     fontSize: 12,
     fontWeight: '600',
   },
@@ -1542,7 +1560,7 @@ const styles = StyleSheet.create({
   guessPlayerName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1F2937',
+    color: '#0A1A3A', // Frequency theme color - כחול כהה
   },
   guessAngle: {
     fontSize: 12,

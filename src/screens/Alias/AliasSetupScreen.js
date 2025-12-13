@@ -105,10 +105,18 @@ export default function AliasSetupScreen({ navigation, route }) {
   }, [navigation]);
 
   // Auto-navigate when game starts
+  const hasNavigatedToGame = useRef(false);
+  
   useEffect(() => {
-    if (room && (room.game_status === 'waiting' || room.game_status === 'playing')) {
+    if (room && (room.game_status === 'waiting' || room.game_status === 'playing') && !hasNavigatedToGame.current) {
       // Game has started, navigate to game screen
+      hasNavigatedToGame.current = true;
       navigation.replace('AliasGame', { roomCode });
+    }
+    
+    // Reset flag if game goes back to setup
+    if (room && room.game_status === 'setup') {
+      hasNavigatedToGame.current = false;
     }
   }, [room?.game_status, roomCode, navigation]);
 

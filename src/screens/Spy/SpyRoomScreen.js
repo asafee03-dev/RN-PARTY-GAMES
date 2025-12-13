@@ -435,7 +435,7 @@ export default function SpyRoomScreen({ navigation, route }) {
           is_spy: true,
           location: '',
           role: '',
-          vote: null
+          votes: [] // Array for multiple votes
         };
       } else {
         const randomRole = randomLocation.roles[Math.floor(Math.random() * randomLocation.roles.length)];
@@ -444,7 +444,7 @@ export default function SpyRoomScreen({ navigation, route }) {
           is_spy: false,
           location: randomLocation.location,
           role: randomRole,
-          vote: null
+          votes: [] // Array for multiple votes
         };
       }
     });
@@ -506,14 +506,41 @@ export default function SpyRoomScreen({ navigation, route }) {
   const voteForPlayer = async (votedPlayerName) => {
     if (!room || room.game_status !== 'playing' || !currentPlayerName) return;
 
+    const numSpies = room.number_of_spies || 1;
+    const currentPlayer = room.players.find(p => p && p.name === currentPlayerName);
+    if (!currentPlayer) return;
+
+    // Get current votes array or initialize as empty
+    const currentVotes = currentPlayer.votes || [];
+    
+    // If already voted for this player, remove the vote (toggle)
+    // Otherwise, add the vote (up to numSpies votes)
+    let updatedVotes;
+    if (currentVotes.includes(votedPlayerName)) {
+      // Remove vote
+      updatedVotes = currentVotes.filter(v => v !== votedPlayerName);
+    } else {
+      // Add vote if we haven't reached the limit
+      if (currentVotes.length < numSpies) {
+        updatedVotes = [...currentVotes, votedPlayerName];
+      } else {
+        // Already at limit, can't add more votes
+        return;
+      }
+    }
+
     const updatedPlayers = room.players.map(p => {
       if (p.name === currentPlayerName) {
-        return { ...p, vote: votedPlayerName };
+        return { ...p, votes: updatedVotes };
       }
       return p;
     });
 
-    const allVoted = updatedPlayers.every(p => p.vote !== null && p.vote !== undefined);
+    // Check if all players have submitted their votes (each player needs numSpies votes)
+    const allVoted = updatedPlayers.every(p => {
+      const playerVotes = p.votes || [];
+      return playerVotes.length === numSpies;
+    });
     
     try {
       const roomRef = doc(db, 'SpyRoom', room.id);
@@ -521,7 +548,7 @@ export default function SpyRoomScreen({ navigation, route }) {
         players: updatedPlayers,
         all_votes_submitted: allVoted && updatedPlayers.length > 0
       });
-      console.log('✅ Vote submitted. All votes submitted:', allVoted);
+      console.log('✅ Vote submitted. Votes:', updatedVotes, 'All votes submitted:', allVoted);
     } catch (error) {
       console.error('❌ Error submitting vote:', error);
       return;
@@ -671,7 +698,8 @@ export default function SpyRoomScreen({ navigation, route }) {
   const players = room?.players && Array.isArray(room.players) ? room.players : [];
   const currentPlayer = players.find(p => p && p.name === currentPlayerName);
   const isSpy = currentPlayer?.is_spy || false;
-  const myVote = currentPlayer?.vote;
+  const myVotes = currentPlayer?.votes || []; // Array of votes
+  const numSpies = room?.number_of_spies || 1;
 
   return (
     <GradientBackground variant="spy">
@@ -733,16 +761,19 @@ export default function SpyRoomScreen({ navigation, route }) {
                         return (
                           <Pressable
                             key={num}
-                            onPress={() => {
-                              if (!isDisabled) {
+                            onPress={async () => {
+                              if (!isDisabled && room?.id) {
                                 const newNumSpies = num;
                                 setNumberOfSpies(newNumSpies);
                                 // Save to room
-                                if (room?.id) {
+                                try {
                                   const roomRef = doc(db, 'SpyRoom', room.id);
-                                  updateDoc(roomRef, { number_of_spies: newNumSpies }).catch(err => {
-                                    console.error('Error updating number of spies:', err);
-                                  });
+                                  await updateDoc(roomRef, { number_of_spies: newNumSpies });
+                                  console.log('✅ Number of spies updated to:', newNumSpies);
+                                } catch (err) {
+                                  console.error('❌ Error updating number of spies:', err);
+                                  // Revert on error
+                                  setNumberOfSpies(numberOfSpies);
                                 }
                               }
                             }}
@@ -773,11 +804,11 @@ export default function SpyRoomScreen({ navigation, route }) {
                 </View>
               )}
 
-              {/* Show number of spies to non-host players */}
-              {!isHost && room?.number_of_spies && room.number_of_spies > 1 && (
+              {/* Show number of spies to all players */}
+              {!isHost && room?.number_of_spies && (
                 <View style={styles.spiesInfoBadge}>
                   <Text style={styles.spiesInfoText}>
-                    🕵️ במשחק זה יהיו {room.number_of_spies} מרגלים
+                    🕵️ במשחק זה {room.number_of_spies === 1 ? 'יהיה מרגל אחד' : `יהיו ${room.number_of_spies} מרגלים`}
                   </Text>
                 </View>
               )}
@@ -886,7 +917,14 @@ export default function SpyRoomScreen({ navigation, route }) {
               {/* Voting Section */}
               <View style={styles.votingCard}>
                 <View style={styles.votingHeader}>
-                  <Text style={styles.votingTitle}>הצבעה - מי המרגל?</Text>
+                  <Text style={styles.votingTitle}>
+                    הצבעה - מי המרגל{numSpies > 1 ? `ים? (${myVotes.length}/${numSpies} הצבעות)` : '?'}
+                  </Text>
+                  {numSpies > 1 && (
+                    <Text style={styles.votingSubtitle}>
+                      יש {numSpies} מרגלים - הצבע {numSpies} הצבעות
+                    </Text>
+                  )}
                 </View>
                 <View style={styles.votingContent}>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.votingPlayersList}>
@@ -894,19 +932,25 @@ export default function SpyRoomScreen({ navigation, route }) {
                       .filter((player) => player != null && player.name != null)
                       .map((player, idx) => {
                       const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
-                      const votesForPlayer = players.filter(p => p && p.vote === playerName).length;
-                      const isMyVote = myVote === playerName;
+                      // Count votes from all players for this player
+                      const votesForPlayer = players.reduce((count, p) => {
+                        const playerVotes = p.votes || [];
+                        return count + playerVotes.filter(v => v === playerName).length;
+                      }, 0);
+                      const isMyVote = myVotes.includes(playerName);
                       const isMe = playerName === currentPlayerName;
+                      const myVoteCount = myVotes.filter(v => v === playerName).length;
 
                       return (
                         <Pressable
                           key={`voting-player-${idx}`}
                           onPress={() => !isMe && voteForPlayer(playerName)}
-                          disabled={isMe}
+                          disabled={isMe || (myVotes.length >= numSpies && !isMyVote)}
                           style={[
                             styles.votingPlayerCard,
                             isMyVote && styles.votingPlayerCardSelected,
-                            isMe && styles.votingPlayerCardDisabled
+                            isMe && styles.votingPlayerCardDisabled,
+                            myVotes.length >= numSpies && !isMyVote && styles.votingPlayerCardDisabled
                           ]}
                         >
                           <Text style={styles.votingPlayerName}>{playerName}</Text>
@@ -922,7 +966,9 @@ export default function SpyRoomScreen({ navigation, route }) {
                           )}
                           {isMyVote && (
                             <View style={styles.myVoteBadge}>
-                              <Text style={styles.myVoteText}>ההצבעה שלך ✓</Text>
+                              <Text style={styles.myVoteText}>
+                                {myVoteCount > 1 ? `${myVoteCount}x ` : ''}ההצבעה שלך ✓
+                              </Text>
                             </View>
                           )}
                         </Pressable>
@@ -935,13 +981,16 @@ export default function SpyRoomScreen({ navigation, route }) {
                       💡 תוכל לשנות את הצבעתך בכל עת.
                     </Text>
                     <Text style={styles.votingInfoSubtext}>
-                      המשחק יסתיים כשכולם יצביעו, כשהמארח יסיים את המשחק, או כשהזמן יגמר.
+                      המשחק יסתיים כשכולם יצביעו {numSpies > 1 ? `(${numSpies} הצבעות לכל שחקן)` : ''}, כשהמארח יסיים את המשחק, או כשהזמן יגמר.
                     </Text>
                     <View style={styles.votingProgress}>
                       <Text style={styles.votingProgressText}>
-                        {players.filter(p => p && p.vote !== null && p.vote !== undefined).length} / {players.length}
+                        {players.filter(p => {
+                          const playerVotes = p.votes || [];
+                          return playerVotes.length === numSpies;
+                        }).length} / {players.length}
                       </Text>
-                      <Text style={styles.votingProgressLabel}>שחקנים הצביעו</Text>
+                      <Text style={styles.votingProgressLabel}>שחקנים סיימו להצביע</Text>
                     </View>
                   </View>
                 </View>
@@ -1035,7 +1084,11 @@ export default function SpyRoomScreen({ navigation, route }) {
                 {(() => {
                   const spyNames = room?.spy_names || (room?.spy_name ? [room.spy_name] : []);
                   const voteCounts = players.map(player => {
-                    const votes = players.filter(p => p && p.vote === player.name).length;
+                    // Count all votes for this player (including multiple votes from same player)
+                    const votes = players.reduce((count, p) => {
+                      const playerVotes = p.votes || [];
+                      return count + playerVotes.filter(v => v === player.name).length;
+                    }, 0);
                     const wasSpy = spyNames.includes(player.name);
                     return { player, votes, wasSpy };
                   });
@@ -1532,6 +1585,15 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+    textAlign: 'center',
+  },
+  votingSubtitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginTop: 4,
+    opacity: 0.9,
   },
   votingContent: {
     padding: 16,

@@ -706,16 +706,8 @@ export default function CodenamesGameScreen({ navigation, route }) {
     // Force close modal immediately - set before any async operations
     setForceCloseModal(true);
     
-    // Also clear winner_team in Firestore to ensure modal doesn't reappear
-    try {
-      const roomRef = doc(db, 'CodenamesRoom', room.id);
-      await updateDoc(roomRef, {
-        winner_team: null,
-        game_status: 'setup'
-      });
-    } catch (error) {
-      console.error('Error clearing winner_team:', error);
-    }
+    // Also update local room state immediately to close modal
+    setRoom(prev => prev ? { ...prev, game_status: 'setup', winner_team: null } : prev);
     
     const resetRedTeam = {
       ...room.red_team,
@@ -746,6 +738,9 @@ export default function CodenamesGameScreen({ navigation, route }) {
       });
       console.log('✅ Game reset successfully - all state cleared');
       
+      // Small delay to ensure modal closes before navigation
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       // Navigate immediately using replace to ensure clean navigation
       navigation.replace('CodenamesSetup', { 
         roomCode, 
@@ -755,7 +750,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
       // Reset force close flag after navigation
       setTimeout(() => {
         setForceCloseModal(false);
-      }, 100);
+      }, 500);
     } catch (error) {
       console.error('❌ Error resetting game:', error);
       Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
@@ -877,7 +872,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
         )}
 
         {/* Winner Modal */}
-        {room && room.game_status === 'finished' && !forceCloseModal && (
+        {room && room.game_status === 'finished' && !forceCloseModal && room.winner_team && (
           <Modal
             visible={true}
             transparent={true}

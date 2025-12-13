@@ -520,8 +520,13 @@ export default function DrawRoomScreen({ navigation, route }) {
   };
 
   const startGame = async () => {
-    if (!room || room.host_name !== currentPlayerName) return;
-    if (room.players.length < 2) {
+    // Use roomRef.current for most up-to-date state
+    const currentRoom = roomRef.current || room;
+    if (!currentRoom || currentRoom.host_name !== currentPlayerName) return;
+    
+    // Filter valid players
+    const validPlayers = currentRoom.players ? currentRoom.players.filter(p => p && p.name) : [];
+    if (validPlayers.length < 2) {
       Alert.alert('שגיאה', 'צריך לפחות 2 שחקנים כדי להתחיל!');
       return;
     }
@@ -540,38 +545,50 @@ export default function DrawRoomScreen({ navigation, route }) {
 
       const randomWord = allWords[Math.floor(Math.random() * allWords.length)];
 
-      const resetPlayers = room.players.map(p => ({
+      const resetPlayers = currentRoom.players.map(p => ({
         ...p,
         current_guess: '',
         has_submitted: false
       }));
 
-      if (!room || !room.id) {
+      if (!currentRoom || !currentRoom.id) {
         console.error('❌ Cannot start game: room or room.id is missing');
         Alert.alert('שגיאה', 'חדר לא נטען כראוי. נסה לרענן את הדף.');
         return;
       }
 
-      console.log('🔵 Starting Draw game, updating room:', room.id);
+      // Find first valid player index
+      let firstTurnIndex = 0;
+      for (let i = 0; i < currentRoom.players.length; i++) {
+        if (currentRoom.players[i] && currentRoom.players[i].name) {
+          firstTurnIndex = i;
+          break;
+        }
+      }
+
+      console.log('🔵 Starting Draw game, updating room:', currentRoom.id);
       try {
-        const roomRef = doc(db, 'DrawRoom', room.id);
+        const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
         const turnStartTime = Date.now();
         const updates = {
           game_status: 'playing',
-          current_turn_index: 0,
+          current_turn_index: firstTurnIndex,
           current_word: randomWord.word,
           drawing_data: null,
           players: resetPlayers,
           final_draw_image: null,
           all_guesses: [],
-          turn_start_time: turnStartTime
+          turn_start_time: turnStartTime,
+          show_round_summary: false,
+          round_winner: null,
+          drinking_players: null
         };
-        await updateDoc(roomRef, updates);
-        const updatedRoom = { ...room, ...updates };
+        await updateDoc(roomDocRef, updates);
+        const updatedRoom = { ...currentRoom, ...updates };
         setRoom(updatedRoom);
         roomRef.current = updatedRoom; // Update ref immediately so isMyTurn() works correctly for first turn
         console.log('✅ Game started successfully');
-        console.log(`🔵 [DRAW] First turn - Player at index 0: ${updatedRoom.players[0]?.name}, Current player: ${currentPlayerName}`);
+        console.log(`🔵 [DRAW] First turn - Player at index ${firstTurnIndex}: ${updatedRoom.players[firstTurnIndex]?.name}, Current player: ${currentPlayerName}`);
       } catch (error) {
         console.error('❌ Error starting game:', error);
         Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');
@@ -782,15 +799,33 @@ export default function DrawRoomScreen({ navigation, route }) {
   };
 
   const continueToNextRound = async () => {
-    if (!room) return;
+    // Use roomRef.current for most up-to-date state to prevent race conditions
+    const currentRoom = roomRef.current || room;
+    if (!currentRoom || !currentRoom.id) {
+      console.warn('⚠️ [DRAW] continueToNextRound - no room data');
+      return;
+    }
 
-    const winner = room.players.find(p => p.score >= WINNING_SCORE);
+    // Validate players array
+    if (!currentRoom.players || !Array.isArray(currentRoom.players) || currentRoom.players.length === 0) {
+      console.warn('⚠️ [DRAW] continueToNextRound - invalid players array');
+      return;
+    }
+
+    // Filter out invalid players (null or missing name)
+    const validPlayers = currentRoom.players.filter(p => p && p.name);
+    if (validPlayers.length === 0) {
+      console.warn('⚠️ [DRAW] continueToNextRound - no valid players');
+      return;
+    }
+
+    const winner = validPlayers.find(p => p.score >= WINNING_SCORE);
     
     if (winner) {
       // Game finished
       try {
-        const roomRef = doc(db, 'DrawRoom', room.id);
-        await updateDoc(roomRef, {
+        const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
+        await updateDoc(roomDocRef, {
           game_status: 'finished',
           winner_name: winner.name,
           final_draw_image: null
@@ -814,25 +849,58 @@ export default function DrawRoomScreen({ navigation, route }) {
         
         const randomWord = allWords[Math.floor(Math.random() * allWords.length)];
         
-        let nextTurnIndex = (room.current_turn_index + 1) % room.players.length;
-        let attempts = 0;
-        while (attempts < room.players.length && (!room.players[nextTurnIndex] || !room.players[nextTurnIndex].name)) {
-          nextTurnIndex = (nextTurnIndex + 1) % room.players.length;
-          attempts++;
+        // Calculate next turn index using valid players only
+        const currentTurnIndex = currentRoom.current_turn_index ?? 0;
+        const currentPlayerName = validPlayers[currentTurnIndex]?.name;
+        
+        // Find current player index in valid players array
+        let currentValidIndex = validPlayers.findIndex(p => p.name === currentPlayerName);
+        if (currentValidIndex === -1) {
+          currentValidIndex = 0; // Fallback to first player
         }
-        if (attempts >= room.players.length) {
-          nextTurnIndex = room.current_turn_index;
+        
+        // Move to next valid player
+        let nextValidIndex = (currentValidIndex + 1) % validPlayers.length;
+        
+        // Find the actual index in the full players array
+        const nextPlayerName = validPlayers[nextValidIndex].name;
+        let nextTurnIndex = currentRoom.players.findIndex(p => p && p.name === nextPlayerName);
+        
+        // Fallback: if not found, use modulo on valid players length
+        if (nextTurnIndex === -1) {
+          nextTurnIndex = nextValidIndex;
         }
 
-        const resetPlayers = room.players.map(p => ({
-          ...p,
-          current_guess: '',
-          has_submitted: false
-        }));
+        // Ensure nextTurnIndex is within bounds
+        if (nextTurnIndex < 0 || nextTurnIndex >= currentRoom.players.length) {
+          nextTurnIndex = 0;
+        }
 
-        const roomRef = doc(db, 'DrawRoom', room.id);
+        // Validate that the next player exists
+        if (!currentRoom.players[nextTurnIndex] || !currentRoom.players[nextTurnIndex].name) {
+          console.warn('⚠️ [DRAW] continueToNextRound - next player invalid, using first valid player');
+          nextTurnIndex = currentRoom.players.findIndex(p => p && p.name);
+          if (nextTurnIndex === -1) {
+            console.error('❌ [DRAW] continueToNextRound - no valid players found');
+            return;
+          }
+        }
+
+        const resetPlayers = currentRoom.players.map(p => {
+          if (!p || !p.name) return p; // Keep invalid players as-is
+          return {
+            ...p,
+            current_guess: '',
+            has_submitted: false
+          };
+        });
+
+        const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
         const turnStartTime = Date.now();
-        await updateDoc(roomRef, {
+        
+        // Update atomically: first clear word, then set new word with turn index
+        // This prevents word from being visible before turn is set
+        await updateDoc(roomDocRef, {
           current_turn_index: nextTurnIndex,
           current_word: randomWord.word,
           drawing_data: null,
@@ -845,9 +913,10 @@ export default function DrawRoomScreen({ navigation, route }) {
           turn_start_time: turnStartTime
         });
 
+        console.log(`✅ [DRAW] Moved to next round - Turn index: ${nextTurnIndex}, Player: ${currentRoom.players[nextTurnIndex]?.name}, Word: ${randomWord.word}`);
         setLocalStrokes([]);
       } catch (error) {
-        console.error('Error moving to next turn:', error);
+        console.error('❌ Error moving to next turn:', error);
       }
     }
   };
@@ -951,35 +1020,39 @@ export default function DrawRoomScreen({ navigation, route }) {
   const isMyTurn = () => {
     // Use roomRef for most up-to-date state
     const currentRoom = roomRef.current || room;
-    if (!currentRoom || !currentRoom.players) {
-      console.log('🔍 [DRAW] isMyTurn - no room or players');
+    if (!currentRoom || !currentRoom.players || !Array.isArray(currentRoom.players)) {
       return false;
     }
     
     if (currentRoom.current_turn_index === undefined || currentRoom.current_turn_index === null) {
-      console.log('🔍 [DRAW] isMyTurn - no current_turn_index');
       return false;
     }
     
     if (currentRoom.game_status !== 'playing') {
-      console.log('🔍 [DRAW] isMyTurn - game not playing, status:', currentRoom.game_status);
+      return false;
+    }
+    
+    // Don't show word during round summary
+    if (currentRoom.show_round_summary) {
       return false;
     }
     
     const playerName = currentPlayerNameRef.current || currentPlayerName;
     if (!playerName) {
-      console.log('🔍 [DRAW] isMyTurn - no player name');
+      return false;
+    }
+    
+    // Validate turn index is within bounds
+    if (currentRoom.current_turn_index < 0 || currentRoom.current_turn_index >= currentRoom.players.length) {
       return false;
     }
     
     const currentDrawer = currentRoom.players[currentRoom.current_turn_index];
     if (!currentDrawer || !currentDrawer.name) {
-      console.log(`🔍 [DRAW] isMyTurn - no current drawer at index ${currentRoom.current_turn_index}`);
       return false;
     }
     
     const result = currentDrawer.name === playerName;
-    console.log(`🔍 [DRAW] isMyTurn check - Player: ${playerName}, Drawer: ${currentDrawer.name}, Turn index: ${currentRoom.current_turn_index}, Result: ${result}`);
     return result;
   };
 
@@ -1130,13 +1203,13 @@ export default function DrawRoomScreen({ navigation, route }) {
           <View style={styles.gameContainer}>
             {/* Top Bar - Word (Centered) */}
             <View style={styles.topBarCentered}>
-              {isMyTurn() ? (
+              {isMyTurn() && room.current_word ? (
                 <View style={styles.wordCardCentered}>
                   <Text style={styles.wordTextCentered}>{room.current_word}</Text>
                 </View>
               ) : (
                 <View style={styles.drawerInfoCentered}>
-                  <Text style={styles.drawerTextCentered}>{currentDrawerName} מצייר...</Text>
+                  <Text style={styles.drawerTextCentered}>{currentDrawerName || 'ממתין...'} מצייר...</Text>
                 </View>
               )}
             </View>
@@ -1286,6 +1359,9 @@ export default function DrawRoomScreen({ navigation, route }) {
                       placeholderTextColor="#999"
                       editable={!room.show_round_summary}
                       onSubmitEditing={handleGuessSubmit}
+                      autoComplete="off"
+                      textContentType="none"
+                      autoCorrect={false}
                     />
                     <Pressable
                       onPress={handleGuessSubmit}
@@ -2245,7 +2321,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9FAFB',
     borderRadius: 12,
     padding: 10,
-    fontSize: 14,
+    fontSize: 16, // Minimum 16px to prevent zoom on mobile
     textAlign: 'right',
     borderWidth: 2,
     borderColor: '#C48CFF',

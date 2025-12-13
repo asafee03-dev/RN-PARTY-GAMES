@@ -89,12 +89,34 @@ export default function AliasGameScreen({ navigation, route }) {
   }, [navigation]);
 
   // Redirect to setup if game is still in setup phase
+  // But only if we haven't just navigated from setup (prevent navigation loops)
+  const hasNavigatedFromSetup = useRef(false);
+  const isInitialLoad = useRef(true);
+  
   useEffect(() => {
-    if (room && room.game_status === 'setup') {
+    // Mark initial load as complete once room is loaded
+    if (room && !isLoading) {
+      isInitialLoad.current = false;
+    }
+    
+    // Mark that we've navigated from setup if game_status is waiting or playing
+    if (room && (room.game_status === 'waiting' || room.game_status === 'playing')) {
+      hasNavigatedFromSetup.current = true;
+    }
+    
+    // Only redirect to setup if:
+    // 1. Game status is setup
+    // 2. We haven't just navigated from setup (to prevent loops)
+    // 3. Room has been loaded (not initial state)
+    // 4. Not during initial load (to prevent premature navigation)
+    if (room && room.game_status === 'setup' && !hasNavigatedFromSetup.current && 
+        room.teams && !isInitialLoad.current && !isLoading) {
+      // Reset flag when going back to setup
+      hasNavigatedFromSetup.current = false;
       navigation.replace('AliasSetup', { roomCode });
       return;
     }
-  }, [room?.game_status, roomCode, navigation]);
+  }, [room?.game_status, roomCode, navigation, room?.teams, isLoading]);
 
   // Restore cards when round is active after refresh
   useEffect(() => {

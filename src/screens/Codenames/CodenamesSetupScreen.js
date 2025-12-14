@@ -112,6 +112,19 @@ export default function CodenamesSetupScreen({ navigation, route }) {
       const existingRoom = { id: snapshot.id, ...snapshot.data() };
       console.log('✅ Room loaded successfully:', existingRoom.id, 'with code:', existingRoom.room_code);
 
+      // Load drinking mode from room data (preferred) or local storage (fallback)
+      if (existingRoom.drinking_mode !== undefined) {
+        setDrinkingMode(existingRoom.drinking_mode);
+        // Also sync to local storage
+        await storage.setItem('drinkingMode', existingRoom.drinking_mode.toString());
+      } else {
+        // Fallback to local storage if room doesn't have it yet
+        const savedMode = await storage.getItem('drinkingMode');
+        if (savedMode) {
+          setDrinkingMode(savedMode === 'true');
+        }
+      }
+
       // Check if player is already in the room
       const playerInRoom = existingRoom.red_team.spymaster === playerName ||
                            existingRoom.blue_team.spymaster === playerName ||
@@ -163,6 +176,13 @@ export default function CodenamesSetupScreen({ navigation, route }) {
         setRoom(updatedRoom);
         setIsHost(updatedRoom.host_name === currentPlayerName);
         
+        // Sync drinking mode from room data
+        if (updatedRoom.drinking_mode !== undefined) {
+          setDrinkingMode(updatedRoom.drinking_mode);
+          // Also sync to local storage
+          storage.setItem('drinkingMode', updatedRoom.drinking_mode.toString()).catch(() => {});
+        }
+        
         if (updatedRoom.game_status === 'playing') {
           navigation.navigate('CodenamesGame', { roomCode });
         }
@@ -191,37 +211,81 @@ export default function CodenamesSetupScreen({ navigation, route }) {
   const joinTeam = async (team, role) => {
     if (!currentPlayerName || !room) return;
 
-    const updatedRoom = { ...room };
-
-    if (updatedRoom.red_team.spymaster === currentPlayerName) {
-      updatedRoom.red_team.spymaster = '';
+    if (!room.id) {
+      console.error('❌ Cannot update room: room.id is missing');
+      return;
     }
-    if (updatedRoom.blue_team.spymaster === currentPlayerName) {
-      updatedRoom.blue_team.spymaster = '';
-    }
-    updatedRoom.red_team.guessers = updatedRoom.red_team.guessers.filter(p => p !== currentPlayerName);
-    updatedRoom.blue_team.guessers = updatedRoom.blue_team.guessers.filter(p => p !== currentPlayerName);
 
-    if (role === 'spymaster') {
-      updatedRoom[`${team}_team`].spymaster = currentPlayerName;
-    } else {
-      if (!updatedRoom[`${team}_team`].guessers.includes(currentPlayerName)) {
-        updatedRoom[`${team}_team`].guessers.push(currentPlayerName);
+    // Use retry mechanism with verification for atomic team join
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const roomRef = doc(db, 'CodenamesRoom', room.id);
+        
+        // Read current room state
+        const roomSnap = await getDoc(roomRef);
+        if (!roomSnap.exists()) {
+          Alert.alert('שגיאה', 'החדר נמחק');
+          navigation.goBack();
+          return;
+        }
+        
+        const currentRoom = { id: roomSnap.id, ...roomSnap.data() };
+        const updatedRoom = { ...currentRoom };
+
+        // Remove player from all teams/roles
+        if (updatedRoom.red_team.spymaster === currentPlayerName) {
+          updatedRoom.red_team.spymaster = '';
+        }
+        if (updatedRoom.blue_team.spymaster === currentPlayerName) {
+          updatedRoom.blue_team.spymaster = '';
+        }
+        updatedRoom.red_team.guessers = updatedRoom.red_team.guessers.filter(p => p !== currentPlayerName);
+        updatedRoom.blue_team.guessers = updatedRoom.blue_team.guessers.filter(p => p !== currentPlayerName);
+
+        // Add player to selected team/role
+        if (role === 'spymaster') {
+          updatedRoom[`${team}_team`].spymaster = currentPlayerName;
+        } else {
+          if (!updatedRoom[`${team}_team`].guessers.includes(currentPlayerName)) {
+            updatedRoom[`${team}_team`].guessers.push(currentPlayerName);
+          }
+        }
+
+        // Write update
+        await updateDoc(roomRef, updatedRoom);
+        
+        // Verify player was actually added
+        const verifySnap = await getDoc(roomRef);
+        if (verifySnap.exists()) {
+          const verifiedRoom = { id: verifySnap.id, ...verifySnap.data() };
+          const playerInTeam = role === 'spymaster' 
+            ? verifiedRoom[`${team}_team`].spymaster === currentPlayerName
+            : verifiedRoom[`${team}_team`].guessers.includes(currentPlayerName);
+          
+          if (playerInTeam) {
+            // Success - player is confirmed in team
+            setRoom(verifiedRoom);
+            return;
+          } else {
+            // Verification failed - retry
+            console.warn(`⚠️ Team join verification failed (attempt ${attempt + 1}/${maxRetries}), retrying...`);
+            if (attempt < maxRetries - 1) {
+              await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+              continue;
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Error joining team (attempt ${attempt + 1}/${maxRetries}):`, error);
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+          continue;
+        } else {
+          Alert.alert('שגיאה', 'לא הצלחנו להצטרף לקבוצה. נסה שוב.');
+          return;
+        }
       }
-    }
-
-    if (!room || !room.id) {
-      console.error('❌ Cannot update room: room or room.id is missing');
-      return;
-    }
-    
-    try {
-      const roomRef = doc(db, 'CodenamesRoom', room.id);
-      await updateDoc(roomRef, updatedRoom);
-      setRoom(prev => ({ ...prev, ...updatedRoom }));
-    } catch (error) {
-      console.error('❌ Error updating room:', error);
-      return;
     }
   };
 
@@ -429,6 +493,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
           onExit={goBack}
           onRulesPress={() => setShowRulesModal(true)}
           drinkingMode={drinkingMode}
+          showRules={true}
         />
 
         {/* Rivals Mode Badge */}
@@ -465,9 +530,25 @@ export default function CodenamesSetupScreen({ navigation, route }) {
                   <Text style={styles.drinkingModeLabel}>🔞 מצב משחקי שתייה</Text>
                   <Switch 
                     value={drinkingMode} 
-                    onValueChange={(checked) => {
+                    onValueChange={async (checked) => {
                       setDrinkingMode(checked);
-                      storage.setItem('drinkingMode', checked.toString());
+                      try {
+                        // Save to local storage
+                        await storage.setItem('drinkingMode', checked.toString());
+                        
+                        // Save to Firestore room data so all players see it
+                        if (room && room.id) {
+                          const roomRef = doc(db, 'CodenamesRoom', room.id);
+                          await updateDoc(roomRef, {
+                            drinking_mode: checked
+                          });
+                          console.log('✅ Drinking mode updated:', checked);
+                        }
+                      } catch (error) {
+                        console.error('Error saving drinking mode:', error);
+                        setDrinkingMode(!checked); // Revert on error
+                        Alert.alert('שגיאה', 'לא הצלחנו לעדכן את מצב השתייה');
+                      }
                     }} 
                   />
                   <Text style={styles.drinkingModeLabel}>🍺</Text>

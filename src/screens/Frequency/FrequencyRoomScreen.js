@@ -9,6 +9,7 @@ import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
+import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
@@ -61,31 +62,77 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         setCurrentPlayerName(playerName);
       }
 
-      // Add player if not already in room
-      const playerExists = roomData.players && Array.isArray(roomData.players) && roomData.players.some(p => p && p.name === playerName);
+      // Check if player exists in room (by name)
+      const existingPlayerIndex = roomData.players && Array.isArray(roomData.players) 
+        ? roomData.players.findIndex(p => p && p.name === playerName)
+        : -1;
+      const playerExists = existingPlayerIndex !== -1;
       
-      // If game is already playing and player is not in room, show error
-      if (!playerExists && (roomData.game_status === 'playing' || roomData.game_status === 'finished') && playerName) {
-        console.warn('⚠️ Player tried to join game that is already in progress');
-        Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
-        navigation.goBack();
-        return;
-      }
-      
-      if (!playerExists && roomData.game_status === 'lobby' && playerName) {
-        const playerColor = PLAYER_COLORS[roomData.players?.length % PLAYER_COLORS.length || 0];
-        const updatedPlayers = [...(roomData.players || []), { name: playerName, score: 0, has_guessed: false, color: playerColor }];
-        console.log('🔵 Adding player to Frequency room:', playerName);
-        try {
-          await updateDoc(roomRef, { players: updatedPlayers });
-          const updatedSnapshot = await getDoc(roomRef);
-          if (updatedSnapshot.exists()) {
-            const updatedRoom = { id: updatedSnapshot.id, ...updatedSnapshot.data() };
-            setRoom(updatedRoom);
+      if (playerName) {
+        if (playerExists) {
+          // Player exists - check if they're rejoining (inactive)
+          const existingPlayer = roomData.players[existingPlayerIndex];
+          if (existingPlayer.active === false) {
+            // Rejoining: restore active state, keep score - use atomic join
+            console.log('🔄 Player rejoining Frequency room:', playerName);
+            const result = await atomicPlayerJoin(
+              'FrequencyRoom',
+              roomData.id,
+              playerName,
+              null, // createPlayerObject (not needed for rejoin)
+              (players, name) => players.findIndex(p => p && p.name === name), // findPlayerIndex
+              (existingPlayer) => ({ ...existingPlayer, active: true }), // updatePlayerObject
+              3 // maxRetries
+            );
+            
+            if (result.success && result.roomData) {
+              console.log('✅ Player rejoined Frequency room successfully:', playerName);
+              setRoom(result.roomData);
+              return;
+            } else {
+              console.error('❌ Failed to rejoin Frequency room:', result.error);
+              // Continue anyway - player exists, just couldn't update active status
+            }
+          }
+          // Player already active, continue normally
+        } else {
+          // New player joining
+          if (roomData.game_status === 'lobby') {
+            // Only allow new players in lobby - use atomic join
+            const playerColor = PLAYER_COLORS[roomData.players?.length % PLAYER_COLORS.length || 0];
+            const result = await atomicPlayerJoin(
+              'FrequencyRoom',
+              roomData.id,
+              playerName,
+              () => ({ 
+                name: playerName, 
+                score: 0, 
+                has_guessed: false, 
+                color: playerColor,
+                active: true 
+              }), // createPlayerObject
+              (players, name) => players.findIndex(p => p && p.name === name), // findPlayerIndex
+              null, // updatePlayerObject
+              3 // maxRetries
+            );
+            
+            if (result.success && result.roomData) {
+              console.log('✅ Player joined Frequency room successfully:', playerName);
+              setRoom(result.roomData);
+              return;
+            } else {
+              console.error('❌ Failed to join Frequency room:', result.error);
+              Alert.alert('שגיאה', 'לא הצלחנו להצטרף לחדר. נסה שוב.');
+              navigation.goBack();
+              return;
+            }
+          } else if (roomData.game_status === 'playing' || roomData.game_status === 'finished') {
+            // Game in progress - new players cannot join
+            console.warn('⚠️ New player tried to join game that is already in progress');
+            Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+            navigation.goBack();
             return;
           }
-        } catch (updateErr) {
-          console.error('❌ Error adding player:', updateErr);
         }
       }
       setRoom(roomData);
@@ -106,9 +153,15 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         if (savedName) {
           setCurrentPlayerName(savedName);
         }
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
+        // Load drinking mode from room data (preferred) or local storage (fallback)
+        if (roomData.drinking_mode !== undefined) {
+          setDrinkingMode(roomData.drinking_mode);
+          await storage.setItem('drinkingMode', roomData.drinking_mode.toString());
+        } else {
+          const savedMode = await storage.getItem('drinkingMode');
+          if (savedMode) {
+            setDrinkingMode(savedMode === 'true');
+          }
         }
       } catch (e) {
         console.warn('Could not load player name:', e);
@@ -177,9 +230,26 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     };
   }, [roomCode]);
 
-  // Cleanup timers/listeners on navigation away
+  // Cleanup timers/listeners on navigation away and mark player as inactive
   useEffect(() => {
-    const unsubscribeNav = navigation.addListener('beforeRemove', () => {
+    const unsubscribeNav = navigation.addListener('beforeRemove', async () => {
+      // Mark player as inactive instead of removing
+      if (room && room.id && currentPlayerName) {
+        try {
+          const roomRef = doc(db, 'FrequencyRoom', room.id);
+          const updatedPlayers = room.players.map(p => {
+            if (p && p.name === currentPlayerName) {
+              return { ...p, active: false };
+            }
+            return p;
+          });
+          await updateDoc(roomRef, { players: updatedPlayers });
+          console.log('🔄 Marked player as inactive:', currentPlayerName);
+        } catch (error) {
+          console.error('Error marking player as inactive:', error);
+        }
+      }
+      
       if (needleUpdateTimeout.current) {
         clearTimeout(needleUpdateTimeout.current);
       }
@@ -188,7 +258,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       }
     });
     return unsubscribeNav;
-  }, [navigation]);
+  }, [navigation, room, currentPlayerName]);
 
   // Reset force close modal flag when game status changes back to lobby
   useEffect(() => {
@@ -209,7 +279,28 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const newRoom = { id: snapshot.id, ...snapshot.data() };
+        
+        // Sync drinking mode from room data
+        if (newRoom.drinking_mode !== undefined) {
+          setDrinkingMode(newRoom.drinking_mode);
+          // Also sync to local storage
+          storage.setItem('drinkingMode', newRoom.drinking_mode.toString()).catch(() => {});
+        }
+        
         setRoom(prevRoom => {
+          // Preserve submitted needle positions - don't overwrite if player has already submitted
+          if (prevRoom && currentPlayerName) {
+            const hasSubmitted = hasPlayerSubmittedGuess(prevRoom, currentPlayerName);
+            if (hasSubmitted && prevRoom.needle_positions && prevRoom.needle_positions[currentPlayerName] !== undefined) {
+              // Preserve the submitted needle position even if Firestore update doesn't have it yet
+              const preservedNeedlePositions = {
+                ...(newRoom.needle_positions || {}),
+                [currentPlayerName]: prevRoom.needle_positions[currentPlayerName]
+              };
+              newRoom.needle_positions = preservedNeedlePositions;
+            }
+          }
+          
           if (JSON.stringify(prevRoom) !== JSON.stringify(newRoom)) {
             return newRoom;
           }
@@ -333,6 +424,31 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     return 0;
   };
 
+  // Helper function to check if an angle is within the correct sector (the one containing target_position)
+  const isInCorrectSector = (guessAngle, targetPosition, sectors) => {
+    // Find which sector contains the target position
+    const clampedTarget = Math.max(0, Math.min(180, targetPosition));
+    let correctSector = null;
+    
+    for (const sector of sectors) {
+      const sectorStart = Math.max(0, sector.start);
+      const sectorEnd = Math.min(180, sector.end);
+      if (clampedTarget >= sectorStart && clampedTarget <= sectorEnd) {
+        correctSector = sector;
+        break;
+      }
+    }
+    
+    if (!correctSector) return false;
+    
+    // Check if guess angle is within the correct sector
+    const clampedGuess = Math.max(0, Math.min(180, guessAngle));
+    const sectorStart = Math.max(0, correctSector.start);
+    const sectorEnd = Math.min(180, correctSector.end);
+    
+    return clampedGuess >= sectorStart && clampedGuess <= sectorEnd;
+  };
+
   const getGuessSubmittedNames = (roomData) => {
     if (!roomData) return {};
     if (typeof roomData.guess_submitted_names === 'object' && roomData.guess_submitted_names !== null && !Array.isArray(roomData.guess_submitted_names)) {
@@ -427,14 +543,20 @@ export default function FrequencyRoomScreen({ navigation, route }) {
 
     isSubmittingGuess.current = true;
 
+    // Lock the needle position immediately to prevent movement
+    const angle = global.currentNeedlePosition || room.needle_positions?.[currentPlayerName] || 90;
+    
+    // Update local state immediately to lock the needle - use functional update to preserve state
+    setRoom(prev => {
+      const lockedNeedlePositions = { ...(prev.needle_positions || {}), [currentPlayerName]: angle };
+      return { ...prev, needle_positions: lockedNeedlePositions };
+    });
+    
+    // Store the locked angle to preserve it through async operations
+    const lockedAngle = angle;
+    
     try {
-      // Lock the needle position immediately to prevent movement
-      const angle = global.currentNeedlePosition || 90;
-      // Update local state immediately to lock the needle
-      const lockedNeedlePositions = { ...(room.needle_positions || {}), [currentPlayerName]: angle };
-      setRoom(prev => ({ ...prev, needle_positions: lockedNeedlePositions }));
-      
-      const updatedNeedlePositions = lockedNeedlePositions;
+      const updatedNeedlePositions = { ...(room.needle_positions || {}), [currentPlayerName]: lockedAngle };
       
       const clueGiver = room.players[room.current_turn_index]?.name;
       
@@ -444,7 +566,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         [currentPlayerName]: true
       };
       
-      const activePlayers = room.players || [];
+      const activePlayers = (room.players || []).filter(p => p && p.name && (p.active !== false));
       const activeGuessers = activePlayers.filter(p => p.name !== clueGiver);
       const totalGuessersRequired = Math.max(activeGuessers.length, 0);
       const allGuessed = getGuessSubmittedCount({ guess_submitted_names: updatedGuessSubmittedNames }) === totalGuessersRequired;
@@ -460,7 +582,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         const targetPos = room.target_position;
         
         const guessesSummary = room.players
-          .filter(p => p.name !== clueGiver)
+          .filter(p => p && p.name && p.name !== clueGiver && (p.active !== false))
           .map(player => {
             const playerAngle = updatedNeedlePositions[player.name];
             return {
@@ -469,6 +591,40 @@ export default function FrequencyRoomScreen({ navigation, route }) {
               points_earned: playerAngle !== undefined ? getSectorScore(playerAngle, sectors) : 0
             };
           });
+
+        // Evaluate drinking at end of round
+        let drinkingPlayers = [];
+        const drinkingModeActive = room.drinking_mode === true;
+        
+        if (drinkingModeActive && targetPos !== undefined && targetPos !== null) {
+          // Get all active guessers (excluding clue giver)
+          const activeGuessers = room.players.filter(p => 
+            p && p.name && p.name !== clueGiver && (p.active !== false)
+          );
+          
+          // Check which guessers got it correct (within correct sector)
+          const correctGuessers = [];
+          const incorrectGuessers = [];
+          
+          activeGuessers.forEach(player => {
+            const angle = updatedNeedlePositions[player.name];
+            if (angle !== undefined && isInCorrectSector(angle, targetPos, sectors)) {
+              correctGuessers.push(player.name);
+            } else {
+              incorrectGuessers.push(player.name);
+            }
+          });
+          
+          // Case 1: No correct guesses → clue giver drinks
+          if (correctGuessers.length === 0) {
+            drinkingPlayers = [clueGiver];
+          }
+          // Case 2: Partial success → only failed guessers drink
+          else if (incorrectGuessers.length > 0) {
+            drinkingPlayers = incorrectGuessers;
+          }
+          // Case 3: Full success → no one drinks (drinkingPlayers stays empty)
+        }
 
         updateData.turn_phase = 'summary';
         updateData.last_guess_result = {
@@ -479,19 +635,28 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           clue_giver: clueGiver,
           show_popup: true
         };
+        updateData.drinking_players = drinkingPlayers.length > 0 ? drinkingPlayers : null;
       }
 
-      try {
-        const roomRef = doc(db, 'FrequencyRoom', room.id);
-        await updateDoc(roomRef, updateData);
-        setRoom(prev => ({ ...prev, ...updateData }));
-        console.log('✅ Guess submitted successfully');
-      } catch (error) {
-        console.error('❌ Error submitting guess:', error);
-        Alert.alert('שגיאה', 'שגיאה בשליחת הניחוש. נסה שוב.');
-      }
+      const roomRef = doc(db, 'FrequencyRoom', room.id);
+      await updateDoc(roomRef, updateData);
+      
+      // Ensure the submitted position is preserved in local state after write
+      // This prevents the realtime listener from overwriting it
+      setRoom(prev => {
+        // Preserve the submitted needle position
+        const preservedNeedlePositions = { ...(prev.needle_positions || {}), [currentPlayerName]: lockedAngle };
+        return { ...prev, needle_positions: preservedNeedlePositions, ...updateData };
+      });
+      
+      console.log('✅ Guess submitted successfully');
     } catch (error) {
       console.error('❌ Error submitting guess:', error);
+      // On error, still preserve the submitted position locally
+      setRoom(prev => {
+        const preservedNeedlePositions = { ...(prev.needle_positions || {}), [currentPlayerName]: lockedAngle };
+        return { ...prev, needle_positions: preservedNeedlePositions };
+      });
       Alert.alert('שגיאה', 'שגיאה בשליחת הניחוש. נסה שוב.');
     } finally {
       isSubmittingGuess.current = false;
@@ -513,21 +678,20 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     try {
       const sectors = room.current_round_sectors;
       const currentClueGiver = room.players[room.current_turn_index]?.name;
-      const drinkingModeActive = await storage.getItem('drinkingMode') === 'true';
-      let drinkingPlayers = [];
       
       let totalPointsEarnedByGuessers = 0;
       const updatedPlayers = room.players.map(player => {
+        // Skip inactive players in score calculation (but preserve their data)
+        if (player.active === false) {
+          return player;
+        }
+        
         if (player.name === currentClueGiver) {
           return player;
         }
         const angle = room.needle_positions[player.name];
         const pointsEarned = angle !== undefined ? getSectorScore(angle, sectors) : 0;
         totalPointsEarnedByGuessers += pointsEarned;
-        
-        if (drinkingModeActive && pointsEarned === 0) {
-          drinkingPlayers.push(player.name);
-        }
         
         return {
           ...player,
@@ -537,6 +701,11 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       
       const clueGiverPoints = totalPointsEarnedByGuessers / 2;
       const finalUpdatedPlayers = updatedPlayers.map(player => {
+        // Skip inactive players
+        if (player.active === false) {
+          return player;
+        }
+        
         if (player.name === currentClueGiver) {
           return {
             ...player,
@@ -546,7 +715,8 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         return player;
       });
       
-      const winner = finalUpdatedPlayers.find(p => p.score >= 10);
+      // Only check active players for winner
+      const winner = finalUpdatedPlayers.find(p => p && p.score >= 10 && (p.active !== false));
       
       if (winner) {
         try {
@@ -556,20 +726,41 @@ export default function FrequencyRoomScreen({ navigation, route }) {
             game_status: 'finished',
             winner_name: winner.name,
             last_guess_result: null,
-            drinking_players: drinkingPlayers.length > 0 ? drinkingPlayers : null
+            drinking_players: null // Clear drinking players when game ends
           });
         } catch (error) {
           console.error('Error finishing game:', error);
         }
       } else {
-        let nextTurnIndex = (room.current_turn_index + 1) % room.players.length;
-        let attempts = 0;
-        while (attempts < room.players.length && !room.players[nextTurnIndex]) {
-          nextTurnIndex = (nextTurnIndex + 1) % room.players.length;
-          attempts++;
+        // Find next active player for turn rotation
+        const activePlayers = room.players.filter(p => p && p.name && (p.active !== false));
+        if (activePlayers.length === 0) {
+          console.warn('⚠️ No active players found, cannot advance turn');
+          isProcessingReveal.current = false;
+          return;
         }
-        if (attempts >= room.players.length) {
-          nextTurnIndex = room.current_turn_index;
+        
+        // Find current player index in active players
+        const currentClueGiverName = room.players[room.current_turn_index]?.name;
+        let currentActiveIndex = activePlayers.findIndex(p => p.name === currentClueGiverName);
+        if (currentActiveIndex === -1) {
+          currentActiveIndex = 0; // Fallback to first active player
+        }
+        
+        // Move to next active player
+        const nextActiveIndex = (currentActiveIndex + 1) % activePlayers.length;
+        const nextPlayerName = activePlayers[nextActiveIndex].name;
+        
+        // Find the actual index in the full players array
+        let nextTurnIndex = room.players.findIndex(p => p && p.name === nextPlayerName);
+        if (nextTurnIndex === -1) {
+          // Fallback: use first active player
+          nextTurnIndex = room.players.findIndex(p => p && p.name && (p.active !== false));
+          if (nextTurnIndex === -1) {
+            console.warn('⚠️ Could not find next active player');
+            isProcessingReveal.current = false;
+            return;
+          }
         }
         const topicsSnapshot = await getDocs(collection(db, 'FrequencyTopic'));
         const allTopics = [];
@@ -606,7 +797,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
             current_round_sectors: newSectors,
             turn_phase: 'clue',
             last_guess_result: null,
-            drinking_players: drinkingPlayers.length > 0 ? drinkingPlayers : null
+            drinking_players: null // Clear drinking players when advancing turn
           });
         } catch (error) {
           console.error('Error advancing to next turn:', error);
@@ -811,9 +1002,25 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                     <Text style={styles.drinkingToggleLabel}>🔞 מצב משחקי שתייה</Text>
                     <Switch
                       value={drinkingMode}
-                      onValueChange={(checked) => {
+                      onValueChange={async (checked) => {
                         setDrinkingMode(checked);
-                        storage.setItem('drinkingMode', checked.toString());
+                        try {
+                          // Save to local storage
+                          await storage.setItem('drinkingMode', checked.toString());
+                          
+                          // Save to Firestore room data so all players see it
+                          if (room && room.id) {
+                            const roomRef = doc(db, 'FrequencyRoom', room.id);
+                            await updateDoc(roomRef, {
+                              drinking_mode: checked
+                            });
+                            console.log('✅ Drinking mode updated:', checked);
+                          }
+                        } catch (error) {
+                          console.error('Error saving drinking mode:', error);
+                          setDrinkingMode(!checked); // Revert on error
+                          Alert.alert('שגיאה', 'לא הצלחנו לעדכן את מצב השתייה');
+                        }
                       }}
                       trackColor={{ false: '#D1D5DB', true: '#F97316' }}
                       thumbColor={drinkingMode ? '#FFFFFF' : '#9CA3AF'}
@@ -940,7 +1147,18 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                 <Text style={styles.drinkingIcon}>🍺</Text>
                 <Text style={styles.drinkingTitle}>זמן שתייה!</Text>
                 <Text style={styles.drinkingMessage}>
-                  {room.drinking_players.length === 1 ? 'פספסת את התדר!' : 'פספסתם את התדר!'}
+                  {(() => {
+                    const clueGiver = room.players[room.current_turn_index]?.name;
+                    const isClueGiverDrinking = room.drinking_players.includes(clueGiver);
+                    
+                    if (isClueGiverDrinking) {
+                      return 'אף אחד לא ניחש נכון – נותן הרמז חייבת לשתות!';
+                    } else if (room.drinking_players.length === 1) {
+                      return 'פספסת את התדר!';
+                    } else {
+                      return 'פספסתם את התדר!';
+                    }
+                  })()}
                 </Text>
                 <View style={styles.drinkingPlayersList}>
                   {room.drinking_players.map((name, idx) => (
@@ -1022,7 +1240,15 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                   rightLabel={room.current_topic?.right_side || ''}
                   targetPosition={room.target_position}
                   showTarget={isMyTurn()}
-                  needlePosition={room.needle_positions[currentPlayerName] || 90}
+                  needlePosition={(() => {
+                    // Preserve submitted position - use stored value if player has submitted
+                    const storedPosition = room.needle_positions?.[currentPlayerName];
+                    if (hasPlayerSubmittedGuess(room, currentPlayerName) && storedPosition !== undefined) {
+                      return storedPosition;
+                    }
+                    // Use global position if available (for active dragging), otherwise fallback to stored or 90
+                    return global.currentNeedlePosition || storedPosition || 90;
+                  })()}
                   canMove={!isMyTurn() && !hasPlayerSubmittedGuess(room, currentPlayerName) && room.game_status === 'playing'}
                   showAllNeedles={isMyTurn() || allPlayersGuessed()}
                   allNeedles={room.needle_positions}
@@ -1077,7 +1303,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
             </View>
 
             <View style={styles.scoreboardContainer}>
-              <ScoreBoard players={room.players} currentTurnIndex={room.current_turn_index} />
+              <ScoreBoard players={room.players.filter(p => p && p.name && (p.active !== false))} currentTurnIndex={room.current_turn_index} />
             </View>
           </View>
         )}

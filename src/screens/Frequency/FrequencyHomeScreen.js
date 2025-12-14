@@ -84,7 +84,7 @@ export default function FrequencyHomeScreen({ navigation, route }) {
       const roomData = {
         room_code: newRoomCode,
         host_name: playerName,
-        players: [{ name: playerName, score: 0, has_guessed: false, color: PLAYER_COLORS[0] }],
+        players: [{ name: playerName, score: 0, has_guessed: false, color: PLAYER_COLORS[0], active: true }],
         game_status: 'lobby',
         current_turn_index: 0,
         needle_positions: {},

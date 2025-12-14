@@ -49,11 +49,6 @@ export default function CodenamesGameScreen({ navigation, route }) {
 
         setCurrentPlayerName(playerName);
         
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
-        }
-        
         await loadRoom();
         setIsLoading(false);
       } catch (err) {
@@ -97,6 +92,19 @@ export default function CodenamesGameScreen({ navigation, route }) {
       
       const roomData = { id: snapshot.id, ...snapshot.data() };
       setRoom(roomData);
+      
+      // Load drinking mode from room data (preferred) or local storage (fallback)
+      if (roomData.drinking_mode !== undefined) {
+        setDrinkingMode(roomData.drinking_mode);
+        // Also sync to local storage
+        await storage.setItem('drinkingMode', roomData.drinking_mode.toString());
+      } else {
+        // Fallback to local storage if room doesn't have it yet
+        const savedMode = await storage.getItem('drinkingMode');
+        if (savedMode) {
+          setDrinkingMode(savedMode === 'true');
+        }
+      }
     } catch (error) {
       console.error('❌ Failed to load room:', error);
       navigation.navigate('CodenamesHome');
@@ -501,26 +509,34 @@ export default function CodenamesGameScreen({ navigation, route }) {
     if (!playerRole || playerRole.role === 'spymaster') return;
     if (!isMyTurn()) return;
 
-    // Reload room to ensure we have the latest state
-    try {
-      const roomRef = doc(db, 'CodenamesRoom', roomCode);
-      let snapshot = await getDoc(roomRef);
-      
-      if (!snapshot.exists()) {
-        const q = query(collection(db, 'CodenamesRoom'), where('room_code', '==', roomCode));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          const docData = querySnapshot.docs[0];
-          snapshot = { exists: () => true, id: docData.id, data: () => docData.data() };
+      // Use current room state from realtime listener (more efficient than re-reading)
+      // Only read if room state is not available
+      let currentRoom = room;
+      if (!currentRoom || !currentRoom.id) {
+        try {
+          const roomRef = doc(db, 'CodenamesRoom', roomCode);
+          let snapshot = await getDoc(roomRef);
+          
+          if (!snapshot.exists()) {
+            const q = query(collection(db, 'CodenamesRoom'), where('room_code', '==', roomCode));
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+              const docData = querySnapshot.docs[0];
+              snapshot = { exists: () => true, id: docData.id, data: () => docData.data() };
+            }
+          }
+          
+          if (!snapshot.exists()) {
+            console.error('❌ Error fetching current room state');
+            return;
+          }
+          
+          currentRoom = { id: snapshot.id, ...snapshot.data() };
+        } catch (error) {
+          console.error('❌ Error fetching current room state:', error);
+          return;
         }
       }
-      
-      if (!snapshot.exists()) {
-        console.error('❌ Error fetching current room state');
-        return;
-      }
-      
-      const currentRoom = { id: snapshot.id, ...snapshot.data() };
 
       // Double-check it's still our turn
       if (currentRoom.current_turn !== playerRole.team) {
@@ -548,8 +564,10 @@ export default function CodenamesGameScreen({ navigation, route }) {
         updates.turn_start_time = Date.now();
       }
 
-      // Save old baseline for drinking mode
-      const drinkingMode = await storage.getItem('drinkingMode') === 'true';
+      // Get drinking mode from room data (preferred) or local storage (fallback)
+      const drinkingMode = currentRoom.drinking_mode !== undefined 
+        ? currentRoom.drinking_mode 
+        : (await storage.getItem('drinkingMode') === 'true');
       const oldBaseline = drinkingMode && currentRoom.round_baseline_reveals 
         ? { ...currentRoom.round_baseline_reveals } 
         : null;
@@ -558,63 +576,55 @@ export default function CodenamesGameScreen({ navigation, route }) {
       
       try {
         const roomRef = doc(db, 'CodenamesRoom', currentRoom.id);
-        const currentSnapshot = await getDoc(roomRef);
-        if (currentSnapshot.exists()) {
-          const currentData = currentSnapshot.data();
-          if (currentData.current_turn !== currentTeam) {
+        // Single verification read before update
+        const verifySnapshot = await getDoc(roomRef);
+        if (verifySnapshot.exists()) {
+          const verifyData = verifySnapshot.data();
+          if (verifyData.current_turn !== currentTeam) {
             console.log('⚠️ Turn changed before update could be processed');
-            setRoom({ id: currentSnapshot.id, ...currentData });
+            setRoom({ id: verifySnapshot.id, ...verifyData });
             return;
           }
         }
         
         await updateDoc(roomRef, updates);
-        const updatedSnapshot = await getDoc(roomRef);
-        if (updatedSnapshot.exists()) {
-          const updatedRoom = { id: updatedSnapshot.id, ...updatedSnapshot.data() };
-          
-          if (updatedRoom.current_turn !== nextTeam) {
-            console.error('❌ Turn did not switch correctly. Expected:', nextTeam, 'Got:', updatedRoom.current_turn);
-            await updateDoc(roomRef, { current_turn: nextTeam, current_clue: null, guesses_remaining: 0 });
-            const finalSnapshot = await getDoc(roomRef);
-            if (finalSnapshot.exists()) {
-              setRoom({ id: finalSnapshot.id, ...finalSnapshot.data() });
-            }
-            return;
-          }
-          
-          console.log('✅ Turn ended successfully, switched to', updatedRoom.current_turn);
-          setRoom(updatedRoom);
-        }
+        // Realtime listener will update state, no need to read again
+        console.log('✅ Turn ended successfully, switched to', nextTeam);
       } catch (error) {
         console.error('❌ Error ending turn:', error);
-        try {
-          const roomRef = doc(db, 'CodenamesRoom', roomCode);
-          const snapshot = await getDoc(roomRef);
-          if (snapshot.exists()) {
-            setRoom({ id: snapshot.id, ...snapshot.data() });
-          }
-        } catch (reloadError) {
-          console.error('❌ Error reloading room:', reloadError);
-        }
+        // Realtime listener will sync state, no need to manually reload
         return;
       }
 
       // Check drinking mode - if both teams finished turn (back to starting team)
-      if (drinkingMode && nextTeam === currentRoom.starting_team && oldBaseline) {
+      // A round is complete when we cycle back to the starting team (2 turns total)
+      if (drinkingMode && nextTeam === currentRoom.starting_team) {
         setTimeout(async () => {
           try {
-            const roomRef = doc(db, 'CodenamesRoom', roomCode);
+            // Use realtime listener state if available, otherwise read once
+            const roomRef = doc(db, 'CodenamesRoom', currentRoom.id);
             const snapshot = await getDoc(roomRef);
             
-            if (snapshot.exists()) {
-              const roomForPopup = { id: snapshot.id, ...snapshot.data() };
-              const currentRed = roomForPopup.red_team.revealed_words.length;
-              const currentBlue = roomForPopup.blue_team.revealed_words.length;
-          
+            if (!snapshot.exists()) return;
+            
+            const roomForPopup = { id: snapshot.id, ...snapshot.data() };
+            const currentRed = roomForPopup.red_team.revealed_words.length;
+            const currentBlue = roomForPopup.blue_team.revealed_words.length;
+            
+            // Prepare updates object to batch writes
+            const updates = {
+              round_baseline_reveals: {
+                red: currentRed,
+                blue: currentBlue
+              }
+            };
+            
+            // Only calculate drinking popup if we have a baseline to compare
+            if (oldBaseline) {
               const redRevealedInRound = currentRed - oldBaseline.red;
               const blueRevealedInRound = currentBlue - oldBaseline.blue;
               
+              // Only show popup if one team has fewer words (not on tie)
               let drinkingTeam = null;
               if (redRevealedInRound < blueRevealedInRound) {
                 drinkingTeam = 'red';
@@ -623,58 +633,23 @@ export default function CodenamesGameScreen({ navigation, route }) {
               }
               
               if (drinkingTeam) {
-                try {
-                  const roomRef = doc(db, 'CodenamesRoom', roomForPopup.id);
-                  await updateDoc(roomRef, {
-                    drinking_popup: { team: drinkingTeam }
-                  });
-                } catch (error) {
-                  console.error('❌ Error updating drinking popup:', error);
-                }
-              }
-              
-              // Save new baseline for next round
-              try {
-                const roomRef = doc(db, 'CodenamesRoom', roomForPopup.id);
-                await updateDoc(roomRef, {
-                  round_baseline_reveals: {
-                    red: currentRed,
-                    blue: currentBlue
-                  }
-                });
-              } catch (error) {
-                console.error('❌ Error updating baseline:', error);
+                // Get team name/captain name for popup
+                const teamData = drinkingTeam === 'red' ? roomForPopup.red_team : roomForPopup.blue_team;
+                const teamName = teamData.spymaster || (drinkingTeam === 'red' ? 'אדומה' : 'כחולה');
+                updates.drinking_popup = { 
+                  team: drinkingTeam,
+                  team_name: teamName
+                };
               }
             }
+            
+            // Batch all updates into a single write
+            await updateDoc(roomRef, updates);
           } catch (error) {
             console.error('❌ Error in drinking popup check:', error);
           }
         }, 500);
-      } else if (drinkingMode && nextTeam === currentRoom.starting_team && !oldBaseline) {
-        // If no baseline (start of game) - save baseline now
-        setTimeout(async () => {
-          try {
-            const roomRef = doc(db, 'CodenamesRoom', roomCode);
-            const snapshot = await getDoc(roomRef);
-            
-            if (snapshot.exists()) {
-              const roomForBaseline = { id: snapshot.id, ...snapshot.data() };
-              await updateDoc(roomRef, {
-                round_baseline_reveals: {
-                  red: roomForBaseline.red_team.revealed_words.length,
-                  blue: roomForBaseline.blue_team.revealed_words.length
-                }
-              });
-            }
-          } catch (error) {
-            console.error('❌ Error updating baseline:', error);
-          }
-        }, 500);
       }
-    } catch (error) {
-      console.error('❌ Error fetching current room state:', error);
-      return;
-    }
   };
 
   const copyRoomCode = () => {
@@ -872,10 +847,13 @@ export default function CodenamesGameScreen({ navigation, route }) {
                 <Text style={styles.modalIcon}>🍺</Text>
                 <Text style={styles.modalTitle}>זמן שתייה!</Text>
                 <Text style={styles.modalMessage}>
-                  הקבוצה ה{room.drinking_popup.team === 'red' ? 'אדומה' : 'כחולה'} - חשפתם פחות מילים בסבב
+                  {room.drinking_popup.team_name 
+                    ? `הקבוצה של ${room.drinking_popup.team_name} חייבת לשתות 🍺`
+                    : `הקבוצה ה${room.drinking_popup.team === 'red' ? 'אדומה' : 'כחולה'} חייבת לשתות 🍺`}
                 </Text>
-                <Text style={styles.modalEmoji}>🍻</Text>
-                <Text style={styles.modalSubtitle}>קחו שוט! 🥃</Text>
+                <Text style={styles.modalSubtext}>
+                  הקבוצה שהצליחה לחשוף פחות מילים בסבב הזה
+                </Text>
                 <TouchableOpacity
                   style={styles.modalButton}
                   onPress={clearDrinkingPopup}
@@ -1214,8 +1192,12 @@ const styles = StyleSheet.create({
     color: '#374151',
     textAlign: 'center',
   },
-  modalEmoji: {
-    fontSize: 48,
+  modalSubtext: {
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 24,
   },
   modalSubtitle: {
     fontSize: 18,

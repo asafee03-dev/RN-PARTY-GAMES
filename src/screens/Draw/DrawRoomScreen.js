@@ -1,4 +1,5 @@
 import { collection, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
+import { atomicPlayerJoin } from '../../utils/playerJoin';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -62,9 +63,15 @@ export default function DrawRoomScreen({ navigation, route }) {
         if (savedName) {
           setCurrentPlayerName(savedName);
         }
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
+        // Load drinking mode from room data (preferred) or local storage (fallback)
+        if (roomData.drinking_mode !== undefined) {
+          setDrinkingMode(roomData.drinking_mode);
+          await storage.setItem('drinkingMode', roomData.drinking_mode.toString());
+        } else {
+          const savedMode = await storage.getItem('drinkingMode');
+          if (savedMode) {
+            setDrinkingMode(savedMode === 'true');
+          }
         }
       } catch (e) {
         console.warn('Could not load player name:', e);
@@ -132,20 +139,26 @@ export default function DrawRoomScreen({ navigation, route }) {
     // setupRealtimeListener will be called from loadRoom after room is loaded
 
     return () => {
-      // Remove player from room on unmount
+      // Mark player as inactive instead of removing
       const currentRoom = roomRef.current;
       const playerName = currentPlayerNameRef.current;
       if (currentRoom && currentRoom.id && playerName) {
         try {
-          const updatedPlayers = currentRoom.players.filter(p => p && p.name !== playerName);
+          const updatedPlayers = currentRoom.players.map(p => {
+            if (p && p.name === playerName) {
+              return { ...p, active: false };
+            }
+            return p;
+          });
           const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
           updateDoc(roomDocRef, {
             players: updatedPlayers
           }).catch(error => {
-            console.error('Error removing player from room on unmount:', error);
+            console.error('Error marking player as inactive on unmount:', error);
           });
+          console.log('🔄 Marked player as inactive on unmount:', playerName);
         } catch (error) {
-          console.error('Error removing player from room on unmount:', error);
+          console.error('Error marking player as inactive on unmount:', error);
         }
       }
       
@@ -161,21 +174,27 @@ export default function DrawRoomScreen({ navigation, route }) {
     };
   }, [roomCode]);
 
-  // Cleanup on navigation away
+  // Cleanup on navigation away and mark player as inactive
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', async () => {
-      // Remove player from room before leaving
+      // Mark player as inactive instead of removing
       const currentRoom = roomRef.current;
       const playerName = currentPlayerNameRef.current;
       if (currentRoom && currentRoom.id && playerName) {
         try {
-          const updatedPlayers = currentRoom.players.filter(p => p && p.name !== playerName);
+          const updatedPlayers = currentRoom.players.map(p => {
+            if (p && p.name === playerName) {
+              return { ...p, active: false };
+            }
+            return p;
+          });
           const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
           await updateDoc(roomDocRef, {
             players: updatedPlayers
           });
+          console.log('🔄 Marked player as inactive on navigation:', playerName);
         } catch (error) {
-          console.error('Error removing player from room on navigation:', error);
+          console.error('Error marking player as inactive on navigation:', error);
         }
       }
       
@@ -210,6 +229,13 @@ export default function DrawRoomScreen({ navigation, route }) {
     unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const newRoom = { id: snapshot.id, ...snapshot.data() };
+        
+        // Sync drinking mode from room data
+        if (newRoom.drinking_mode !== undefined) {
+          setDrinkingMode(newRoom.drinking_mode);
+          // Also sync to local storage
+          storage.setItem('drinkingMode', newRoom.drinking_mode.toString()).catch(() => {});
+        }
         
         // Check if current player is still in the room
         const playerName = currentPlayerNameRef.current || '';
@@ -377,7 +403,7 @@ export default function DrawRoomScreen({ navigation, route }) {
 
     const currentDrawer = currentRoom.players[currentRoom.current_turn_index]?.name;
     const normalizedWord = currentRoom.current_word?.toLowerCase().trim();
-    const drinkingModeActive = await storage.getItem('drinkingMode') === 'true';
+    const drinkingModeActive = currentRoom.drinking_mode === true;
     let firstWinner = null;
     const drinkingPlayersList = [];
 
@@ -408,7 +434,33 @@ export default function DrawRoomScreen({ navigation, route }) {
 
     const hasCorrectGuess = correctGuessers.size > 0;
 
+    // Evaluate drinking based on the 2 cases
+    if (drinkingModeActive) {
+      // Case 1: No correct guesses → drawing player drinks
+      if (!hasCorrectGuess) {
+        drinkingPlayersList.push(currentDrawer);
+      }
+      // Case 2: At least one correct guess → all players who didn't guess correctly drink
+      else {
+        // Get all active guessers (excluding drawer)
+        const activeGuessers = currentRoom.players.filter(p => 
+          p && p.name && p.name !== currentDrawer && (p.active !== false)
+        );
+        
+        activeGuessers.forEach(player => {
+          if (!correctGuessers.has(player.name)) {
+            drinkingPlayersList.push(player.name);
+          }
+        });
+      }
+    }
+
     const finalPlayersWithScores = currentRoom.players.map(player => {
+      // Skip inactive players in score calculation (but preserve their data)
+      if (player.active === false) {
+        return player;
+      }
+      
       if (player.name === currentDrawer) {
         return {
           ...player,
@@ -419,10 +471,6 @@ export default function DrawRoomScreen({ navigation, route }) {
       if (correctGuessers.has(player.name)) {
         const pointsEarned = correctGuessers.get(player.name);
         return { ...player, score: player.score + pointsEarned };
-      }
-
-      if (drinkingModeActive && !correctGuessers.has(player.name)) {
-        drinkingPlayersList.push(player.name);
       }
 
       return player;
@@ -471,36 +519,81 @@ export default function DrawRoomScreen({ navigation, route }) {
         setCurrentPlayerName(playerName);
       }
 
-      // Add player if not already in room (only in lobby state)
-      const playerExists = roomData.players && Array.isArray(roomData.players) && roomData.players.some(p => p && p.name === playerName);
-      if (!playerExists && roomData.game_status === 'lobby' && playerName) {
-        const updatedPlayers = [...(roomData.players || []), { name: playerName, score: 0 }];
-        console.log('🔵 Adding player to Draw room:', playerName);
-        try {
-          const roomDocRef = doc(db, 'DrawRoom', roomData.id);
-          await updateDoc(roomDocRef, { players: updatedPlayers });
-          const updatedSnapshot = await getDoc(roomDocRef);
-          if (updatedSnapshot.exists()) {
-            const updatedRoom = { id: updatedSnapshot.id, ...updatedSnapshot.data() };
-            setRoom(updatedRoom);
-            setIsLoading(false);
-            // Setup realtime listener with room ID
-            if (updatedRoom.id) {
-              setupRealtimeListener(updatedRoom.id);
+      // Check if player exists in room (by name)
+      const existingPlayerIndex = roomData.players && Array.isArray(roomData.players) 
+        ? roomData.players.findIndex(p => p && p.name === playerName)
+        : -1;
+      const playerExists = existingPlayerIndex !== -1;
+      
+      if (playerName) {
+        if (playerExists) {
+          // Player exists - check if they're rejoining (inactive)
+          const existingPlayer = roomData.players[existingPlayerIndex];
+          if (existingPlayer.active === false) {
+            // Rejoining: restore active state, keep score - use atomic join
+            console.log('🔄 Player rejoining Draw room:', playerName);
+            const result = await atomicPlayerJoin(
+              'DrawRoom',
+              roomData.id,
+              playerName,
+              null, // createPlayerObject (not needed for rejoin)
+              (players, name) => players.findIndex(p => p && p.name === name), // findPlayerIndex
+              (existingPlayer) => ({ ...existingPlayer, active: true }), // updatePlayerObject
+              3 // maxRetries
+            );
+            
+            if (result.success && result.roomData) {
+              console.log('✅ Player rejoined Draw room successfully:', playerName);
+              setRoom(result.roomData);
+              setIsLoading(false);
+              // Setup realtime listener with room ID
+              if (result.roomData.id) {
+                setupRealtimeListener(result.roomData.id);
+              }
+              return;
+            } else {
+              console.error('❌ Failed to rejoin Draw room:', result.error);
+              // Continue anyway - player exists, just couldn't update active status
             }
+          }
+          // Player already active, continue normally
+        } else {
+          // New player joining
+          if (roomData.game_status === 'lobby') {
+            // Only allow new players in lobby - use atomic join
+            const result = await atomicPlayerJoin(
+              'DrawRoom',
+              roomData.id,
+              playerName,
+              () => ({ name: playerName, score: 0, active: true }), // createPlayerObject
+              (players, name) => players.findIndex(p => p && p.name === name), // findPlayerIndex
+              null, // updatePlayerObject
+              3 // maxRetries
+            );
+            
+            if (result.success && result.roomData) {
+              console.log('✅ Player joined Draw room successfully:', playerName);
+              setRoom(result.roomData);
+              setIsLoading(false);
+              // Setup realtime listener with room ID
+              if (result.roomData.id) {
+                setupRealtimeListener(result.roomData.id);
+              }
+              return;
+            } else {
+              console.error('❌ Failed to join Draw room:', result.error);
+              Alert.alert('שגיאה', 'לא הצלחנו להצטרף לחדר. נסה שוב.');
+              navigation.goBack();
+              return;
+            }
+          } else if (roomData.game_status === 'playing') {
+            // Game in progress - new players cannot join
+            console.warn('⚠️ New player tried to join game that is already in progress');
+            Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+            navigation.goBack();
             return;
           }
-        } catch (updateErr) {
-          console.error('❌ Error adding player:', updateErr);
         }
-      }
-      
-      // If game is already playing and player is not in room, show error
-      if (!playerExists && roomData.game_status === 'playing' && playerName) {
-        console.warn('⚠️ Player tried to join game that is already in progress');
-        Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
-        navigation.goBack();
-        return;
       }
       
       setRoom(roomData);
@@ -524,12 +617,12 @@ export default function DrawRoomScreen({ navigation, route }) {
     const currentRoom = roomRef.current || room;
     if (!currentRoom || currentRoom.host_name !== currentPlayerName) return;
     
-    // Filter valid players
-    const validPlayers = currentRoom.players ? currentRoom.players.filter(p => p && p.name) : [];
-    if (validPlayers.length < 2) {
-      Alert.alert('שגיאה', 'צריך לפחות 2 שחקנים כדי להתחיל!');
-      return;
-    }
+      // Filter to active players only
+      const validPlayers = currentRoom.players ? currentRoom.players.filter(p => p && p.name && (p.active !== false)) : [];
+      if (validPlayers.length < 2) {
+        Alert.alert('שגיאה', 'צריך לפחות 2 שחקנים פעילים כדי להתחיל!');
+        return;
+      }
 
     try {
       const wordsSnapshot = await getDocs(collection(db, 'DrawWord'));
@@ -729,7 +822,7 @@ export default function DrawRoomScreen({ navigation, route }) {
     };
 
     if (shouldEndRound) {
-      const drinkingModeActive = await storage.getItem('drinkingMode') === 'true';
+      const drinkingModeActive = room.drinking_mode === true;
       let firstWinner = null;
       const drinkingPlayersList = [];
       let hasCorrectGuess = false;
@@ -758,7 +851,33 @@ export default function DrawRoomScreen({ navigation, route }) {
         }
       });
 
+      // Evaluate drinking based on the 2 cases
+      if (drinkingModeActive) {
+        // Case 1: No correct guesses → drawing player drinks
+        if (!hasCorrectGuess) {
+          drinkingPlayersList.push(currentDrawer);
+        }
+        // Case 2: At least one correct guess → all players who didn't guess correctly drink
+        else {
+          // Get all active guessers (excluding drawer)
+          const activeGuessers = room.players.filter(p => 
+            p && p.name && p.name !== currentDrawer && (p.active !== false)
+          );
+          
+          activeGuessers.forEach(player => {
+            if (!correctGuessers.has(player.name)) {
+              drinkingPlayersList.push(player.name);
+            }
+          });
+        }
+      }
+
       const playersWithScores = room.players.map(player => {
+        // Skip inactive players in score calculation (but preserve their data)
+        if (player.active === false) {
+          return player;
+        }
+        
         if (player.name === currentDrawer) {
           return {
             ...player,
@@ -769,10 +888,6 @@ export default function DrawRoomScreen({ navigation, route }) {
         if (correctGuessers.has(player.name)) {
           const pointsEarned = correctGuessers.get(player.name);
           return { ...player, score: player.score + pointsEarned };
-        }
-
-        if (drinkingModeActive && !correctGuessers.has(player.name)) {
-          drinkingPlayersList.push(player.name);
         }
 
         return player;
@@ -812,14 +927,15 @@ export default function DrawRoomScreen({ navigation, route }) {
       return;
     }
 
-    // Filter out invalid players (null or missing name)
-    const validPlayers = currentRoom.players.filter(p => p && p.name);
+    // Filter to active players only (active !== false)
+    const validPlayers = currentRoom.players.filter(p => p && p.name && (p.active !== false));
     if (validPlayers.length === 0) {
-      console.warn('⚠️ [DRAW] continueToNextRound - no valid players');
+      console.warn('⚠️ [DRAW] continueToNextRound - no active players');
       return;
     }
 
-    const winner = validPlayers.find(p => p.score >= WINNING_SCORE);
+    // Only check active players for winner
+    const winner = validPlayers.find(p => p.score >= WINNING_SCORE && (p.active !== false));
     
     if (winner) {
       // Game finished
@@ -853,35 +969,43 @@ export default function DrawRoomScreen({ navigation, route }) {
         const currentTurnIndex = currentRoom.current_turn_index ?? 0;
         const currentPlayerName = validPlayers[currentTurnIndex]?.name;
         
-        // Find current player index in valid players array
+        // Find current player index in active players array
         let currentValidIndex = validPlayers.findIndex(p => p.name === currentPlayerName);
         if (currentValidIndex === -1) {
-          currentValidIndex = 0; // Fallback to first player
+          currentValidIndex = 0; // Fallback to first active player
         }
         
-        // Move to next valid player
+        // Move to next active player
         let nextValidIndex = (currentValidIndex + 1) % validPlayers.length;
         
         // Find the actual index in the full players array
         const nextPlayerName = validPlayers[nextValidIndex].name;
         let nextTurnIndex = currentRoom.players.findIndex(p => p && p.name === nextPlayerName);
         
-        // Fallback: if not found, use modulo on valid players length
+        // Fallback: if not found, use first active player
         if (nextTurnIndex === -1) {
-          nextTurnIndex = nextValidIndex;
+          nextTurnIndex = currentRoom.players.findIndex(p => p && p.name && (p.active !== false));
+          if (nextTurnIndex === -1) {
+            console.error('❌ [DRAW] continueToNextRound - no active players found');
+            return;
+          }
         }
 
         // Ensure nextTurnIndex is within bounds
         if (nextTurnIndex < 0 || nextTurnIndex >= currentRoom.players.length) {
-          nextTurnIndex = 0;
+          nextTurnIndex = currentRoom.players.findIndex(p => p && p.name && (p.active !== false));
+          if (nextTurnIndex === -1) {
+            console.error('❌ [DRAW] continueToNextRound - no active players found');
+            return;
+          }
         }
 
-        // Validate that the next player exists
-        if (!currentRoom.players[nextTurnIndex] || !currentRoom.players[nextTurnIndex].name) {
-          console.warn('⚠️ [DRAW] continueToNextRound - next player invalid, using first valid player');
-          nextTurnIndex = currentRoom.players.findIndex(p => p && p.name);
+        // Validate that the next player exists and is active
+        if (!currentRoom.players[nextTurnIndex] || !currentRoom.players[nextTurnIndex].name || currentRoom.players[nextTurnIndex].active === false) {
+          console.warn('⚠️ [DRAW] continueToNextRound - next player invalid, using first active player');
+          nextTurnIndex = currentRoom.players.findIndex(p => p && p.name && (p.active !== false));
           if (nextTurnIndex === -1) {
-            console.error('❌ [DRAW] continueToNextRound - no valid players found');
+            console.error('❌ [DRAW] continueToNextRound - no active players found');
             return;
           }
         }
@@ -979,16 +1103,22 @@ export default function DrawRoomScreen({ navigation, route }) {
     // Note: We don't update Firestore show_round_summary here because other players might still be viewing it
     // Instead, we rely on the component unmounting and the modal visibility being tied to room state
     
-    // Remove player from room before leaving
+    // Mark player as inactive instead of removing
     if (room && room.id && currentPlayerName) {
       try {
-        const updatedPlayers = room.players.filter(p => p && p.name !== currentPlayerName);
+        const updatedPlayers = room.players.map(p => {
+          if (p && p.name === currentPlayerName) {
+            return { ...p, active: false };
+          }
+          return p;
+        });
         const roomRef = doc(db, 'DrawRoom', room.id);
         await updateDoc(roomRef, {
           players: updatedPlayers
         });
+        console.log('🔄 Marked player as inactive on goBack:', currentPlayerName);
       } catch (error) {
-        console.error('Error removing player from room:', error);
+        console.error('Error marking player as inactive:', error);
       }
     }
     
@@ -1145,9 +1275,25 @@ export default function DrawRoomScreen({ navigation, route }) {
                     <Text style={styles.drinkingToggleLabel}>🔞 מצב משחקי שתייה</Text>
                     <Switch
                       value={drinkingMode}
-                      onValueChange={(checked) => {
+                      onValueChange={async (checked) => {
                         setDrinkingMode(checked);
-                        storage.setItem('drinkingMode', checked.toString());
+                        try {
+                          // Save to local storage
+                          await storage.setItem('drinkingMode', checked.toString());
+                          
+                          // Save to Firestore room data so all players see it
+                          if (room && room.id) {
+                            const roomRef = doc(db, 'DrawRoom', room.id);
+                            await updateDoc(roomRef, {
+                              drinking_mode: checked
+                            });
+                            console.log('✅ Drinking mode updated:', checked);
+                          }
+                        } catch (error) {
+                          console.error('Error saving drinking mode:', error);
+                          setDrinkingMode(!checked); // Revert on error
+                          Alert.alert('שגיאה', 'לא הצלחנו לעדכן את מצב השתייה');
+                        }
                       }}
                       trackColor={{ false: '#D1D5DB', true: '#F97316' }}
                       thumbColor={drinkingMode ? '#FFFFFF' : '#9CA3AF'}
@@ -1445,7 +1591,7 @@ export default function DrawRoomScreen({ navigation, route }) {
                     showsHorizontalScrollIndicator={false}
                   >
                     <View style={styles.scoreboardHorizontalContainer}>
-                      {[...room.players].sort((a, b) => b.score - a.score).map((player, idx) => {
+                      {[...room.players].filter(p => p && p.name && (p.active !== false)).sort((a, b) => b.score - a.score).map((player, idx) => {
                         const isCurrentTurn = room.players[room.current_turn_index]?.name === player.name;
                         
                         return (
@@ -1494,7 +1640,18 @@ export default function DrawRoomScreen({ navigation, route }) {
                 <Text style={styles.drinkingIcon}>🍺</Text>
                 <Text style={styles.drinkingTitle}>זמן שתייה!</Text>
                 <Text style={styles.drinkingMessage}>
-                  {room.drinking_players.length === 1 ? 'לא ניחשת נכון!' : 'לא ניחשתם נכון!'}
+                  {(() => {
+                    const currentDrawer = room.players[room.current_turn_index]?.name;
+                    const isDrawerDrinking = room.drinking_players.includes(currentDrawer);
+                    
+                    if (isDrawerDrinking) {
+                      return `אף אחד לא ניחש נכון – ${currentDrawer} חייבת לשתות!`;
+                    } else if (room.drinking_players.length === 1) {
+                      return 'לא ניחשת נכון!';
+                    } else {
+                      return 'לא ניחשתם נכון!';
+                    }
+                  })()}
                 </Text>
                 <View style={styles.drinkingPlayersList}>
                   {room.drinking_players && Array.isArray(room.drinking_players) && room.drinking_players

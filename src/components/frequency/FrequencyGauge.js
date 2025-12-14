@@ -48,16 +48,28 @@ export default function FrequencyGauge({
   }, [canMove, onNeedleMove]);
 
   // Initialize local needle from prop, but only if not dragging and prop is valid
+  // IMPORTANT: Don't reset if canMove is false (player has submitted) - preserve submitted position
   useEffect(() => {
     if (!isDraggingRef.current && needlePosition !== undefined && needlePosition !== null) {
-      // Only update if the prop value is significantly different to avoid unnecessary updates
-      const currentValue = localNeedle;
-      const newValue = needlePosition;
-      if (Math.abs(currentValue - newValue) > 0.1) {
-        setLocalNeedle(newValue);
+      // If player can't move (has submitted), preserve their submitted position
+      // Only update from prop if the difference is significant AND player can still move
+      if (!canMove) {
+        // Player has submitted - don't reset their needle position
+        // Only update if prop has a valid submitted position that's different
+        if (Math.abs(localNeedle - needlePosition) > 0.1 && needlePosition !== 90) {
+          // Only update if the prop value is a real submitted position (not default 90)
+          setLocalNeedle(needlePosition);
+        }
+      } else {
+        // Player can still move - allow normal updates
+        const currentValue = localNeedle;
+        const newValue = needlePosition;
+        if (Math.abs(currentValue - newValue) > 0.1) {
+          setLocalNeedle(newValue);
+        }
       }
     }
-  }, [needlePosition]);
+  }, [needlePosition, canMove]);
 
   // Store current needle position globally for submission
   useEffect(() => {

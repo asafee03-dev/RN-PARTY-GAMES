@@ -92,7 +92,7 @@ export default function DrawHomeScreen({ navigation, route }) {
       const roomData = {
         room_code: code,
         host_name: playerName,
-        players: [{ name: playerName, score: 0 }],
+        players: [{ name: playerName, score: 0, active: true }],
         game_status: 'lobby',
         current_turn_index: 0,
         created_at: Date.now() // Store as timestamp for age calculation
@@ -116,24 +116,8 @@ export default function DrawHomeScreen({ navigation, route }) {
         throw setDocError;
       }
       
-      // Verify the document was actually created
-      console.log('🔵 [DRAW] Verifying document exists...');
-      try {
-        const verifySnapshot = await getDoc(roomRef);
-        console.log('🔵 [DRAW] Verification snapshot:', verifySnapshot.exists() ? 'EXISTS' : 'NOT FOUND');
-        if (!verifySnapshot.exists()) {
-          console.error('❌ [DRAW] Document not found after write!');
-          console.error('❌ [DRAW] Room code:', code);
-          console.error('❌ [DRAW] Collection: DrawRoom');
-          throw new Error('Document was not created - check Firestore Rules');
-        }
-        console.log('✅ [DRAW] Document verified successfully');
-      } catch (verifyError) {
-        console.error('❌ [DRAW] Verification failed:', verifyError);
-        throw verifyError;
-      }
-      
-      console.log('✅ [DRAW] Room created and verified successfully with code:', code);
+      // No need to verify - if setDoc succeeds, document exists
+      console.log('✅ [DRAW] Room created successfully with code:', code);
       
       // Save player name before navigation
       try {

@@ -60,7 +60,13 @@ export default function GameBoard({ teams, goldenSquares = [] }) {
   const spiralSquares = createRectangularSpiral();
 
   const getTeamsOnSquare = (position) => {
-    return teams.filter(team => team.position === position);
+    if (!teams || !Array.isArray(teams)) return [];
+    // Ensure all teams have position property (default to 0 if missing)
+    return teams.filter(team => {
+      if (!team) return false;
+      const teamPosition = team.position !== undefined ? team.position : 0;
+      return teamPosition === position;
+    });
   };
 
   return (
@@ -111,12 +117,23 @@ export default function GameBoard({ teams, goldenSquares = [] }) {
                 {/* Team indicators */}
                 {teamsHere.length > 0 && (
                   <View style={styles.teamIndicators}>
-                    {teamsHere.map((team, idx) => (
-                      <View
-                        key={idx}
-                        style={[styles.teamDot, { backgroundColor: team.color }]}
-                      />
-                    ))}
+                    {teamsHere.map((team, idx) => {
+                      const teamColor = team.color || '#CCCCCC';
+                      // Offset multiple pawns on the same square
+                      const offsetX = teamsHere.length > 1 ? (idx - (teamsHere.length - 1) / 2) * 3 : 0;
+                      return (
+                        <View
+                          key={idx}
+                          style={[
+                            styles.teamDot, 
+                            { 
+                              backgroundColor: teamColor,
+                              marginLeft: offsetX
+                            }
+                          ]}
+                        />
+                      );
+                    })}
                   </View>
                 )}
               </View>
@@ -127,13 +144,21 @@ export default function GameBoard({ teams, goldenSquares = [] }) {
 
       {/* Legend */}
       <View style={styles.legend}>
-        {teams.map((team, idx) => (
-          <View key={idx} style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: team.color }]} />
-            <Text style={styles.legendText}>{team.name}</Text>
-            <Text style={styles.legendPosition}>{team.position + 1}/60</Text>
-          </View>
-        ))}
+        {teams && Array.isArray(teams) && teams.map((team, idx) => {
+          if (!team) return null;
+          // Ensure position is defined (default to 0)
+          const teamPosition = team.position !== undefined ? team.position : 0;
+          const teamColor = team.color || '#CCCCCC';
+          const teamName = team.name || `קבוצה ${idx + 1}`;
+          
+          return (
+            <View key={idx} style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: teamColor }]} />
+              <Text style={styles.legendText}>{teamName}</Text>
+              <Text style={styles.legendPosition}>{teamPosition + 1}/60</Text>
+            </View>
+          );
+        })}
       </View>
     </View>
   );

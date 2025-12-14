@@ -9,6 +9,7 @@ import TimeUpPopup from '../../components/alias/TimeUpPopup';
 import GoldenWordPopup from '../../components/alias/GoldenWordPopup';
 import GoldenRoundCard from '../../components/alias/GoldenRoundCard';
 import RoundSummary from '../../components/alias/RoundSummary';
+import DrinkingPopup from '../../components/alias/DrinkingPopup';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db } from '../../firebase';
@@ -33,6 +34,9 @@ export default function AliasGameScreen({ navigation, route }) {
   const [showGoldenPopup, setShowGoldenPopup] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [drinkingMode, setDrinkingMode] = useState(false);
+  const [showDrinkingPopup, setShowDrinkingPopup] = useState(false);
+  const [drinkingTeamName, setDrinkingTeamName] = useState('');
+  const previousTurnRef = useRef(null); // Track previous turn to detect full round completion
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
 
@@ -168,6 +172,19 @@ export default function AliasGameScreen({ navigation, route }) {
 
       const roomData = { id: roomSnap.id, ...roomSnap.data() };
       setRoom(roomData);
+      
+      // Load drinking mode from room data (preferred) or local storage (fallback)
+      if (roomData.drinking_mode !== undefined) {
+        setDrinkingMode(roomData.drinking_mode);
+        // Also sync to local storage
+        await storage.setItem('drinkingMode', roomData.drinking_mode.toString());
+      } else {
+        // Fallback to local storage if room doesn't have it yet
+        const savedMode = await storage.getItem('drinkingMode');
+        if (savedMode) {
+          setDrinkingMode(savedMode === 'true');
+        }
+      }
     } catch (error) {
       console.error('Error loading room:', error);
       throw error;
@@ -187,6 +204,22 @@ export default function AliasGameScreen({ navigation, route }) {
       if (snapshot.exists()) {
         const roomData = { id: snapshot.id, ...snapshot.data() };
         
+        // Sync drinking mode from room data
+        if (roomData.drinking_mode !== undefined) {
+          setDrinkingMode(roomData.drinking_mode);
+          // Also sync to local storage
+          storage.setItem('drinkingMode', roomData.drinking_mode.toString()).catch(() => {});
+        }
+        
+        // Handle drinking popup from room data
+        if (roomData.drinking_popup && roomData.drinking_popup.team_name) {
+          setDrinkingTeamName(roomData.drinking_popup.team_name);
+          setShowDrinkingPopup(true);
+        } else if (roomData.drinking_popup === null && showDrinkingPopup) {
+          // Popup was cleared
+          setShowDrinkingPopup(false);
+        }
+        
         // Handle state updates - match old version's exact logic
         setRoom(prevRoom => {
           // Restore timeIsUp state if last_word_on_time_up exists (after refresh)
@@ -194,6 +227,9 @@ export default function AliasGameScreen({ navigation, route }) {
             console.log('🔵 [RESTORE] Restoring timeIsUp state from Firestore');
             setTimeIsUp(true);
           }
+          
+          // Note: Full round completion is now handled in finishRound() function
+          // This ensures it only triggers once when the round actually completes
           
           // Reset timer and timeIsUp when a new round starts
           if (!prevRoom?.round_active && roomData.round_active) {
@@ -340,11 +376,13 @@ export default function AliasGameScreen({ navigation, route }) {
     try {
       const roomRef = doc(db, 'GameRoom', room.id);
       
-      const roomSnapshot = await getDoc(roomRef);
-      if (!roomSnapshot.exists()) {
-        Alert.alert('שגיאה', 'החדר נמחק. אנא צא מהחדר וחזור.');
-        navigation.navigate('AliasHome');
-        return;
+      // Store round_start_position for the current team in the team object as well
+      const updatedTeams = [...room.teams];
+      if (updatedTeams[room.current_turn]) {
+        updatedTeams[room.current_turn] = {
+          ...updatedTeams[room.current_turn],
+          round_start_position: currentTeamPosition
+        };
       }
       
       const updates = {
@@ -353,12 +391,24 @@ export default function AliasGameScreen({ navigation, route }) {
         current_round_score: 0,
         round_start_time: Date.now(),
         round_start_position: currentTeamPosition,
+        teams: updatedTeams,
         used_cards: [],
         show_round_summary: false,
         last_word_on_time_up: null,
         current_word_is_golden: false
       };
-      await updateDoc(roomRef, updates);
+      
+      // Try update first - if room doesn't exist, updateDoc will throw
+      try {
+        await updateDoc(roomRef, updates);
+      } catch (error) {
+        if (error.code === 'not-found') {
+          Alert.alert('שגיאה', 'החדר נמחק. אנא צא מהחדר וחזור.');
+          navigation.navigate('AliasHome');
+          return;
+        }
+        throw error; // Re-throw other errors
+      }
       
       console.log('✅ Round started successfully');
     } catch (error) {
@@ -458,21 +508,25 @@ export default function AliasGameScreen({ navigation, route }) {
 
       try {
         const roomRef = doc(db, 'GameRoom', room.id);
-        const roomSnapshot = await getDoc(roomRef);
-        if (!roomSnapshot.exists()) {
-          Alert.alert('שגיאה', 'החדר נמחק. אנא צא מהחדר וחזור.');
-          navigation.navigate('AliasHome');
-          return;
+        
+        // Try update first - if room doesn't exist, updateDoc will throw
+        try {
+          await updateDoc(roomRef, {
+            teams: updatedTeams,
+            used_cards: updatedUsedCards,
+            current_round_score: updatedUsedCards.filter(c => c.status === 'correct').length,
+            game_status: gameStatus,
+            winner_team: winnerTeam,
+            current_word_is_golden: isNextSquareGolden
+          });
+        } catch (error) {
+          if (error.code === 'not-found') {
+            Alert.alert('שגיאה', 'החדר נמחק. אנא צא מהחדר וחזור.');
+            navigation.navigate('AliasHome');
+            return;
+          }
+          throw error; // Re-throw other errors
         }
-
-        await updateDoc(roomRef, {
-          teams: updatedTeams,
-          used_cards: updatedUsedCards,
-          current_round_score: updatedUsedCards.filter(c => c.status === 'correct').length,
-          game_status: gameStatus,
-          winner_team: winnerTeam,
-          current_word_is_golden: isNextSquareGolden
-        });
       } catch (error) {
         console.error('❌ Error updating room:', error);
       }
@@ -516,22 +570,26 @@ export default function AliasGameScreen({ navigation, route }) {
 
       try {
         const roomRef = doc(db, 'GameRoom', room.id);
-        const roomSnapshot = await getDoc(roomRef);
-        if (!roomSnapshot.exists()) {
-          Alert.alert('שגיאה', 'החדר נמחק. אנא צא מהחדר וחזור.');
-          navigation.navigate('AliasHome');
-          return;
+        
+        // Try update first - if room doesn't exist, updateDoc will throw
+        try {
+          await updateDoc(roomRef, {
+            teams: updatedTeams,
+            used_cards: updatedUsedCards,
+            current_round_score: updatedUsedCards.filter(c => c.status === 'correct').length,
+            game_status: gameStatus,
+            winner_team: winnerTeam,
+            show_round_summary: true,
+            round_active: false
+          });
+        } catch (error) {
+          if (error.code === 'not-found') {
+            Alert.alert('שגיאה', 'החדר נמחק. אנא צא מהחדר וחזור.');
+            navigation.navigate('AliasHome');
+            return;
+          }
+          throw error; // Re-throw other errors
         }
-
-        await updateDoc(roomRef, {
-          teams: updatedTeams,
-          used_cards: updatedUsedCards,
-          current_round_score: updatedUsedCards.filter(c => c.status === 'correct').length,
-          game_status: gameStatus,
-          winner_team: winnerTeam,
-          show_round_summary: true,
-          round_active: false
-        });
       } catch (error) {
         console.error('❌ Error updating room:', error);
       }
@@ -570,21 +628,25 @@ export default function AliasGameScreen({ navigation, route }) {
 
     try {
       const roomRef = doc(db, 'GameRoom', room.id);
-      const roomSnapshot = await getDoc(roomRef);
-      if (!roomSnapshot.exists()) {
-        Alert.alert('שגיאה', 'החדר נמחק. אנא צא מהחדר וחזור.');
-        navigation.navigate('AliasHome');
-        return;
+      
+      // Try update first - if room doesn't exist, updateDoc will throw
+      try {
+        await updateDoc(roomRef, {
+          current_round_score: updatedUsedCards.filter(c => c.status === 'correct').length,
+          teams: updatedTeams,
+          game_status: gameStatus,
+          winner_team: winnerTeam,
+          used_cards: updatedUsedCards,
+          current_word_is_golden: isNextSquareGolden
+        });
+      } catch (error) {
+        if (error.code === 'not-found') {
+          Alert.alert('שגיאה', 'החדר נמחק. אנא צא מהחדר וחזור.');
+          navigation.navigate('AliasHome');
+          return;
+        }
+        throw error; // Re-throw other errors
       }
-
-      await updateDoc(roomRef, {
-        current_round_score: updatedUsedCards.filter(c => c.status === 'correct').length,
-        teams: updatedTeams,
-        game_status: gameStatus,
-        winner_team: winnerTeam,
-        used_cards: updatedUsedCards,
-        current_word_is_golden: isNextSquareGolden
-      });
     } catch (error) {
       console.error('❌ Error updating room:', error);
     }
@@ -682,6 +744,8 @@ export default function AliasGameScreen({ navigation, route }) {
     if (!room || !room.show_round_summary) return;
 
     const nextTurn = (room.current_turn + 1) % room.teams.length;
+    const numTeams = room.teams.length;
+    const isFullRoundComplete = nextTurn === 0; // Full round completed when cycling back to team 0
 
     try {
       const roomRef = doc(db, 'GameRoom', room.id);
@@ -692,15 +756,36 @@ export default function AliasGameScreen({ navigation, route }) {
         return;
       }
 
+      // Clear round_start_position for the team that just finished their round
+      const updatedTeams = [...room.teams];
+      if (updatedTeams[room.current_turn]) {
+        updatedTeams[room.current_turn] = {
+          ...updatedTeams[room.current_turn],
+          round_start_position: null // Clear after round ends
+        };
+      }
+      
       await updateDoc(roomRef, {
         current_turn: nextTurn,
         round_active: false,
         show_round_summary: false,
         current_round_score: 0,
+        teams: updatedTeams,
         used_cards: [],
         last_word_on_time_up: null,
-        current_word_is_golden: false
+        current_word_is_golden: false,
+        round_start_position: null // Clear room-level round_start_position
       });
+      
+      // Check for drinking popup if full round completed and drinking mode is on
+      if (isFullRoundComplete && room.drinking_mode) {
+        // Get fresh room data after update
+        const updatedRoomSnap = await getDoc(roomRef);
+        if (updatedRoomSnap.exists()) {
+          const updatedRoomData = { id: updatedRoomSnap.id, ...updatedRoomSnap.data() };
+          handleFullRoundCompletion(updatedRoomData);
+        }
+      }
       
       setTimerKey(prev => prev + 1);
       setTimeIsUp(false);
@@ -878,15 +963,83 @@ export default function AliasGameScreen({ navigation, route }) {
     return room.teams[room.current_turn] || null;
   };
 
-  const calculateProgress = () => {
-    const currentTeam = getCurrentTeam();
-    if (!currentTeam) return { startPos: 0, currentPos: 0, moved: 0 };
+  const calculateProgress = (teamIndex = null) => {
+    // If teamIndex is provided, calculate for that team; otherwise use current team
+    const targetTeamIndex = teamIndex !== null ? teamIndex : room.current_turn;
+    const targetTeam = room.teams && room.teams[targetTeamIndex];
     
-    const startPos = room.round_start_position || currentTeam.position;
-    const currentPos = currentTeam.position;
+    if (!targetTeam) return { startPos: 0, currentPos: 0, moved: 0 };
+    
+    // Get the team's position (default to 0 if undefined)
+    const currentPos = targetTeam.position !== undefined ? targetTeam.position : 0;
+    
+    // Determine start position based on whether it's the current team and if a round is active
+    let startPos;
+    if (targetTeamIndex === room.current_turn && room.round_active) {
+      // Current team during active round: use the round_start_position stored in room
+      startPos = room.round_start_position !== undefined && room.round_start_position !== null 
+        ? room.round_start_position 
+        : currentPos;
+    } else if (targetTeamIndex === room.current_turn && !room.round_active) {
+      // Current team when round is not active: no movement this round
+      startPos = currentPos;
+    } else {
+      // Other teams: if they have a stored round_start_position, use it; otherwise no movement
+      if (targetTeam.round_start_position !== undefined && targetTeam.round_start_position !== null) {
+        startPos = targetTeam.round_start_position;
+      } else {
+        // No round started for this team yet, or round already ended - no movement
+        startPos = currentPos;
+      }
+    }
+    
     const moved = currentPos - startPos;
     
     return { startPos, currentPos, moved };
+  };
+
+  const handleFullRoundCompletion = (roomData) => {
+    // Only show drinking popup if drinking mode is enabled
+    if (!roomData.drinking_mode) {
+      return;
+    }
+
+    // Calculate round progress for all teams
+    const teamProgress = roomData.teams.map((team, index) => {
+      const currentPos = team.position !== undefined ? team.position : 0;
+      const startPos = team.round_start_position !== undefined && team.round_start_position !== null
+        ? team.round_start_position
+        : currentPos; // If no start position, assume no movement
+      const moved = currentPos - startPos;
+      return {
+        teamIndex: index,
+        teamName: team.name || `קבוצה ${index + 1}`,
+        moved: moved
+      };
+    });
+
+    // Find team(s) with fewest tiles advanced
+    const minMoved = Math.min(...teamProgress.map(t => t.moved));
+    const losingTeams = teamProgress.filter(t => t.moved === minMoved);
+
+    // If tied, choose first team deterministically (by index)
+    const losingTeam = losingTeams[0];
+
+    // Show popup for all players if there's a losing team
+    if (losingTeam) {
+      setDrinkingTeamName(losingTeam.teamName);
+      setShowDrinkingPopup(true);
+      
+      // Store in room data so all players see it
+      const roomRef = doc(db, 'GameRoom', roomData.id);
+      updateDoc(roomRef, {
+        drinking_popup: {
+          team_name: losingTeam.teamName,
+          team_index: losingTeam.teamIndex,
+          timestamp: Date.now()
+        }
+      }).catch(err => console.error('Error updating drinking popup:', err));
+    }
   };
 
   if (isLoading || !room) {
@@ -1033,6 +1186,22 @@ export default function AliasGameScreen({ navigation, route }) {
           visible={showRulesModal}
           onClose={() => setShowRulesModal(false)}
           variant="alias"
+        />
+
+        {/* Drinking Popup */}
+        <DrinkingPopup
+          visible={showDrinkingPopup}
+          onClose={() => {
+            setShowDrinkingPopup(false);
+            // Clear drinking popup from room data
+            if (room && room.id) {
+              const roomRef = doc(db, 'GameRoom', room.id);
+              updateDoc(roomRef, { drinking_popup: null }).catch(err => 
+                console.error('Error clearing drinking popup:', err)
+              );
+            }
+          }}
+          teamName={drinkingTeamName}
         />
 
         {/* Team Info */}

@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientButton from '../codenames/GradientButton';
-import { copyRoomCode, copyRoomLink } from '../../utils/clipboard';
+import { copyRoomCode } from '../../utils/clipboard';
+import { shareGameLink } from '../../utils/shareUtils';
 import storage from '../../utils/storage';
 
 export default function UnifiedTopBar({ 
@@ -14,6 +15,7 @@ export default function UnifiedTopBar({
   drinkingMode: propDrinkingMode = null // Allow override from prop, otherwise check storage
 }) {
   const [drinkingMode, setDrinkingMode] = useState(false);
+  const [playerName, setPlayerName] = useState('');
 
   useEffect(() => {
     const loadDrinkingMode = async () => {
@@ -32,6 +34,21 @@ export default function UnifiedTopBar({
     };
     loadDrinkingMode();
   }, [propDrinkingMode]);
+
+  useEffect(() => {
+    const loadPlayerName = async () => {
+      try {
+        const savedName = await storage.getItem('playerName');
+        if (savedName) {
+          setPlayerName(savedName);
+        }
+      } catch (e) {
+        console.warn('Could not load player name:', e);
+      }
+    };
+    loadPlayerName();
+  }, []);
+
   const insets = useSafeAreaInsets();
   const [copied, setCopied] = useState(false);
 
@@ -41,8 +58,10 @@ export default function UnifiedTopBar({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleCopyRoomLink = async () => {
-    await copyRoomLink(roomCode, variant);
+  const handleShareRoomLink = async () => {
+    // Use player name as inviter, fallback to "Someone" if not available
+    const inviter = playerName || 'Someone';
+    await shareGameLink(variant, roomCode, inviter);
   };
 
   // Theme colors per variant (matching GradientButton colors)
@@ -61,7 +80,7 @@ export default function UnifiedTopBar({
       {/* Right to Left: Share Link, Room Code, Drinking Mode Badge, Rules, Exit */}
       <View style={styles.content}>
         {/* Share Room Link Button */}
-        <Pressable onPress={handleCopyRoomLink} style={styles.shareButton}>
+        <Pressable onPress={handleShareRoomLink} style={styles.shareButton}>
           <Text style={styles.shareIcon}>🔗</Text>
         </Pressable>
 

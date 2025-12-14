@@ -3,7 +3,9 @@ import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import GradientBackground from '../codenames/GradientBackground';
 
 export default function ScoreBoard({ players, currentTurnIndex }) {
-  const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+  // Filter to show only active players (active !== false)
+  const activePlayers = (players || []).filter(p => p && p.name && (p.active !== false));
+  const sortedPlayers = [...activePlayers].sort((a, b) => b.score - a.score);
 
   return (
     <View style={styles.container}>

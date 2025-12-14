@@ -7,6 +7,7 @@ import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
+import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
@@ -178,16 +179,30 @@ export default function SpyRoomScreen({ navigation, route }) {
       console.log('✅ Room loaded successfully:', roomData.id, 'with code:', roomData.room_code);
 
       // Load numberOfSpies from room (default to 1)
+      // Only write default if we're the host (to avoid race conditions with multiple players)
       if (roomData.number_of_spies !== undefined && roomData.number_of_spies !== null) {
         setNumberOfSpies(roomData.number_of_spies);
       } else {
-        // If not set, default to 1 and save it
         setNumberOfSpies(1);
-        if (roomData.id) {
+        // Only write default if we're the host to avoid unnecessary concurrent writes
+        if (roomData.id && roomData.host_name === playerName) {
           const roomRef = doc(db, 'SpyRoom', roomData.id);
           updateDoc(roomRef, { number_of_spies: 1 }).catch(err => {
             console.error('Error setting default number of spies:', err);
           });
+        }
+      }
+
+      // Load drinking mode from room data (preferred) or local storage (fallback)
+      if (roomData.drinking_mode !== undefined) {
+        setDrinkingMode(roomData.drinking_mode);
+        // Also sync to local storage
+        await storage.setItem('drinkingMode', roomData.drinking_mode.toString());
+      } else {
+        // Fallback to local storage if room doesn't have it yet
+        const savedMode = await storage.getItem('drinkingMode');
+        if (savedMode) {
+          setDrinkingMode(savedMode === 'true');
         }
       }
 
@@ -197,30 +212,39 @@ export default function SpyRoomScreen({ navigation, route }) {
         setCurrentPlayerName(playerName);
       }
 
-      // Add player if not already in room
-      const playerExists = roomData.players && Array.isArray(roomData.players) && roomData.players.some(p => p && p.name === playerName);
-      
-      // If game is already playing and player is not in room, show error
-      if (!playerExists && (roomData.game_status === 'playing' || roomData.game_status === 'finished') && playerName) {
-        console.warn('⚠️ Player tried to join game that is already in progress');
-        Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
-        navigation.goBack();
-        return;
+      // Check game status first - don't allow new joins if game is playing/finished
+      if (playerName && (roomData.game_status === 'playing' || roomData.game_status === 'finished')) {
+        const playerExists = roomData.players && Array.isArray(roomData.players) && 
+          roomData.players.some(p => p && p.name === playerName);
+        if (!playerExists) {
+          console.warn('⚠️ Player tried to join game that is already in progress');
+          Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+          navigation.goBack();
+          return;
+        }
       }
       
-      if (!playerExists && roomData.game_status === 'lobby' && playerName) {
-        const updatedPlayers = [...(roomData.players || []), { name: playerName }];
-        console.log('🔵 Adding player to Spy room:', playerName);
-        try {
-          await updateDoc(roomRef, { players: updatedPlayers });
-          const updatedSnapshot = await getDoc(roomRef);
-          if (updatedSnapshot.exists()) {
-            const updatedRoom = { id: updatedSnapshot.id, ...updatedSnapshot.data() };
-            setRoom(updatedRoom);
-            return;
-          }
-        } catch (updateError) {
-          console.error('❌ Error adding player:', updateError);
+      // Use atomic join for lobby state
+      if (playerName && roomData.game_status === 'lobby') {
+        const result = await atomicPlayerJoin(
+          'SpyRoom',
+          roomData.id,
+          playerName,
+          () => ({ name: playerName }), // createPlayerObject
+          (players, name) => players.findIndex(p => p && p.name === name), // findPlayerIndex
+          null, // updatePlayerObject (no update needed for new joins)
+          3 // maxRetries
+        );
+        
+        if (result.success && result.roomData) {
+          console.log('✅ Player joined Spy room successfully:', playerName);
+          setRoom(result.roomData);
+          return;
+        } else {
+          console.error('❌ Failed to join Spy room:', result.error);
+          Alert.alert('שגיאה', 'לא הצלחנו להצטרף לחדר. נסה שוב.');
+          navigation.goBack();
+          return;
         }
       }
       setRoom(roomData);
@@ -245,6 +269,14 @@ export default function SpyRoomScreen({ navigation, route }) {
     unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const newRoom = { id: snapshot.id, ...snapshot.data() };
+        
+        // Sync drinking mode from room data
+        if (newRoom.drinking_mode !== undefined) {
+          setDrinkingMode(newRoom.drinking_mode);
+          // Also sync to local storage
+          storage.setItem('drinkingMode', newRoom.drinking_mode.toString()).catch(() => {});
+        }
+        
         setRoom(prevRoom => {
           if (!prevRoom) {
             // Update numberOfSpies when room is first loaded
@@ -371,16 +403,8 @@ export default function SpyRoomScreen({ navigation, route }) {
       return;
     }
 
-    let currentRoom = room;
-    try {
-      const roomRef = doc(db, 'SpyRoom', room.id);
-      const snapshot = await getDoc(roomRef);
-      if (snapshot.exists()) {
-        currentRoom = { id: snapshot.id, ...snapshot.data() };
-      }
-    } catch (error) {
-      console.error('❌ Error fetching fresh room state:', error);
-    }
+    // Use realtime listener state (more efficient than re-reading)
+    const currentRoom = room;
 
     if (currentRoom.game_status !== 'lobby') {
       console.warn('⚠️ Cannot start game - room is not in lobby state:', currentRoom.game_status);
@@ -577,15 +601,11 @@ export default function SpyRoomScreen({ navigation, route }) {
       const correctLocation = room.chosen_location || '';
       const isCorrect = trimmedGuess.toLowerCase() === correctLocation.toLowerCase();
       
-      // Save the guess and result
+      // Batch both updates into a single write
       await updateDoc(roomRef, {
         spy_guess: trimmedGuess,
         spy_guess_correct: isCorrect,
-        spy_guess_player: currentPlayerName
-      });
-
-      // End the game automatically
-      await updateDoc(roomRef, {
+        spy_guess_player: currentPlayerName,
         game_status: 'finished'
       });
 
@@ -794,9 +814,25 @@ export default function SpyRoomScreen({ navigation, route }) {
                     <Text style={styles.drinkingToggleLabel}>🔞 מצב משחקי שתייה</Text>
                     <Switch
                       value={drinkingMode}
-                      onValueChange={(checked) => {
+                      onValueChange={async (checked) => {
                         setDrinkingMode(checked);
-                        storage.setItem('drinkingMode', checked.toString());
+                        try {
+                          // Save to local storage
+                          await storage.setItem('drinkingMode', checked.toString());
+                          
+                          // Save to Firestore room data so all players see it
+                          if (room && room.id) {
+                            const roomRef = doc(db, 'SpyRoom', room.id);
+                            await updateDoc(roomRef, {
+                              drinking_mode: checked
+                            });
+                            console.log('✅ Drinking mode updated:', checked);
+                          }
+                        } catch (error) {
+                          console.error('Error saving drinking mode:', error);
+                          setDrinkingMode(!checked); // Revert on error
+                          Alert.alert('שגיאה', 'לא הצלחנו לעדכן את מצב השתייה');
+                        }
                       }}
                       trackColor={{ false: '#D1D5DB', true: '#F97316' }}
                       thumbColor={drinkingMode ? '#FFFFFF' : '#9CA3AF'}
@@ -1246,6 +1282,23 @@ export default function SpyRoomScreen({ navigation, route }) {
                                 : 'השחקנים הצליחו לזהות את כל המרגלים!')}
                         </Text>
                       </View>
+
+                      {/* Drinking Section - Only show if drinking mode is enabled */}
+                      {room.drinking_mode && (
+                        <View style={styles.drinkingSection}>
+                          <Text style={styles.drinkingSectionIcon}>🍺</Text>
+                          <Text style={styles.drinkingSectionTitle}>זמן שתייה!</Text>
+                          <Text style={styles.drinkingSectionMessage}>
+                            {spyWon 
+                              ? (spyNames.length === 1 
+                                  ? 'המרגל ניצח – כל השחקנים האחרים חייבת לשתות 🍺'
+                                  : 'המרגלים ניצחו – כל השחקנים האחרים חייבת לשתות 🍺')
+                              : (spyNames.length === 1
+                                  ? 'המרגל נתפס – המרגל חייבת לשתות 🍺'
+                                  : 'כל המרגלים נתפסו – כל המרגלים חייבת לשתות 🍺')}
+                          </Text>
+                        </View>
+                      )}
                       
                       {voteCounts
                         .sort((a, b) => b.votes - a.votes)
@@ -2205,5 +2258,31 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#10B981',
     marginTop: 8,
+  },
+  drinkingSection: {
+    backgroundColor: '#FFF7ED',
+    borderWidth: 2,
+    borderColor: '#F97316',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    marginTop: 16,
+    gap: 8,
+  },
+  drinkingSectionIcon: {
+    fontSize: 48,
+    marginBottom: 4,
+  },
+  drinkingSectionTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#1F2937',
+    marginBottom: 4,
+  },
+  drinkingSectionMessage: {
+    fontSize: 18,
+    color: '#374151',
+    textAlign: 'center',
+    lineHeight: 24,
   },
 });

@@ -11,6 +11,76 @@ const agentIcons = ["🕵️", "🔍", "🎯", "📋", "🗂️", "💼", "🕶�
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// Custom icon component for binary code
+const BinaryCode = () => {
+  const binaryRows = [
+    ['0', '1', '0', '1', '1', '0'],
+    ['1', '0', '1', '0', '0', '1'],
+    ['0', '1', '1', '0', '1', '0'],
+    ['1', '1', '0', '1', '0', '1'],
+    ['0', '0', '1', '1', '0', '0'],
+  ];
+  
+  return (
+    <View style={customIconStyles.binaryContainer}>
+      {binaryRows.map((row, rowIndex) => (
+        <View key={rowIndex} style={customIconStyles.binaryRow}>
+          {row.map((bit, bitIndex) => (
+            <Text 
+              key={`${rowIndex}-${bitIndex}`} 
+              style={[
+                customIconStyles.binaryBit,
+                (rowIndex === 0 && bitIndex === 0) || 
+                (rowIndex === 1 && bitIndex === 2) || 
+                (rowIndex === 2 && bitIndex === 4) || 
+                (rowIndex === 3 && bitIndex === 1) || 
+                (rowIndex === 4 && bitIndex === 3) 
+                  ? customIconStyles.binaryBitLarge 
+                  : null
+              ]}
+            >
+              {bit}
+            </Text>
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+};
+
+const customIconStyles = StyleSheet.create({
+  binaryContainer: {
+    width: 80,
+    height: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    padding: 6,
+    borderWidth: 2,
+    borderColor: 'rgba(0, 255, 255, 0.3)',
+  },
+  binaryRow: {
+    flexDirection: 'row',
+    gap: 2,
+    marginBottom: 2,
+  },
+  binaryBit: {
+    color: '#00FFFF',
+    fontSize: 10,
+    fontWeight: '600',
+    textShadowColor: '#00FFFF',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 4,
+    opacity: 0.7,
+  },
+  binaryBitLarge: {
+    fontSize: 12,
+    fontWeight: '700',
+    opacity: 1,
+  },
+});
+
 export default function CodenamesHomeScreen({ navigation, route }) {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
@@ -219,110 +289,108 @@ export default function CodenamesHomeScreen({ navigation, route }) {
             style={styles.backButton}
           />
 
-          <View style={styles.header}>
-            <View style={styles.iconContainer}>
-              <Text style={styles.icon}>🔍</Text>
-            </View>
-            <Text style={styles.title}>שם טוב</Text>
-            <Text style={styles.subtitle}>משחק המרגלים והרמזים!</Text>
-          </View>
-
-          <View style={styles.card}>
-            {error ? (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>{error}</Text>
+          <View style={styles.cardContainer}>
+            <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <View style={styles.iconContainer}>
+                  <BinaryCode />
+                </View>
+                <Text style={styles.cardTitle}>שם טוב</Text>
+                <Text style={styles.cardSubtitle}>משחק המרגלים והרמזים!</Text>
               </View>
-            ) : null}
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>👤 השם שלך</Text>
-              <TextInput
-                style={styles.input}
-                value={playerName}
-                onChangeText={(text) => {
-                  setPlayerName(text);
-                  setError('');
-                }}
-                placeholder="הכנס שם סוכן..."
-                placeholderTextColor="#999"
-                autoCapitalize="words"
-              />
-            </View>
+              <View style={styles.cardContent}>
+                {error ? (
+                  <View style={styles.errorContainer}>
+                    <Text style={styles.errorText}>{error}</Text>
+                  </View>
+                ) : null}
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>👁️ מצב משחק</Text>
-              <View style={styles.modeContainer}>
-                <TouchableOpacity
-                  style={[styles.modeButton, gameMode === 'friends' && styles.modeButtonActive]}
-                  onPress={() => setGameMode('friends')}
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>השם שלך</Text>
+                  <TextInput
+                    value={playerName}
+                    onChangeText={(text) => {
+                      setPlayerName(text);
+                      setError('');
+                    }}
+                    placeholder="הכנס שם..."
+                    placeholderTextColor="#999"
+                    style={styles.input}
+                    autoCapitalize="none"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>מצב משחק</Text>
+                  <View style={styles.modeContainer}>
+                    <TouchableOpacity
+                      style={[styles.modeButton, gameMode === 'friends' && styles.modeButtonActive]}
+                      onPress={() => setGameMode('friends')}
+                    >
+                      <Text style={styles.modeIcon}>👥</Text>
+                      <Text style={[styles.modeText, gameMode === 'friends' && styles.modeTextActive]}>
+                        חברים
+                      </Text>
+                      <Text style={[styles.modeSubtext, gameMode === 'friends' && styles.modeSubtextActive]}>
+                        בלי טיימר
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.modeButton, gameMode === 'rivals' && styles.modeButtonActive]}
+                      onPress={() => setGameMode('rivals')}
+                    >
+                      <Text style={styles.modeIcon}>⚔️</Text>
+                      <Text style={[styles.modeText, gameMode === 'rivals' && styles.modeTextActive]}>
+                        יריבים
+                      </Text>
+                      <Text style={[styles.modeSubtext, gameMode === 'rivals' && styles.modeSubtextActive]}>
+                        עם טיימר
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <GradientButton
+                  title={isCreating ? 'יוצר חדר...' : 'צור משחק חדש'}
+                  onPress={createRoom}
+                  variant="codenames"
+                  style={styles.createButton}
+                  disabled={isCreating}
                 >
-                  <Text style={styles.modeIcon}>👥</Text>
-                  <Text style={[styles.modeText, gameMode === 'friends' && styles.modeTextActive]}>
-                    חברים
-                  </Text>
-                  <Text style={[styles.modeSubtext, gameMode === 'friends' && styles.modeSubtextActive]}>
-                    בלי טיימר
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modeButton, gameMode === 'rivals' && styles.modeButtonActive]}
-                  onPress={() => setGameMode('rivals')}
-                >
-                  <Text style={styles.modeIcon}>⚔️</Text>
-                  <Text style={[styles.modeText, gameMode === 'rivals' && styles.modeTextActive]}>
-                    יריבים
-                  </Text>
-                  <Text style={[styles.modeSubtext, gameMode === 'rivals' && styles.modeSubtextActive]}>
-                    עם טיימר
-                  </Text>
-                </TouchableOpacity>
+                  {isCreating && <ActivityIndicator color="#FFFFFF" style={{ marginLeft: 8 }} />}
+                </GradientButton>
+
+                <View style={styles.divider}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>או</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>קוד חדר</Text>
+                  <TextInput
+                    value={roomCode}
+                    onChangeText={(text) => {
+                      setRoomCode(text.toUpperCase());
+                      setError('');
+                    }}
+                    placeholder="הכנס קוד..."
+                    placeholderTextColor="#999"
+                    style={styles.input}
+                    autoCapitalize="characters"
+                    maxLength={6}
+                  />
+                </View>
+
+                <GradientButton
+                  title="הצטרף למשחק"
+                  onPress={joinRoom}
+                  variant="codenames"
+                  style={styles.joinButton}
+                />
               </View>
             </View>
-
-            <TouchableOpacity
-              style={[styles.createButton, isCreating && styles.createButtonDisabled]}
-              onPress={createRoom}
-              disabled={isCreating}
-            >
-              {isCreating ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <>
-                  <Text style={styles.createButtonIcon}>➕</Text>
-                  <Text style={styles.createButtonText}>צור משחק חדש</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>או</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}># קוד חדר</Text>
-              <TextInput
-                style={styles.input}
-                value={roomCode}
-                onChangeText={(text) => {
-                  setRoomCode(text.toUpperCase());
-                  setError('');
-                }}
-                placeholder="הכנס קוד סודי..."
-                placeholderTextColor="#999"
-                autoCapitalize="characters"
-                maxLength={6}
-              />
-            </View>
-
-            <TouchableOpacity
-              style={styles.joinButton}
-              onPress={joinRoom}
-            >
-              <Text style={styles.joinButtonIcon}>🚪</Text>
-              <Text style={styles.joinButtonText}>הצטרף למשחק</Text>
-            </TouchableOpacity>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -339,91 +407,99 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    padding: 24,
+    padding: 20,
+    paddingTop: 50,
+  },
+  header: {
+    marginBottom: 20,
   },
   backButton: {
     alignSelf: 'flex-start',
-    marginBottom: 16,
   },
-  backButtonText: {
-    color: '#2C3E50',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  header: {
+  cardContainer: {
+    width: '100%',
     alignItems: 'center',
-    marginBottom: 32,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 500,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  cardHeader: {
+    backgroundColor: '#D9C3A5', // Codenames theme color - חום בהיר
+    padding: 24,
+    paddingBottom: 60,
+    alignItems: 'center',
+    position: 'relative',
   },
   iconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    position: 'absolute',
+    bottom: -30,
     backgroundColor: '#FFFFFF',
+    borderRadius: 50,
+    width: 80,
+    height: 80,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
   },
-  icon: {
-    fontSize: 64,
-  },
-  title: {
+  cardTitle: {
     fontSize: 48,
-    fontWeight: '900',
-    color: '#2C3E50',
+    fontWeight: 'bold',
+    color: '#FFFFFF',
     marginBottom: 8,
   },
-  subtitle: {
-    fontSize: 20,
-    color: '#2C3E50',
-    opacity: 0.8,
+  cardSubtitle: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    opacity: 0.9,
   },
-  card: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 24,
+  cardContent: {
     padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    paddingTop: 32,
+    gap: 16,
   },
   errorContainer: {
-    backgroundColor: '#FEE2E2',
+    backgroundColor: '#FFEBEE',
     borderWidth: 2,
-    borderColor: '#FCA5A5',
+    borderColor: '#F44336',
     borderRadius: 16,
     padding: 16,
-    marginBottom: 16,
   },
   errorText: {
-    color: '#991B1B',
+    color: '#C62828',
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
   },
   inputGroup: {
-    marginBottom: 24,
+    gap: 8,
   },
   label: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#374151',
-    marginBottom: 12,
+    fontWeight: '700',
+    color: '#2C3E50',
     textAlign: 'right',
   },
   input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 3,
-    borderColor: '#DBEAFE',
+    backgroundColor: '#F5F5F5',
     borderRadius: 16,
     padding: 16,
     fontSize: 18,
     textAlign: 'right',
+    borderWidth: 2,
+    borderColor: '#E0E0E0',
   },
   modeContainer: {
     flexDirection: 'row',
@@ -431,9 +507,9 @@ const styles = StyleSheet.create({
   },
   modeButton: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 3,
-    borderColor: '#D1D5DB',
+    backgroundColor: '#F5F5F5',
+    borderWidth: 2,
+    borderColor: '#E0E0E0',
     borderRadius: 16,
     padding: 20,
     alignItems: 'center',
@@ -465,62 +541,26 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   createButton: {
-    backgroundColor: '#D9C3A5', // Codenames theme color - חום בהיר
-    borderRadius: 16,
-    padding: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  createButtonDisabled: {
-    opacity: 0.6,
-  },
-  createButtonIcon: {
-    fontSize: 24,
-    marginRight: 8,
-  },
-  createButtonText: {
-    color: '#2C3E50', // Dark text for light brown background
-    fontSize: 20,
-    fontWeight: 'bold',
+    width: '100%',
+    marginTop: 8,
   },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 24,
+    marginVertical: 8,
   },
   dividerLine: {
     flex: 1,
-    height: 2,
-    backgroundColor: '#D1D5DB',
+    height: 1,
+    backgroundColor: '#E0E0E0',
   },
   dividerText: {
     marginHorizontal: 16,
     fontSize: 16,
-    color: '#6B7280',
+    color: '#666',
     fontWeight: '600',
   },
   joinButton: {
-    backgroundColor: '#D9C3A5', // Codenames theme color - חום בהיר
-    borderRadius: 16,
-    padding: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  joinButtonIcon: {
-    fontSize: 24,
-    marginRight: 8,
-  },
-  joinButtonText: {
-    color: '#2C3E50', // Dark text for light brown background
-    fontSize: 20,
-    fontWeight: 'bold',
+    width: '100%',
   },
 });

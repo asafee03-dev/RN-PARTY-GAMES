@@ -1,16 +1,180 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import React from 'react';
+import { Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Svg, { Path, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 // Using emojis instead of lucide icons for React Native compatibility
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Custom icon components
+const SpeechBubbleWithQuestion = () => (
+  <View style={customIconStyles.speechBubbleContainer}>
+    <Text style={customIconStyles.speechBubble}>💬</Text>
+    <View style={customIconStyles.questionMarkContainer}>
+      <Text style={customIconStyles.questionMark}>❓</Text>
+    </View>
+  </View>
+);
+
+const FrequencyWaves = () => {
+  const size = 48;
+  const centerY = size / 2;
+  
+  // Blue wave - lower frequency, broader waves (sinusoidal)
+  const blueWavePath = `M 0 ${centerY} 
+    C ${size * 0.1} ${centerY - 10} ${size * 0.2} ${centerY - 10} ${size * 0.3} ${centerY}
+    C ${size * 0.4} ${centerY + 10} ${size * 0.5} ${centerY + 10} ${size * 0.6} ${centerY}
+    C ${size * 0.7} ${centerY - 10} ${size * 0.8} ${centerY - 10} ${size * 0.9} ${centerY}
+    C ${size * 0.95} ${centerY + 5} ${size} ${centerY + 5} ${size} ${centerY}`;
+  
+  // Orange wave - higher frequency, tighter waves (offset for visual interest)
+  const orangeWavePath = `M 0 ${centerY + 2} 
+    C ${size * 0.08} ${centerY - 8} ${size * 0.16} ${centerY - 8} ${size * 0.24} ${centerY + 2}
+    C ${size * 0.32} ${centerY + 12} ${size * 0.4} ${centerY + 12} ${size * 0.48} ${centerY + 2}
+    C ${size * 0.56} ${centerY - 8} ${size * 0.64} ${centerY - 8} ${size * 0.72} ${centerY + 2}
+    C ${size * 0.8} ${centerY + 12} ${size * 0.88} ${centerY + 12} ${size * 0.96} ${centerY + 2}
+    C ${size * 0.98} ${centerY - 3} ${size} ${centerY - 3} ${size} ${centerY + 2}`;
+  
+  return (
+    <View style={customIconStyles.frequencyContainer}>
+      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <Defs>
+          <SvgLinearGradient id="blueWaveGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <Stop offset="0%" stopColor="#3B82F6" stopOpacity="0.85" />
+            <Stop offset="50%" stopColor="#2563EB" stopOpacity="0.75" />
+            <Stop offset="100%" stopColor="#1E40AF" stopOpacity="0.65" />
+          </SvgLinearGradient>
+          <SvgLinearGradient id="orangeWaveGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <Stop offset="0%" stopColor="#F59E0B" stopOpacity="0.85" />
+            <Stop offset="50%" stopColor="#F97316" stopOpacity="0.75" />
+            <Stop offset="100%" stopColor="#EA580C" stopOpacity="0.65" />
+          </SvgLinearGradient>
+        </Defs>
+        
+        {/* Blue wave - broader, lower frequency */}
+        <Path
+          d={blueWavePath}
+          fill="none"
+          stroke="url(#blueWaveGradient)"
+          strokeWidth="3.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={0.75}
+        />
+        
+        {/* Orange wave - tighter, higher frequency */}
+        <Path
+          d={orangeWavePath}
+          fill="none"
+          stroke="url(#orangeWaveGradient)"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={0.8}
+        />
+      </Svg>
+    </View>
+  );
+};
+
+const BinaryCode = () => {
+  const binaryRows = [
+    ['0', '1', '0', '1', '1', '0'],
+    ['1', '0', '1', '0', '0', '1'],
+    ['0', '1', '1', '0', '1', '0'],
+    ['1', '1', '0', '1', '0', '1'],
+  ];
+  
+  return (
+    <View style={customIconStyles.binaryContainer}>
+      {binaryRows.map((row, rowIndex) => (
+        <View key={rowIndex} style={customIconStyles.binaryRow}>
+          {row.map((bit, bitIndex) => (
+            <Text 
+              key={`${rowIndex}-${bitIndex}`} 
+              style={[
+                customIconStyles.binaryBit,
+                (rowIndex === 0 && (bitIndex === 0 || bitIndex === 3)) || 
+                (rowIndex === 1 && (bitIndex === 2 || bitIndex === 5)) || 
+                (rowIndex === 2 && bitIndex === 1) || 
+                (rowIndex === 3 && bitIndex === 4) 
+                  ? customIconStyles.binaryBitLarge 
+                  : null
+              ]}
+            >
+              {bit}
+            </Text>
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+};
+
+const customIconStyles = StyleSheet.create({
+  speechBubbleContainer: {
+    width: 48,
+    height: 48,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  speechBubble: {
+    fontSize: 48,
+    position: 'absolute',
+  },
+  questionMarkContainer: {
+    position: 'absolute',
+    top: 6,
+    left: 12,
+  },
+  questionMark: {
+    fontSize: 22,
+  },
+  frequencyContainer: {
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  binaryContainer: {
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000000',
+    borderRadius: 6,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.2)',
+  },
+  binaryRow: {
+    flexDirection: 'row',
+    gap: 2,
+    marginBottom: 1,
+  },
+  binaryBit: {
+    color: '#00FFFF',
+    fontSize: 7,
+    fontWeight: '600',
+    textShadowColor: '#00FFFF',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 4,
+    opacity: 0.7,
+  },
+  binaryBitLarge: {
+    fontSize: 9,
+    fontWeight: '700',
+    opacity: 1,
+  },
+});
 
 const games = [
   {
     id: 'alias',
     name: 'אליאב',
     description: 'משחק ההסברות המהיר! 45 שניות להסביר כמה שיותר מילים',
-    icon: '💬',
+    icon: 'custom-speech-bubble',
     color: ['#4FA8FF', '#3B82F6', '#2563EB'], // כחול בהיר
     bgColor: ['#EFF6FF', '#DBEAFE'], // from-blue-50 to-blue-100
     available: true,
@@ -20,7 +184,7 @@ const games = [
     id: 'codenames',
     name: 'שם טוב',
     description: 'משחק קבוצתי של מילים וקשרים - נחשו את המילים הנכונות',
-    icon: '🔍',
+    icon: 'custom-binary',
     color: ['#D9C3A5', '#C4A574', '#B8956A'], // חום בהיר
     bgColor: ['#FDF4E8', '#FAF0E6'], // from-beige-50 to-beige-100
     available: true,
@@ -30,7 +194,7 @@ const games = [
     id: 'spy',
     name: 'המרגל',
     description: 'מי המרגל ביניכם? נסו לגלות מי לא באותו מקום',
-    icon: '👁️',
+    icon: '🕵️',
     color: ['#7ED957', '#4ADE80', '#22C55E'], // ירוק בהיר
     bgColor: ['#F0FDF4', '#D1FAE5'], // from-green-50 to-emerald-50
     available: true,
@@ -40,7 +204,7 @@ const games = [
     id: 'frequency',
     name: 'התדר',
     description: 'משחק חיבור וסנכרון - כמה אתם על אותו גל?',
-    icon: '🎮',
+    icon: 'custom-frequency',
     color: ['#0A1A3A', '#1E3A5F', '#2D4A6B'], // כחול כהה
     bgColor: ['#E0E7FF', '#C7D2FE'], // from-indigo-50 to-indigo-100
     available: true,
@@ -50,7 +214,7 @@ const games = [
     id: 'draw',
     name: 'צייר משהו',
     description: 'צייר ונחש - משחק יצירתי ומהנה!',
-    icon: '🎨',
+    icon: '✏️',
     color: ['#C48CFF', '#A855F7', '#9333EA'], // סגול בהיר
     bgColor: ['#F3E8FF', '#E9D5FF'], // from-purple-50 to-purple-100
     available: true,
@@ -97,9 +261,6 @@ export default function HomeScreen({ navigation }) {
 
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.iconContainer}>
-            <Text style={styles.headerIcon}>🎮</Text>
-          </View>
           <Text style={styles.title}>PARTY GAMES</Text>
           <Text style={styles.subtitle}>בחרו את המשחק שלכם ותתחילו את המסיבה!</Text>
         </View>
@@ -124,7 +285,15 @@ export default function HomeScreen({ navigation }) {
                   >
                     <View style={styles.cardIconContainer}>
                       <View style={styles.cardIconBackground}>
-                        <Text style={styles.cardIcon}>{game.icon}</Text>
+                        {game.icon === 'custom-speech-bubble' ? (
+                          <SpeechBubbleWithQuestion />
+                        ) : game.icon === 'custom-frequency' ? (
+                          <FrequencyWaves />
+                        ) : game.icon === 'custom-binary' ? (
+                          <BinaryCode />
+                        ) : (
+                          <Text style={styles.cardIcon}>{game.icon}</Text>
+                        )}
                       </View>
                     </View>
                   </LinearGradient>
@@ -165,7 +334,9 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    paddingTop: 52,
   },
   settingsContainer: {
     alignItems: 'flex-end',
@@ -195,19 +366,13 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: 48,
-  },
-  iconContainer: {
-    marginBottom: 16,
-  },
-  headerIcon: {
-    fontSize: 80,
+    marginBottom: 32,
   },
   title: {
     fontSize: 56,
     fontWeight: '900',
     color: '#9333EA',
-    marginBottom: 16,
+    marginBottom: 12,
     textAlign: 'center',
   },
   cardIcon: {
@@ -237,17 +402,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   cardHeader: {
-    paddingTop: 32,
-    paddingBottom: 48,
+    paddingVertical: 24,
     paddingHorizontal: 24,
-    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardIconContainer: {
     alignItems: 'center',
-    position: 'absolute',
-    bottom: -24,
-    left: '50%',
-    marginLeft: -40,
+    justifyContent: 'center',
   },
   cardIconBackground: {
     width: 80,
@@ -264,7 +426,7 @@ const styles = StyleSheet.create({
   },
   cardBody: {
     padding: 32,
-    paddingTop: 48,
+    paddingTop: 32,
     alignItems: 'center',
   },
   gameName: {

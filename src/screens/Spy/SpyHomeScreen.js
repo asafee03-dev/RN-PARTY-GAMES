@@ -182,78 +182,77 @@ export default function SpyHomeScreen({ navigation, route }) {
             style={styles.backButton}
           />
 
-          <View style={styles.header}>
-            <Text style={styles.iconText}>👁️</Text>
-            <Text style={styles.title}>המרגל</Text>
-            <Text style={styles.subtitle}>מי המרגל ביניכם?</Text>
-          </View>
-
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>הצטרף למשחק</Text>
-            </View>
-            <View style={styles.cardContent}>
-              <View style={styles.inputSection}>
-                <Text style={styles.label}>שם שחקן</Text>
-                <TextInput
-                  style={styles.input}
-                  value={playerName}
-                  onChangeText={(text) => {
-                    setPlayerName(text);
-                    setError('');
-                  }}
-                  placeholder="הכנס את שמך..."
-                  placeholderTextColor="#999"
-                  autoCapitalize="words"
-                />
-              </View>
-
-              {error ? (
-                <View style={styles.errorContainer}>
-                  <Text style={styles.errorText}>{error}</Text>
+          <View style={styles.cardContainer}>
+            <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <View style={styles.iconContainer}>
+                  <Text style={styles.iconText}>🕵️</Text>
                 </View>
-              ) : null}
-
-              <GradientButton
-                title="צור חדר חדש"
-                onPress={createRoom}
-                variant="spy"
-                style={styles.createButton}
-                disabled={isCreating}
-              />
-
-              {isCreating && (
-                <ActivityIndicator size="small" color="#FFFFFF" style={styles.loader} />
-              )}
-
-              <View style={styles.divider}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>או</Text>
-                <View style={styles.dividerLine} />
+                <Text style={styles.cardTitle}>המרגל</Text>
+                <Text style={styles.cardSubtitle}>מי המרגל ביניכם?</Text>
               </View>
 
-              <View style={styles.inputSection}>
-                <Text style={styles.label}>קוד חדר</Text>
-                <TextInput
-                  style={styles.input}
-                  value={roomCode}
-                  onChangeText={(text) => {
-                    setRoomCode(text.toUpperCase());
-                    setError('');
-                  }}
-                  placeholder="הכנס קוד חדר..."
-                  placeholderTextColor="#999"
-                  autoCapitalize="characters"
-                  maxLength={6}
+              <View style={styles.cardContent}>
+                {error ? (
+                  <View style={styles.errorContainer}>
+                    <Text style={styles.errorText}>{error}</Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>השם שלך</Text>
+                  <TextInput
+                    value={playerName}
+                    onChangeText={(text) => {
+                      setPlayerName(text);
+                      setError('');
+                    }}
+                    placeholder="הכנס שם..."
+                    placeholderTextColor="#999"
+                    style={styles.input}
+                    autoCapitalize="none"
+                  />
+                </View>
+
+                <GradientButton
+                  title={isCreating ? 'יוצר חדר...' : 'צור משחק חדש'}
+                  onPress={createRoom}
+                  variant="spy"
+                  style={styles.createButton}
+                  disabled={isCreating}
+                >
+                  {isCreating && <ActivityIndicator color="#FFFFFF" style={{ marginLeft: 8 }} />}
+                </GradientButton>
+
+                <View style={styles.divider}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>או</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>קוד חדר</Text>
+                  <TextInput
+                    value={roomCode}
+                    onChangeText={(text) => {
+                      setRoomCode(text.toUpperCase());
+                      setError('');
+                    }}
+                    placeholder="הכנס קוד..."
+                    placeholderTextColor="#999"
+                    style={styles.input}
+                    autoCapitalize="characters"
+                    maxLength={6}
+                  />
+                </View>
+
+                <GradientButton
+                  title="הצטרף למשחק"
+                  onPress={joinRoom}
+                  variant="spy"
+                  style={styles.joinButton}
                 />
               </View>
-
-              <GradientButton
-                title="הצטרף לחדר"
-                onPress={joinRoom}
-                variant="spy"
-                style={styles.joinButton}
-              />
             </View>
           </View>
         </ScrollView>
@@ -268,108 +267,122 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    padding: 24,
-    paddingTop: 16,
+    padding: 20,
+    paddingTop: 50,
+  },
+  header: {
+    marginBottom: 20,
   },
   backButton: {
     alignSelf: 'flex-start',
-    marginBottom: 16,
-    marginTop: 16,
   },
-  header: {
+  cardContainer: {
+    width: '100%',
     alignItems: 'center',
-    marginBottom: 16,
-  },
-  iconText: {
-    fontSize: 80,
-    marginBottom: 0,
-  },
-  title: {
-    fontSize: 48,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 18,
-    color: '#FFFFFF',
-    opacity: 0.9,
   },
   card: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    width: '100%',
+    maxWidth: 500,
+    backgroundColor: '#FFFFFF',
     borderRadius: 24,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  cardHeader: {
+    backgroundColor: '#7ED957', // Spy theme color - ירוק בהיר
+    padding: 24,
+    paddingBottom: 60,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  iconContainer: {
+    position: 'absolute',
+    bottom: -30,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 50,
+    width: 80,
+    height: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
   },
-  cardHeader: {
-    backgroundColor: '#7ED957', // Spy theme color - ירוק בהיר
-    padding: 20,
-    alignItems: 'center',
+  iconText: {
+    fontSize: 48,
   },
   cardTitle: {
+    fontSize: 48,
+    fontWeight: 'bold',
     color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '700',
+    marginBottom: 8,
+  },
+  cardSubtitle: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    opacity: 0.9,
   },
   cardContent: {
     padding: 24,
+    paddingTop: 32,
     gap: 16,
   },
-  inputSection: {
+  errorContainer: {
+    backgroundColor: '#FFEBEE',
+    borderWidth: 2,
+    borderColor: '#F44336',
+    borderRadius: 16,
+    padding: 16,
+  },
+  errorText: {
+    color: '#C62828',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  inputGroup: {
     gap: 8,
   },
   label: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2C3E50',
+    textAlign: 'right',
   },
   input: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#F5F5F5',
     borderRadius: 16,
     padding: 16,
     fontSize: 18,
     textAlign: 'right',
     borderWidth: 2,
-    borderColor: '#E5E7EB',
-  },
-  errorContainer: {
-    backgroundColor: '#FEE2E2',
-    borderWidth: 2,
-    borderColor: '#EF4444',
-    borderRadius: 16,
-    padding: 12,
-  },
-  errorText: {
-    color: '#DC2626',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
+    borderColor: '#E0E0E0',
   },
   createButton: {
     width: '100%',
     marginTop: 8,
   },
-  loader: {
-    marginTop: 8,
-  },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 16,
+    marginVertical: 8,
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#D1D5DB',
+    backgroundColor: '#E0E0E0',
   },
   dividerText: {
     marginHorizontal: 16,
-    fontSize: 14,
-    color: '#6B7280',
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '600',
   },
   joinButton: {
     width: '100%',

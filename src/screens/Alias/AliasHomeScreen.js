@@ -9,6 +9,38 @@ import { generateUniqueRoomCode } from '../../utils/roomManagement';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
 
+// Custom icon component for speech bubble with question mark
+const SpeechBubbleWithQuestion = () => (
+  <View style={customIconStyles.speechBubbleContainer}>
+    <Text style={customIconStyles.speechBubble}>💬</Text>
+    <View style={customIconStyles.questionMarkContainer}>
+      <Text style={customIconStyles.questionMark}>❓</Text>
+    </View>
+  </View>
+);
+
+const customIconStyles = StyleSheet.create({
+  speechBubbleContainer: {
+    width: 48,
+    height: 48,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  speechBubble: {
+    fontSize: 48,
+    position: 'absolute',
+  },
+  questionMarkContainer: {
+    position: 'absolute',
+    top: 8,
+    left: 14,
+  },
+  questionMark: {
+    fontSize: 24,
+  },
+});
+
 const BASE_TEAMS = [
   { name: "קבוצה אדומה", position: 0, color: TEAM_COLORS[0], players: [] },
   { name: "קבוצה ירוקה", position: 0, color: TEAM_COLORS[2], players: [] }
@@ -235,7 +267,7 @@ export default function AliasHomeScreen({ navigation, route }) {
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <View style={styles.iconContainer}>
-                  <Text style={styles.iconEmoji}>💬</Text>
+                  <SpeechBubbleWithQuestion />
                 </View>
                 <Text style={styles.cardTitle}>אליאב</Text>
                 <Text style={styles.cardSubtitle}>משחק ההסברות המהיר!</Text>

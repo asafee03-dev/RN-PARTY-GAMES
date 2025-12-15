@@ -23,7 +23,8 @@
         "monochromeImage": "./assets/images/partygameslogo.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.asafmanor.partygames"
     },
     "web": {
       "output": "single",

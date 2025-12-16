@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIn
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db, waitForFirestoreReady } from '../../firebase';
@@ -762,6 +763,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
           </View>
         </View>
       </ScrollView>
+      <BannerAd />
     </View>
   );
 }

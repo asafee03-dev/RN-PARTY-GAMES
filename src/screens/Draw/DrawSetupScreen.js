@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 
 export default function DrawSetupScreen({ navigation }) {
   const handleContinue = () => {
@@ -53,6 +54,7 @@ export default function DrawSetupScreen({ navigation }) {
           style={styles.continueButton}
         />
       </ScrollView>
+      <BannerAd />
     </GradientBackground>
   );
 }

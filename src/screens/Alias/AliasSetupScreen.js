@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 import PlayerCard from '../../components/shared/PlayerCard';
 import RulesModal from '../../components/shared/RulesModal';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
@@ -723,6 +724,7 @@ export default function AliasSetupScreen({ navigation, route }) {
           </View>
         )}
       </ScrollView>
+      <BannerAd />
     </GradientBackground>
   );
 }
@@ -732,6 +734,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 16,
     paddingTop: 50,
+    paddingBottom: 20,
   },
   loadingContainer: {
     flex: 1,

@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
+import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 const spyIcons = ["❓", "🕵️", "🔍", "🎭", "👁️", "🗝️", "🔐", "🎩", "💼", "📍"];
 
@@ -115,9 +117,11 @@ export default function SpyHomeScreen({ navigation, route }) {
         console.warn('⚠️ [SPY] Could not save player name:', e);
       }
       
-      // Navigate immediately after successful write
+      // Show interstitial ad if available, then navigate
       console.log('🔵 [SPY] Navigating to room...');
-      navigation.navigate('SpyRoom', { roomCode: newRoomCode });
+      showInterstitialIfAvailable(() => {
+        navigation.navigate('SpyRoom', { roomCode: newRoomCode });
+      });
     } catch (error) {
       console.error('❌ [SPY] Error creating room:', error);
       let errorMessage = 'שגיאה ביצירת החדר. נסה שוב.';
@@ -148,7 +152,11 @@ export default function SpyHomeScreen({ navigation, route }) {
     }
 
     storage.setItem('playerName', playerName);
-    navigation.navigate('SpyRoom', { roomCode: roomCode.toUpperCase() });
+    
+    // Show interstitial ad if available, then navigate
+    showInterstitialIfAvailable(() => {
+      navigation.navigate('SpyRoom', { roomCode: roomCode.toUpperCase() });
+    });
   };
 
   const goBack = () => {
@@ -256,6 +264,7 @@ export default function SpyHomeScreen({ navigation, route }) {
             </View>
           </View>
         </ScrollView>
+        <BannerAd />
       </KeyboardAvoidingView>
     </GradientBackground>
   );
@@ -269,6 +278,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 20,
     paddingTop: 50,
+    paddingBottom: 20,
   },
   header: {
     marginBottom: 20,

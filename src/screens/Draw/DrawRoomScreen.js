@@ -5,6 +5,7 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Swi
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 import DrawCanvas from '../../components/draw/DrawCanvas';
 import Timer from '../../components/game/Timer';
 import RulesModal from '../../components/shared/RulesModal';
@@ -1921,6 +1922,7 @@ export default function DrawRoomScreen({ navigation, route }) {
           </Modal>
         )}
       </ScrollView>
+      <BannerAd />
     </GradientBackground>
   );
 }

@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs, onSnapshot } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
+import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 const drawIcons = ["🎨", "✏️", "🖌️", "🖍️", "✨"];
 
@@ -126,9 +128,11 @@ export default function DrawHomeScreen({ navigation, route }) {
         console.warn('⚠️ [DRAW] Could not save player name:', e);
       }
       
-      // Navigate immediately after successful write (like old project)
+      // Show interstitial ad if available, then navigate
       console.log('🔵 [DRAW] Navigating to room...');
-      navigation.navigate('DrawRoom', { roomCode: code });
+      showInterstitialIfAvailable(() => {
+        navigation.navigate('DrawRoom', { roomCode: code });
+      });
     } catch (error) {
       console.error('❌ [DRAW] Error creating room:', error);
       let errorMessage = 'שגיאה ביצירת החדר. נסה שוב.';
@@ -192,8 +196,10 @@ export default function DrawHomeScreen({ navigation, route }) {
         unsubscribeRef.current = null;
       }
       
-      // Navigate immediately - DrawRoomScreen will handle the game state
-      navigation.navigate('DrawRoom', { roomCode: joinedRoomCode });
+      // Show interstitial ad if available, then navigate
+      showInterstitialIfAvailable(() => {
+        navigation.navigate('DrawRoom', { roomCode: joinedRoomCode });
+      });
       
       // Set up a temporary listener to catch game start if player is still on this screen
       // This listener will be cleaned up when navigating to DrawRoom
@@ -347,6 +353,7 @@ export default function DrawHomeScreen({ navigation, route }) {
             </View>
           </View>
         </ScrollView>
+        <BannerAd />
       </KeyboardAvoidingView>
     </GradientBackground>
   );
@@ -360,6 +367,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 20,
     paddingTop: 50,
+    paddingBottom: 20,
   },
   header: {
     marginBottom: 20,

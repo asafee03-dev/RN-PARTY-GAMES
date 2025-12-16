@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 
 export default function SpySetupScreen({ navigation }) {
   const [selectedLocation, setSelectedLocation] = useState(null);
@@ -67,6 +68,7 @@ export default function SpySetupScreen({ navigation }) {
           disabled={!selectedLocation}
         />
       </ScrollView>
+      <BannerAd />
     </GradientBackground>
   );
 }

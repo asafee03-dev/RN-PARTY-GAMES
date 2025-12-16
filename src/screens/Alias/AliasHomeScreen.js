@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, setDoc, collection } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
+import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
 
@@ -164,7 +166,11 @@ export default function AliasHomeScreen({ navigation, route }) {
       }
 
       console.log('✅ [ALIAS] Room created successfully with code:', newRoomCode);
-      navigation.navigate('AliasSetup', { roomCode: newRoomCode });
+      
+      // Show interstitial ad if available, then navigate
+      showInterstitialIfAvailable(() => {
+        navigation.navigate('AliasSetup', { roomCode: newRoomCode });
+      });
     } catch (error) {
       console.error('❌ [ALIAS] Error creating room:', error);
       isCreatingRoomRef.current = false;
@@ -222,10 +228,18 @@ export default function AliasHomeScreen({ navigation, route }) {
       }
       
       await storage.setItem('playerName', playerName);
-      navigation.navigate('AliasSetup', { roomCode: roomCode.toUpperCase() });
+      
+      // Show interstitial ad if available, then navigate
+      showInterstitialIfAvailable(() => {
+        navigation.navigate('AliasSetup', { roomCode: roomCode.toUpperCase() });
+      });
     } catch (e) {
       console.warn('Could not save player name:', e);
-      navigation.navigate('AliasSetup', { roomCode: roomCode.toUpperCase() });
+      
+      // Show interstitial ad if available, then navigate
+      showInterstitialIfAvailable(() => {
+        navigation.navigate('AliasSetup', { roomCode: roomCode.toUpperCase() });
+      });
     }
   };
 
@@ -359,6 +373,7 @@ export default function AliasHomeScreen({ navigation, route }) {
             </View>
           </View>
         </ScrollView>
+        <BannerAd />
       </KeyboardAvoidingView>
     </GradientBackground>
   );
@@ -372,6 +387,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 20,
     paddingTop: 50,
+    paddingBottom: 20,
   },
   header: {
     marginBottom: 20,

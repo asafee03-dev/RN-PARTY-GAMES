@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, TouchableOpacity, Dimensions } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
+import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 const agentIcons = ["🕵️", "🔍", "🎯", "📋", "🗂️", "💼", "🕶️", "🎩", "🔐", "📡"];
 
@@ -217,8 +219,12 @@ export default function CodenamesHomeScreen({ navigation, route }) {
       
       console.log('✅ [CODENAMES] Room created and verified successfully with code:', newRoomCode);
       console.log('🔵 [CODENAMES] About to navigate - execution checkpoint 4');
-      navigation.navigate('CodenamesSetup', { roomCode: newRoomCode, gameMode });
-      console.log('✅ [CODENAMES] Navigation initiated - execution checkpoint 5');
+      
+      // Show interstitial ad if available, then navigate
+      showInterstitialIfAvailable(() => {
+        navigation.navigate('CodenamesSetup', { roomCode: newRoomCode, gameMode });
+        console.log('✅ [CODENAMES] Navigation initiated - execution checkpoint 5');
+      });
     } catch (error) {
       console.error('❌ [CODENAMES] Error creating room:', error);
       isCreatingRoomRef.current = false;
@@ -251,7 +257,11 @@ export default function CodenamesHomeScreen({ navigation, route }) {
 
     try {
       await storage.setItem('playerName', playerName);
-      navigation.navigate('CodenamesSetup', { roomCode: roomCode.toUpperCase(), gameMode });
+      
+      // Show interstitial ad if available, then navigate
+      showInterstitialIfAvailable(() => {
+        navigation.navigate('CodenamesSetup', { roomCode: roomCode.toUpperCase(), gameMode });
+      });
     } catch (error) {
       console.error('❌ Error joining room:', error);
       setError('שגיאה בהצטרפות לחדר. נסה שוב.');
@@ -393,6 +403,7 @@ export default function CodenamesHomeScreen({ navigation, route }) {
             </View>
           </View>
         </ScrollView>
+        <BannerAd />
       </KeyboardAvoidingView>
     </GradientBackground>
   );
@@ -409,6 +420,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 20,
     paddingTop: 50,
+    paddingBottom: 20,
   },
   header: {
     marginBottom: 20,

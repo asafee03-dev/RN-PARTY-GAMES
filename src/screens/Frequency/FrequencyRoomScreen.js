@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 import FrequencyGauge from '../../components/frequency/FrequencyGauge';
 import ScoreBoard from '../../components/frequency/ScoreBoard';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
@@ -1387,6 +1388,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           </Modal>
         )}
       </ScrollView>
+      <BannerAd />
     </GradientBackground>
   );
 }

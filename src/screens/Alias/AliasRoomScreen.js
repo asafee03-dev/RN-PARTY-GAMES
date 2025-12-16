@@ -2,6 +2,7 @@ import React from 'react';
 import { FlatList, ScrollView, StyleSheet, Text, View } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 import HostStatusCard from '../../components/shared/HostStatusCard';
 import PlayerCard from '../../components/shared/PlayerCard';
 
@@ -94,6 +95,7 @@ export default function AliasRoomScreen({ navigation }) {
           </View>
         )}
       </ScrollView>
+      <BannerAd />
     </GradientBackground>
   );
 }

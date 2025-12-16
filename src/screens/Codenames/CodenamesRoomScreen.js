@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, FlatList } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
+import BannerAd from '../../components/shared/BannerAd';
 import TeamScoreCard from '../../components/codenames/TeamScoreCard';
 
 export default function CodenamesRoomScreen({ navigation }) {
@@ -119,6 +120,7 @@ export default function CodenamesRoomScreen({ navigation }) {
           style={styles.startButton}
         />
       </ScrollView>
+      <BannerAd />
     </GradientBackground>
   );
 }

@@ -53,6 +53,7 @@ const DrawCanvas = forwardRef(({
   const [currentPath, setCurrentPath] = useState(null);
   const [currentPoints, setCurrentPoints] = useState([]);
   const isDrawingRef = useRef(false);
+  const justCompletedStrokeRef = useRef(false);
   const svgRef = useRef(null);
   const disabledRef = useRef(isDisabled);
   const currentColorRef = useRef(color);
@@ -69,15 +70,24 @@ const DrawCanvas = forwardRef(({
 
   // Update paths when strokes prop changes (Vite API)
   // Only update if we're not currently drawing to prevent erasing strokes
+  // Also skip update if we just completed a stroke locally (to prevent race conditions)
   useEffect(() => {
-    if (useViteAPI && strokes && !isDrawingRef.current) {
-      const newPaths = strokes.map(stroke => ({
-        pathString: stroke.path || '',
-        color: stroke.color || color,
-        width: stroke.width || brushSize,
-        points: stroke.points || [],
-      }));
-      setPaths(newPaths);
+    if (useViteAPI && strokes && !isDrawingRef.current && !justCompletedStrokeRef.current) {
+      setPaths(prevPaths => {
+        // Only update if strokes prop has a different length (external update)
+        // This prevents overwriting when we just completed a stroke locally
+        if (strokes.length !== prevPaths.length) {
+          const newPaths = strokes.map(stroke => ({
+            pathString: stroke.path || '',
+            color: stroke.color || color,
+            width: stroke.width || brushSize,
+            points: stroke.points || [],
+          }));
+          return newPaths;
+        }
+        // If lengths match, keep local paths (they may have just been updated)
+        return prevPaths;
+      });
     }
   }, [useViteAPI, strokes, color, brushSize]);
 
@@ -164,19 +174,21 @@ const DrawCanvas = forwardRef(({
         const point = { x: locationX, y: locationY };
         isDrawingRef.current = true;
         
-        // Ensure we have all existing strokes loaded before starting new stroke
-        if (useViteAPI && strokes && strokes.length > 0) {
-          const existingPaths = strokes.map(stroke => ({
-            pathString: stroke.path || '',
-            color: stroke.color || color,
-            width: stroke.width || brushSize,
-            points: stroke.points || [],
-          }));
-          // Only update if paths are different to avoid unnecessary re-renders
+        // Sync with strokes prop only if it has more strokes than local state
+        // This handles external updates (from Firestore) without overwriting local additions
+        if (useViteAPI && strokes) {
           setPaths(prev => {
-            if (prev.length !== existingPaths.length) {
+            // Only sync if strokes prop has more items than local paths (external update)
+            if (strokes.length > prev.length) {
+              const existingPaths = strokes.map(stroke => ({
+                pathString: stroke.path || '',
+                color: stroke.color || color,
+                width: stroke.width || brushSize,
+                points: stroke.points || [],
+              }));
               return existingPaths;
             }
+            // Keep local paths if they're up to date or have more items
             return prev;
           });
         }
@@ -239,20 +251,18 @@ const DrawCanvas = forwardRef(({
             points: [],
           };
           
-          // Update paths state - ensure we preserve all existing paths
+          // Update paths state - append new path to existing paths
+          // Always use prev (current paths state) as base to preserve all existing strokes
           setPaths(prev => {
-            // Make sure we're working with the latest paths from props if available
-            const basePaths = useViteAPI && strokes && strokes.length > 0
-              ? strokes.map(stroke => ({
-                  pathString: stroke.path || '',
-                  color: stroke.color || color,
-                  width: stroke.width || brushSize,
-                  points: stroke.points || [],
-                }))
-              : prev;
+            // Simply append the new path to existing paths
+            const updatedPaths = [...prev, newPath];
             
-            // Only append if this stroke is not already in the paths
-            const updatedPaths = [...basePaths, newPath];
+            // Set flag to prevent useEffect from overwriting this update
+            justCompletedStrokeRef.current = true;
+            // Reset flag after a short delay to allow useEffect to see it once
+            setTimeout(() => {
+              justCompletedStrokeRef.current = false;
+            }, 100);
             
             // Vite API: call onStrokeComplete with single stroke
             if (useViteAPI && onStrokeComplete) {

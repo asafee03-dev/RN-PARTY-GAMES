@@ -86,7 +86,6 @@ const customIconStyles = StyleSheet.create({
 export default function CodenamesHomeScreen({ navigation, route }) {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
-  const [gameMode, setGameMode] = useState('friends');
   const [error, setError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const isCreatingRoomRef = useRef(false);
@@ -155,7 +154,7 @@ export default function CodenamesHomeScreen({ navigation, route }) {
       const roomData = {
         room_code: newRoomCode,
         host_name: playerName,
-        game_mode: gameMode,
+        game_mode: 'friends',
         red_team: {
           spymaster: '',
           guessers: [],
@@ -222,7 +221,7 @@ export default function CodenamesHomeScreen({ navigation, route }) {
       
       // Show interstitial ad if available, then navigate
       showInterstitialIfAvailable(() => {
-        navigation.navigate('CodenamesSetup', { roomCode: newRoomCode, gameMode });
+        navigation.navigate('CodenamesSetup', { roomCode: newRoomCode, gameMode: 'friends' });
         console.log('✅ [CODENAMES] Navigation initiated - execution checkpoint 5');
       });
     } catch (error) {
@@ -260,7 +259,7 @@ export default function CodenamesHomeScreen({ navigation, route }) {
       
       // Show interstitial ad if available, then navigate
       showInterstitialIfAvailable(() => {
-        navigation.navigate('CodenamesSetup', { roomCode: roomCode.toUpperCase(), gameMode });
+        navigation.navigate('CodenamesSetup', { roomCode: roomCode.toUpperCase(), gameMode: 'friends' });
       });
     } catch (error) {
       console.error('❌ Error joining room:', error);
@@ -329,36 +328,6 @@ export default function CodenamesHomeScreen({ navigation, route }) {
                     style={styles.input}
                     autoCapitalize="none"
                   />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>מצב משחק</Text>
-                  <View style={styles.modeContainer}>
-                    <TouchableOpacity
-                      style={[styles.modeButton, gameMode === 'friends' && styles.modeButtonActive]}
-                      onPress={() => setGameMode('friends')}
-                    >
-                      <Text style={styles.modeIcon}>👥</Text>
-                      <Text style={[styles.modeText, gameMode === 'friends' && styles.modeTextActive]}>
-                        חברים
-                      </Text>
-                      <Text style={[styles.modeSubtext, gameMode === 'friends' && styles.modeSubtextActive]}>
-                        בלי טיימר
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.modeButton, gameMode === 'rivals' && styles.modeButtonActive]}
-                      onPress={() => setGameMode('rivals')}
-                    >
-                      <Text style={styles.modeIcon}>⚔️</Text>
-                      <Text style={[styles.modeText, gameMode === 'rivals' && styles.modeTextActive]}>
-                        יריבים
-                      </Text>
-                      <Text style={[styles.modeSubtext, gameMode === 'rivals' && styles.modeSubtextActive]}>
-                        עם טיימר
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
                 </View>
 
                 <GradientButton
@@ -431,6 +400,7 @@ const styles = StyleSheet.create({
   cardContainer: {
     width: '100%',
     alignItems: 'center',
+    marginTop: 20,
   },
   card: {
     width: '100%',
@@ -512,45 +482,6 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     borderWidth: 2,
     borderColor: '#E0E0E0',
-  },
-  modeContainer: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  modeButton: {
-    flex: 1,
-    backgroundColor: '#F5F5F5',
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-    borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
-  },
-  modeButtonActive: {
-    backgroundColor: '#D9C3A5', // Codenames theme color - חום בהיר
-    borderColor: '#C4A574',
-  },
-  modeIcon: {
-    fontSize: 40,
-    marginBottom: 8,
-  },
-  modeText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#374151',
-    marginBottom: 4,
-  },
-  modeTextActive: {
-    color: '#2C3E50',
-  },
-  modeSubtext: {
-    fontSize: 14,
-    color: '#6B7280',
-    opacity: 0.9,
-  },
-  modeSubtextActive: {
-    color: '#2C3E50',
-    opacity: 0.9,
   },
   createButton: {
     width: '100%',

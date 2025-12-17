@@ -14,7 +14,7 @@ export const ADS_ENABLED = true;
 // Flag to switch between test ads and production ads
 // Set to true only when ready to use production ad units
 // Keep false during development and testing
-const USE_PRODUCTION_ADS = false;
+const USE_PRODUCTION_ADS = true;
 
 // Production Ad Unit IDs
 // Android IDs

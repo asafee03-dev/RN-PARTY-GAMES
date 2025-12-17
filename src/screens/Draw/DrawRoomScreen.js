@@ -41,12 +41,14 @@ export default function DrawRoomScreen({ navigation, route }) {
   const [timeRemaining, setTimeRemaining] = useState(60);
   const [forceCloseModal, setForceCloseModal] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
+  const [isContinuingRound, setIsContinuingRound] = useState(false);
 
   const timerCheckInterval = useRef(null);
   const unsubscribeRef = useRef(null);
   const roomRef = useRef(room);
   const currentPlayerNameRef = useRef(currentPlayerName);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
+  const isContinuingRoundRef = useRef(false);
 
   useEffect(() => {
     roomRef.current = room;
@@ -915,25 +917,35 @@ export default function DrawRoomScreen({ navigation, route }) {
   };
 
   const continueToNextRound = async () => {
-    // Use roomRef.current for most up-to-date state to prevent race conditions
-    const currentRoom = roomRef.current || room;
-    if (!currentRoom || !currentRoom.id) {
-      console.warn('⚠️ [DRAW] continueToNextRound - no room data');
+    // Prevent multiple simultaneous calls
+    if (isContinuingRoundRef.current) {
+      console.log('⚠️ [DRAW] continueToNextRound - already processing, skipping...');
       return;
     }
+    
+    isContinuingRoundRef.current = true;
+    setIsContinuingRound(true);
+    
+    try {
+      // Use roomRef.current for most up-to-date state to prevent race conditions
+      const currentRoom = roomRef.current || room;
+      if (!currentRoom || !currentRoom.id) {
+        console.warn('⚠️ [DRAW] continueToNextRound - no room data');
+        return;
+      }
 
-    // Validate players array
-    if (!currentRoom.players || !Array.isArray(currentRoom.players) || currentRoom.players.length === 0) {
-      console.warn('⚠️ [DRAW] continueToNextRound - invalid players array');
-      return;
-    }
+      // Validate players array
+      if (!currentRoom.players || !Array.isArray(currentRoom.players) || currentRoom.players.length === 0) {
+        console.warn('⚠️ [DRAW] continueToNextRound - invalid players array');
+        return;
+      }
 
-    // Filter to active players only (active !== false)
-    const validPlayers = currentRoom.players.filter(p => p && p.name && (p.active !== false));
-    if (validPlayers.length === 0) {
-      console.warn('⚠️ [DRAW] continueToNextRound - no active players');
-      return;
-    }
+      // Filter to active players only (active !== false)
+      const validPlayers = currentRoom.players.filter(p => p && p.name && (p.active !== false));
+      if (validPlayers.length === 0) {
+        console.warn('⚠️ [DRAW] continueToNextRound - no active players');
+        return;
+      }
 
     // Only check active players for winner
     const winner = validPlayers.find(p => p.score >= WINNING_SCORE && (p.active !== false));
@@ -1043,6 +1055,11 @@ export default function DrawRoomScreen({ navigation, route }) {
       } catch (error) {
         console.error('❌ Error moving to next turn:', error);
       }
+    }
+    } finally {
+      // Always clear the flag to allow future calls
+      isContinuingRoundRef.current = false;
+      setIsContinuingRound(false);
     }
   };
 
@@ -1833,6 +1850,7 @@ export default function DrawRoomScreen({ navigation, route }) {
                     onPress={continueToNextRound}
                     variant="draw"
                     style={styles.continueButton}
+                    disabled={isContinuingRound}
                   />
                 </View>
               </View>

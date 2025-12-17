@@ -27,6 +27,7 @@ export default function SpyRoomScreen({ navigation, route }) {
   const [numberOfSpies, setNumberOfSpies] = useState(1);
   const [spyGuess, setSpyGuess] = useState('');
   const [spyGuessSubmitted, setSpyGuessSubmitted] = useState(false);
+  const [gameMode, setGameMode] = useState('locations'); // 'locations' or 'word'
 
   const timerInterval = useRef(null);
   const unsubscribeRef = useRef(null);
@@ -179,6 +180,12 @@ export default function SpyRoomScreen({ navigation, route }) {
       const roomData = { id: roomSnap.id, ...roomSnap.data() };
       console.log('✅ Room loaded successfully:', roomData.id, 'with code:', roomData.room_code);
 
+      // Get player name from storage (needed early for host checks)
+      const playerName = currentPlayerName || (await storage.getItem('playerName')) || '';
+      if (playerName) {
+        setCurrentPlayerName(playerName);
+      }
+
       // Load numberOfSpies from room (default to 1)
       // Only write default if we're the host (to avoid race conditions with multiple players)
       if (roomData.number_of_spies !== undefined && roomData.number_of_spies !== null) {
@@ -194,6 +201,20 @@ export default function SpyRoomScreen({ navigation, route }) {
         }
       }
 
+      // Load game mode from room (default to 'locations')
+      if (roomData.game_mode !== undefined && roomData.game_mode !== null) {
+        setGameMode(roomData.game_mode);
+      } else {
+        setGameMode('locations');
+        // Only write default if we're the host to avoid unnecessary concurrent writes
+        if (roomData.id && roomData.host_name === playerName) {
+          const roomRef = doc(db, 'SpyRoom', roomData.id);
+          updateDoc(roomRef, { game_mode: 'locations' }).catch(err => {
+            console.error('Error setting default game mode:', err);
+          });
+        }
+      }
+
       // Load drinking mode from room data (preferred) or local storage (fallback)
       if (roomData.drinking_mode !== undefined) {
         setDrinkingMode(roomData.drinking_mode);
@@ -205,12 +226,6 @@ export default function SpyRoomScreen({ navigation, route }) {
         if (savedMode) {
           setDrinkingMode(savedMode === 'true');
         }
-      }
-
-      // Get player name from storage
-      const playerName = currentPlayerName || (await storage.getItem('playerName')) || '';
-      if (playerName) {
-        setCurrentPlayerName(playerName);
       }
 
       // Check game status first - don't allow new joins if game is playing/finished
@@ -277,6 +292,11 @@ export default function SpyRoomScreen({ navigation, route }) {
           // Also sync to local storage
           storage.setItem('drinkingMode', newRoom.drinking_mode.toString()).catch(() => {});
         }
+
+        // Sync game mode from room data
+        if (newRoom.game_mode !== undefined && newRoom.game_mode !== null) {
+          setGameMode(newRoom.game_mode);
+        }
         
         setRoom(prevRoom => {
           if (!prevRoom) {
@@ -306,6 +326,12 @@ export default function SpyRoomScreen({ navigation, route }) {
           if (newRoom.game_status === 'lobby' && newRoom.number_of_spies !== undefined && 
               newRoom.number_of_spies !== null && newRoom.number_of_spies !== numberOfSpies) {
             setNumberOfSpies(newRoom.number_of_spies);
+          }
+
+          // Update game mode if it changed in room (only in lobby)
+          if (newRoom.game_status === 'lobby' && newRoom.game_mode !== undefined && 
+              newRoom.game_mode !== null && newRoom.game_mode !== gameMode) {
+            setGameMode(newRoom.game_mode);
           }
           
           if (JSON.stringify(prevRoom) !== JSON.stringify(newRoom)) {
@@ -413,31 +439,7 @@ export default function SpyRoomScreen({ navigation, route }) {
       return;
     }
 
-    let locations = [];
-    try {
-      const locationsSnapshot = await getDocs(collection(db, 'SpyLocation'));
-      locationsSnapshot.forEach((doc) => {
-        locations.push({ id: doc.id, ...doc.data() });
-      });
-    } catch (error) {
-      console.error('❌ Error loading locations:', error);
-      Alert.alert('שגיאה', 'שגיאה בטעינת מיקומים. נסה שוב.');
-      return;
-    }
-    
-    if (!locations || locations.length === 0) {
-      Alert.alert('שגיאה', 'אין מיקומים במערכת!');
-      return;
-    }
-
-    const randomLocation = locations[Math.floor(Math.random() * locations.length)];
-
-    if (!randomLocation || !randomLocation.location || !randomLocation.roles || !Array.isArray(randomLocation.roles)) {
-      console.error('❌ Invalid location structure:', randomLocation);
-      Alert.alert('שגיאה', 'שגיאה: מיקום לא תקין. נסה שוב.');
-      return;
-    }
-
+    const currentGameMode = currentRoom.game_mode || 'locations';
     const freshPlayers = currentRoom.players.map(p => ({ name: p.name }));
     const numSpies = currentRoom.number_of_spies || 1;
     
@@ -455,28 +457,110 @@ export default function SpyRoomScreen({ navigation, route }) {
       spyNames.push(shuffledPlayers[i].name);
     }
 
-    const updatedPlayers = freshPlayers.map((player) => {
-      if (spyIndices.has(player.name)) {
-        return {
-          name: player.name,
-          is_spy: true,
-          location: '',
-          role: '',
-          votes: [] // Array for multiple votes
-        };
-      } else {
-        const randomRole = randomLocation.roles[Math.floor(Math.random() * randomLocation.roles.length)];
-        return {
-          name: player.name,
-          is_spy: false,
-          location: randomLocation.location,
-          role: randomRole,
-          votes: [] // Array for multiple votes
-        };
-      }
-    });
+    let updatedPlayers = [];
+    let chosenLocation = '';
+    let allLocationNames = [];
+    let chosenWord = '';
 
-    const allLocationNames = locations.map(loc => loc.location).filter(loc => loc != null);
+    if (currentGameMode === 'locations') {
+      // Locations mode - existing behavior
+      let locations = [];
+      try {
+        const locationsSnapshot = await getDocs(collection(db, 'SpyLocation'));
+        locationsSnapshot.forEach((doc) => {
+          locations.push({ id: doc.id, ...doc.data() });
+        });
+      } catch (error) {
+        console.error('❌ Error loading locations:', error);
+        Alert.alert('שגיאה', 'שגיאה בטעינת מיקומים. נסה שוב.');
+        return;
+      }
+      
+      if (!locations || locations.length === 0) {
+        Alert.alert('שגיאה', 'אין מיקומים במערכת!');
+        return;
+      }
+
+      const randomLocation = locations[Math.floor(Math.random() * locations.length)];
+
+      if (!randomLocation || !randomLocation.location || !randomLocation.roles || !Array.isArray(randomLocation.roles)) {
+        console.error('❌ Invalid location structure:', randomLocation);
+        Alert.alert('שגיאה', 'שגיאה: מיקום לא תקין. נסה שוב.');
+        return;
+      }
+
+      updatedPlayers = freshPlayers.map((player) => {
+        if (spyIndices.has(player.name)) {
+          return {
+            name: player.name,
+            is_spy: true,
+            location: '',
+            role: '',
+            votes: [] // Array for multiple votes
+          };
+        } else {
+          const randomRole = randomLocation.roles[Math.floor(Math.random() * randomLocation.roles.length)];
+          return {
+            name: player.name,
+            is_spy: false,
+            location: randomLocation.location,
+            role: randomRole,
+            votes: [] // Array for multiple votes
+          };
+        }
+      });
+
+      chosenLocation = randomLocation.location || '';
+      allLocationNames = locations.map(loc => loc.location).filter(loc => loc != null);
+    } else {
+      // Word mode - new behavior
+      let words = [];
+      try {
+        const wordsSnapshot = await getDocs(collection(db, 'WordCard'));
+        wordsSnapshot.forEach((doc) => {
+          const wordData = doc.data();
+          if (wordData.word && typeof wordData.word === 'string' && wordData.word.trim().length > 0) {
+            words.push(wordData.word.trim());
+          }
+        });
+      } catch (error) {
+        console.error('❌ Error loading words:', error);
+        Alert.alert('שגיאה', 'שגיאה בטעינת מילים. נסה שוב.');
+        return;
+      }
+      
+      if (!words || words.length === 0) {
+        Alert.alert('שגיאה', 'אין מילים במערכת!');
+        return;
+      }
+
+      const randomWord = words[Math.floor(Math.random() * words.length)];
+
+      updatedPlayers = freshPlayers.map((player) => {
+        if (spyIndices.has(player.name)) {
+          return {
+            name: player.name,
+            is_spy: true,
+            location: '',
+            role: '',
+            votes: [] // Array for multiple votes
+          };
+        } else {
+          // All non-spies get the same word, no role
+          return {
+            name: player.name,
+            is_spy: false,
+            location: randomWord, // Reuse location field to store word
+            role: '', // No role in word mode
+            votes: [] // Array for multiple votes
+          };
+        }
+      });
+
+      chosenWord = randomWord;
+      // In word mode, we don't need all_locations
+      allLocationNames = [];
+    }
 
     if (!currentRoom || !currentRoom.id) {
       console.error('❌ Cannot start game: room or room.id is missing');
@@ -493,7 +577,7 @@ export default function SpyRoomScreen({ navigation, route }) {
         game_start_time: Date.now(),
         spy_name: spyNames.length === 1 ? spyNames[0] : '', // For backward compatibility, use first spy if only one
         spy_names: spyNames, // Array of all spy names
-        chosen_location: randomLocation.location || '',
+        chosen_location: currentGameMode === 'locations' ? chosenLocation : chosenWord,
         all_locations: allLocationNames,
         eliminated_locations: [],
         all_votes_submitted: false
@@ -599,8 +683,8 @@ export default function SpyRoomScreen({ navigation, route }) {
 
     try {
       const roomRef = doc(db, 'SpyRoom', room.id);
-      const correctLocation = room.chosen_location || '';
-      const isCorrect = trimmedGuess.toLowerCase() === correctLocation.toLowerCase();
+      const correctAnswer = room.chosen_location || '';
+      const isCorrect = trimmedGuess.toLowerCase() === correctAnswer.toLowerCase();
       
       // Batch both updates into a single write
       await updateDoc(roomRef, {
@@ -610,10 +694,11 @@ export default function SpyRoomScreen({ navigation, route }) {
         game_status: 'finished'
       });
 
+      const isWordMode = room.game_mode === 'word';
       if (isCorrect) {
-        Alert.alert('🎉 ניצחון!', `צדקת! המיקום היה: ${correctLocation}\nהמשחק הסתיים - המרגל ניצח!`);
+        Alert.alert('🎉 ניצחון!', `צדקת! ${isWordMode ? 'המילה הייתה' : 'המיקום היה'}: ${correctAnswer}\nהמשחק הסתיים - המרגל ניצח!`);
       } else {
-        Alert.alert('❌ טעות', `הניחוש שלך שגוי.\nהמיקום היה: ${correctLocation}\nהמשחק הסתיים - המרגל הפסיד!`);
+        Alert.alert('❌ טעות', `הניחוש שלך שגוי.\n${isWordMode ? 'המילה הייתה' : 'המיקום היה'}: ${correctAnswer}\nהמשחק הסתיים - המרגל הפסיד!`);
       }
 
       console.log('✅ Spy guess submitted:', trimmedGuess, 'Correct:', isCorrect);
@@ -682,6 +767,7 @@ export default function SpyRoomScreen({ navigation, route }) {
         spy_guess: null,
         spy_guess_correct: null,
         spy_guess_player: null
+        // Note: game_mode is preserved when resetting
       });
       // Reset local state
       setSpyGuess('');
@@ -841,6 +927,56 @@ export default function SpyRoomScreen({ navigation, route }) {
                     <Text style={styles.drinkingToggleLabel}>🍺</Text>
                   </View>
                   
+                  {/* Game Mode Selection */}
+                  <View style={styles.gameModeSelectionContainer}>
+                    <Text style={styles.gameModeSelectionLabel}>🎮 מצב משחק:</Text>
+                    <View style={styles.gameModeButtonsRow}>
+                      {[
+                        { value: 'locations', label: 'מיקומים' },
+                        { value: 'word', label: 'מילה' }
+                      ].map((mode) => {
+                        const isSelected = gameMode === mode.value;
+                        return (
+                          <Pressable
+                            key={mode.value}
+                            onPress={async () => {
+                              if (room?.id) {
+                                const newGameMode = mode.value;
+                                setGameMode(newGameMode);
+                                // Save to room
+                                try {
+                                  const roomRef = doc(db, 'SpyRoom', room.id);
+                                  await updateDoc(roomRef, { game_mode: newGameMode });
+                                  console.log('✅ Game mode updated to:', newGameMode);
+                                } catch (err) {
+                                  console.error('❌ Error updating game mode:', err);
+                                  // Revert on error
+                                  setGameMode(gameMode);
+                                }
+                              }
+                            }}
+                            style={[
+                              styles.gameModeButton,
+                              isSelected && styles.gameModeButtonSelected
+                            ]}
+                          >
+                            <Text style={[
+                              styles.gameModeButtonText,
+                              isSelected && styles.gameModeButtonTextSelected
+                            ]}>
+                              {mode.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <Text style={styles.gameModeSelectionHint}>
+                      {gameMode === 'locations' 
+                        ? 'כל שחקן מקבל מיקום ותפקיד' 
+                        : 'כל השחקנים מקבלים אותה מילה'}
+                    </Text>
+                  </View>
+
                   {/* Number of Spies Selection */}
                   <View style={styles.spiesSelectionContainer}>
                     <Text style={styles.spiesSelectionLabel}>🕵️ מספר מרגלים:</Text>
@@ -895,13 +1031,24 @@ export default function SpyRoomScreen({ navigation, route }) {
                 </View>
               )}
 
-              {/* Show number of spies to all players */}
-              {!isHost && room?.number_of_spies && (
-                <View style={styles.spiesInfoBadge}>
-                  <Text style={styles.spiesInfoText}>
-                    🕵️ במשחק זה {room.number_of_spies === 1 ? 'יהיה מרגל אחד' : `יהיו ${room.number_of_spies} מרגלים`}
-                  </Text>
-                </View>
+              {/* Show game mode and number of spies to all players */}
+              {!isHost && (
+                <>
+                  {room?.game_mode && (
+                    <View style={styles.gameModeInfoBadge}>
+                      <Text style={styles.gameModeInfoText}>
+                        🎮 מצב משחק: {room.game_mode === 'word' ? 'מילה' : 'מיקומים'}
+                      </Text>
+                    </View>
+                  )}
+                  {room?.number_of_spies && (
+                    <View style={styles.spiesInfoBadge}>
+                      <Text style={styles.spiesInfoText}>
+                        🕵️ במשחק זה {room.number_of_spies === 1 ? 'יהיה מרגל אחד' : `יהיו ${room.number_of_spies} מרגלים`}
+                      </Text>
+                    </View>
+                  )}
+                </>
               )}
 
               {!isHost && drinkingMode && (
@@ -978,27 +1125,43 @@ export default function SpyRoomScreen({ navigation, route }) {
                       <Text style={styles.spyEmoji}>🕵️</Text>
                       <Text style={styles.spyTitle}>אתה המרגל!</Text>
                       <Text style={styles.spyDescription}>
-                        אתה לא יודע את המקום.{'\n'}
-                        נסה לגלות מהו המיקום מבלי שיגלו שאתה המרגל!
+                        {room.game_mode === 'word' 
+                          ? 'אתה לא יודע את המילה.\nנסה לגלות מהי המילה מבלי שיגלו שאתה המרגל!'
+                          : 'אתה לא יודע את המקום.\nנסה לגלות מהו המיקום מבלי שיגלו שאתה המרגל!'}
                       </Text>
-                      <View style={styles.spyTip}>
-                        <Text style={styles.spyTipTitle}>💡 טיפ:</Text>
-                        <Text style={styles.spyTipText}>השתמש ברשימת המקומות כדי לסמן מקומות שכבר שללת</Text>
-                      </View>
+                      {room.game_mode !== 'word' && (
+                        <View style={styles.spyTip}>
+                          <Text style={styles.spyTipTitle}>💡 טיפ:</Text>
+                          <Text style={styles.spyTipText}>השתמש ברשימת המקומות כדי לסמן מקומות שכבר שללת</Text>
+                        </View>
+                      )}
                     </View>
                   ) : (
                     <View style={styles.regularInfo}>
-                      <View style={styles.locationCard}>
-                        <Text style={styles.locationLabel}>המיקום:</Text>
-                        <Text style={styles.locationText}>{currentPlayer?.location}</Text>
-                      </View>
-                      <View style={styles.roleCard}>
-                        <Text style={styles.roleLabel}>התפקיד שלך:</Text>
-                        <Text style={styles.roleText}>{currentPlayer?.role}</Text>
-                      </View>
+                      {room.game_mode === 'word' ? (
+                        <View style={styles.locationCard}>
+                          <Text style={styles.locationLabel}>המילה:</Text>
+                          <Text style={styles.locationText}>{currentPlayer?.location}</Text>
+                        </View>
+                      ) : (
+                        <>
+                          <View style={styles.locationCard}>
+                            <Text style={styles.locationLabel}>המיקום:</Text>
+                            <Text style={styles.locationText}>{currentPlayer?.location}</Text>
+                          </View>
+                          <View style={styles.roleCard}>
+                            <Text style={styles.roleLabel}>התפקיד שלך:</Text>
+                            <Text style={styles.roleText}>{currentPlayer?.role}</Text>
+                          </View>
+                        </>
+                      )}
                       <View style={styles.regularTip}>
                         <Text style={styles.regularTipTitle}>💡 טיפ:</Text>
-                        <Text style={styles.regularTipText}>שאל שאלות כדי לגלות מי המרגל, אבל אל תחשוף יותר מדי!</Text>
+                        <Text style={styles.regularTipText}>
+                          {room.game_mode === 'word' 
+                            ? 'אמור מילה הקשורה למילה הנתונה, אבל אל תחשוף אותה למרגל!'
+                            : 'שאל שאלות כדי לגלות מי המרגל, אבל אל תחשוף יותר מדי!'}
+                        </Text>
                       </View>
                     </View>
                   )}
@@ -1137,8 +1300,8 @@ export default function SpyRoomScreen({ navigation, route }) {
                 </View>
               )}
 
-              {/* Locations List - Only for Spy */}
-              {isSpy && (
+              {/* Locations List - Only for Spy and only in Locations mode */}
+              {isSpy && room.game_mode !== 'word' && (
                 <View style={styles.locationsCard}>
                   <Pressable
                     style={styles.locationsHeader}
@@ -1206,7 +1369,9 @@ export default function SpyRoomScreen({ navigation, route }) {
               </View>
 
               <View style={styles.locationRevealCard}>
-                <Text style={styles.locationRevealLabel}>המיקום היה:</Text>
+                <Text style={styles.locationRevealLabel}>
+                  {room.game_mode === 'word' ? 'המילה הייתה:' : 'המיקום היה:'}
+                </Text>
                 <Text style={styles.locationRevealName}>{room.chosen_location}</Text>
               </View>
 
@@ -2158,6 +2323,64 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   spiesInfoText: {
+    fontSize: 14,
+    color: '#374151',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  gameModeSelectionContainer: {
+    marginTop: 12,
+    gap: 8,
+  },
+  gameModeSelectionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 4,
+  },
+  gameModeButtonsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  gameModeButton: {
+    flex: 1,
+    minWidth: 100,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  gameModeButtonSelected: {
+    backgroundColor: '#7ED957', // Spy theme color
+    borderColor: '#7ED957',
+  },
+  gameModeButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  gameModeButtonTextSelected: {
+    color: '#FFFFFF',
+  },
+  gameModeSelectionHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontStyle: 'italic',
+  },
+  gameModeInfoBadge: {
+    backgroundColor: 'rgba(59, 130, 246, 0.2)', // Blue with transparency
+    borderWidth: 2,
+    borderColor: '#3B82F6',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 8,
+  },
+  gameModeInfoText: {
     fontSize: 14,
     color: '#374151',
     textAlign: 'center',

@@ -378,6 +378,7 @@ const styles = StyleSheet.create({
   cardContainer: {
     width: '100%',
     alignItems: 'center',
+    marginTop: 20,
   },
   card: {
     width: '100%',

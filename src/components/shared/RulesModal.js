@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, ScrollView, Pressable } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Modal, ScrollView, Pressable, Platform, Dimensions } from 'react-native';
 
 const GAME_RULES = {
   alias: {
@@ -55,17 +55,32 @@ const THEME_COLORS = {
   spy: '#7ED957', // ירוק בהיר
 };
 
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
 export default function RulesModal({ visible, onClose, variant = 'draw' }) {
   const [isExpanded, setIsExpanded] = useState(true);
+  const [contentReady, setContentReady] = useState(false);
+  const scrollViewRef = useRef(null);
   const themeColor = THEME_COLORS[variant] || THEME_COLORS.draw;
   const currentGameRules = GAME_RULES[variant] || GAME_RULES.draw;
 
-  // Reset expanded state when modal opens
+  // Reset expanded state and scroll to top when modal opens
   useEffect(() => {
     if (visible) {
       setIsExpanded(true);
+      setContentReady(false);
+      // Force re-render when content is ready (iOS fix)
+      setTimeout(() => {
+        setContentReady(true);
+        // Scroll to top when modal opens
+        setTimeout(() => {
+          scrollViewRef.current?.scrollTo({ y: 0, animated: false });
+        }, 50);
+      }, 50);
+    } else {
+      setContentReady(false);
     }
-  }, [visible]);
+  }, [visible, variant]);
 
   return (
     <Modal
@@ -85,29 +100,38 @@ export default function RulesModal({ visible, onClose, variant = 'draw' }) {
           </View>
 
           {/* Rules Content */}
-          <ScrollView 
-            style={styles.scrollContent}
-            showsVerticalScrollIndicator={true}
-            contentContainerStyle={styles.scrollContentContainer}
-          >
-            {/* Current Game Rules */}
-            <View style={[styles.rulesSection, { borderColor: themeColor }]}>
-              <Pressable
-                onPress={() => setIsExpanded(!isExpanded)}
-                style={[styles.sectionHeader, { backgroundColor: themeColor }]}
-              >
-                <Text style={styles.sectionTitle}>{currentGameRules.title}</Text>
-                <Text style={styles.expandIcon}>
-                  {isExpanded ? '▼' : '▶'}
-                </Text>
-              </Pressable>
-              {isExpanded && (
-                <View style={styles.sectionContent}>
-                  <Text style={styles.rulesText}>{currentGameRules.content}</Text>
-                </View>
-              )}
-            </View>
-          </ScrollView>
+          {contentReady && (
+            <ScrollView 
+              ref={scrollViewRef}
+              style={styles.scrollContent}
+              showsVerticalScrollIndicator={true}
+              contentContainerStyle={styles.scrollContentContainer}
+              bounces={false}
+            >
+              {/* Current Game Rules */}
+              <View style={[styles.rulesSection, { borderColor: themeColor }]}>
+                <Pressable
+                  onPress={() => setIsExpanded(!isExpanded)}
+                  style={[styles.sectionHeader, { backgroundColor: themeColor }]}
+                >
+                  <Text style={styles.sectionTitle}>{currentGameRules.title}</Text>
+                  <Text style={styles.expandIcon}>
+                    {isExpanded ? '▼' : '▶'}
+                  </Text>
+                </Pressable>
+                {isExpanded && (
+                  <View style={styles.sectionContent}>
+                    <Text 
+                      style={styles.rulesText}
+                      allowFontScaling={true}
+                    >
+                      {currentGameRules.content}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+          )}
         </View>
       </View>
     </Modal>
@@ -127,13 +151,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     width: '100%',
     maxWidth: 500,
-    maxHeight: '85%',
+    maxHeight: SCREEN_HEIGHT * 0.85,
+    height: Platform.OS === 'ios' ? SCREEN_HEIGHT * 0.85 : undefined,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+    flexDirection: 'column',
   },
   header: {
     flexDirection: 'row',
@@ -197,12 +223,16 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: '#F9FAFB',
     minHeight: 100,
+    width: '100%',
   },
   rulesText: {
     fontSize: 14,
     lineHeight: 22,
     color: '#374151',
     textAlign: 'right',
+    ...(Platform.OS === 'ios' && {
+      flexShrink: 1,
+    }),
   },
 });
 

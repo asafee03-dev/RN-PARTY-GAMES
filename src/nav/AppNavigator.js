@@ -9,7 +9,7 @@ import FrequencyNavigator from './FrequencyNavigator';
 import CodenamesNavigator from './CodenamesNavigator';
 import SpyNavigator from './SpyNavigator';
 import DrawNavigator from './DrawNavigator';
-import { loadNavigationState, saveNavigationState, loadCurrentRoom } from '../utils/navigationState';
+import { clearNavigationState, saveNavigationState } from '../utils/navigationState';
 import { parseDeepLink } from '../utils/deepLinking';
 import storage from '../utils/storage';
 
@@ -17,56 +17,26 @@ const Stack = createNativeStackNavigator();
 
 export default function AppNavigator() {
   const [isReady, setIsReady] = useState(false);
-  const [initialState, setInitialState] = useState(undefined);
   const navigationRef = useRef(null);
 
   useEffect(() => {
-    // Restore navigation state on app load
-    const restoreState = async () => {
+    // Clear saved state on app initialization (cold start)
+    // This ensures the app always starts from Home screen when fully closed and reopened
+    const initializeApp = async () => {
       try {
-        const savedState = await loadNavigationState();
-        if (savedState) {
-          setInitialState(savedState);
-        } else {
-          // Fallback: try to restore from saved room info
-          const savedRoom = await loadCurrentRoom();
-          if (savedRoom && savedRoom.roomCode) {
-            // Build navigation state from saved room
-            const gameTypeCapitalized = savedRoom.gameType.charAt(0).toUpperCase() + savedRoom.gameType.slice(1);
-            let screenName = `${gameTypeCapitalized}Room`;
-            if (savedRoom.gameType === 'alias') {
-              screenName = 'AliasSetup'; // Will auto-navigate to Game if needed
-            } else if (savedRoom.gameType === 'codenames') {
-              screenName = 'CodenamesSetup'; // Will auto-navigate to Game if needed
-            }
-            
-            const restoredState = {
-              index: 1,
-              routes: [
-                { name: 'Home', params: undefined },
-                {
-                  name: gameTypeCapitalized,
-                  state: {
-                    index: 1,
-                    routes: [
-                      { name: `${gameTypeCapitalized}Home`, params: undefined },
-                      { name: screenName, params: { roomCode: savedRoom.roomCode } }
-                    ]
-                  }
-                }
-              ]
-            };
-            setInitialState(restoredState);
-          }
-        }
+        // Clear any saved navigation state and room state on cold start
+        // This prevents restoring stale screens or deleted rooms
+        await clearNavigationState();
+        console.log('✅ Cleared saved navigation state on app initialization');
       } catch (error) {
-        console.warn('⚠️ Error restoring navigation state:', error);
+        console.warn('⚠️ Error clearing navigation state:', error);
       } finally {
+        // Always set ready - app will start from Home (initialRouteName)
         setIsReady(true);
       }
     };
 
-    restoreState();
+    initializeApp();
   }, []);
 
   // Handle deep links
@@ -196,15 +166,14 @@ export default function AppNavigator() {
     }
   };
 
-  if (!isReady) {
-    // Return null or a loading screen while restoring state
-    return null;
-  }
+  // Show NavigationContainer immediately - don't block on state restoration
+  // This prevents white screen on app launch
+  // State is cleared on initialization, so app always starts from Home
 
   return (
     <NavigationContainer
       ref={navigationRef}
-      initialState={initialState}
+      initialState={undefined}
       onStateChange={handleStateChange}
       onReady={async () => {
         // Navigation is ready, ensure we're on the correct screen

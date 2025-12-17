@@ -10,9 +10,6 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SpeechBubbleWithQuestion = () => (
   <View style={customIconStyles.speechBubbleContainer}>
     <Text style={customIconStyles.speechBubble}>💬</Text>
-    <View style={customIconStyles.questionMarkContainer}>
-      <Text style={customIconStyles.questionMark}>❓</Text>
-    </View>
   </View>
 );
 
@@ -121,15 +118,6 @@ const customIconStyles = StyleSheet.create({
   },
   speechBubble: {
     fontSize: 48,
-    position: 'absolute',
-  },
-  questionMarkContainer: {
-    position: 'absolute',
-    top: 6,
-    left: 12,
-  },
-  questionMark: {
-    fontSize: 22,
   },
   frequencyContainer: {
     width: 48,

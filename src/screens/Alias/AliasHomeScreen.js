@@ -11,13 +11,10 @@ import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
 
-// Custom icon component for speech bubble with question mark
+// Custom icon component for speech bubble
 const SpeechBubbleWithQuestion = () => (
   <View style={customIconStyles.speechBubbleContainer}>
     <Text style={customIconStyles.speechBubble}>💬</Text>
-    <View style={customIconStyles.questionMarkContainer}>
-      <Text style={customIconStyles.questionMark}>❓</Text>
-    </View>
   </View>
 );
 
@@ -31,15 +28,6 @@ const customIconStyles = StyleSheet.create({
   },
   speechBubble: {
     fontSize: 48,
-    position: 'absolute',
-  },
-  questionMarkContainer: {
-    position: 'absolute',
-    top: 8,
-    left: 14,
-  },
-  questionMark: {
-    fontSize: 24,
   },
 });
 

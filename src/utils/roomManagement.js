@@ -133,7 +133,73 @@ export function setupGameEndAutoDeletion(collectionName, roomId, gracePeriodMs =
 }
 
 /**
+ * Count active players in a room (works for all game types)
+ * @param {Object} roomData - Room data from Firestore
+ * @returns {number} - Number of active players
+ */
+function countActivePlayers(roomData) {
+  let activePlayerCount = 0;
+  
+  // For games with players array (Spy, Draw, Frequency)
+  if (roomData.players && Array.isArray(roomData.players)) {
+    activePlayerCount = roomData.players.filter(p => {
+      if (!p || !p.name) return false;
+      // Only count players where active !== false (includes active: true and active: null/undefined)
+      return p.active !== false;
+    }).length;
+  } 
+  // For games with teams array (Alias)
+  else if (roomData.teams && Array.isArray(roomData.teams)) {
+    activePlayerCount = roomData.teams.reduce((count, team) => {
+      if (!team.players || !Array.isArray(team.players)) {
+        return count;
+      }
+      // Handle both string players and object players
+      const teamPlayerCount = team.players.filter(p => {
+        if (!p) return false;
+        // If player is a string, count it (Alias uses string players)
+        if (typeof p === 'string' && p.trim().length > 0) {
+          return true;
+        }
+        // If player is an object with a name, check if active
+        if (typeof p === 'object' && p.name) {
+          return p.active !== false;
+        }
+        return false;
+      }).length;
+      return count + teamPlayerCount;
+    }, 0);
+    
+    // Also count the host as a player if not already in a team
+    if (roomData.host_name && typeof roomData.host_name === 'string' && roomData.host_name.trim().length > 0) {
+      const hostInTeam = roomData.teams.some(team => 
+        team.players && Array.isArray(team.players) && 
+        team.players.some(p => {
+          if (typeof p === 'string') return p === roomData.host_name;
+          if (typeof p === 'object' && p.name) return p.name === roomData.host_name;
+          return false;
+        })
+      );
+      if (!hostInTeam) {
+        activePlayerCount += 1;
+      }
+    }
+  } 
+  // For Codenames (red_team/blue_team structure)
+  else if (roomData.red_team || roomData.blue_team) {
+    const redGuessers = roomData.red_team?.guessers?.filter(g => g && g.trim().length > 0).length || 0;
+    const blueGuessers = roomData.blue_team?.guessers?.filter(g => g && g.trim().length > 0).length || 0;
+    const redSpymaster = (roomData.red_team?.spymaster && roomData.red_team.spymaster.trim().length > 0) ? 1 : 0;
+    const blueSpymaster = (roomData.blue_team?.spymaster && roomData.blue_team.spymaster.trim().length > 0) ? 1 : 0;
+    activePlayerCount = redGuessers + blueGuessers + redSpymaster + blueSpymaster;
+  }
+  
+  return activePlayerCount;
+}
+
+/**
  * Setup listener to delete room when all players leave
+ * Deletes room immediately when last active player leaves, regardless of game status
  * @param {string} collectionName - The Firestore collection name
  * @param {string} roomId - The room document ID
  * @returns {Function} - Cleanup function to unsubscribe
@@ -147,86 +213,82 @@ export function setupEmptyRoomAutoDeletion(collectionName, roomId) {
   
   const roomRef = doc(db, collectionName, roomId);
   
+  // Use a debounce to prevent race conditions when multiple players leave simultaneously
+  let deletionTimeout = null;
+  
   const unsubscribe = onSnapshot(roomRef, async (snapshot) => {
     if (!snapshot.exists()) {
       // Room already deleted
+      if (deletionTimeout) {
+        clearTimeout(deletionTimeout);
+        deletionTimeout = null;
+      }
       return;
     }
 
     const roomData = snapshot.data();
     
-    // Check if room is empty (no players)
-    let playerCount = 0;
-    
-    if (roomData.players && Array.isArray(roomData.players)) {
-      playerCount = roomData.players.filter(p => p && p.name).length;
-    } else if (roomData.teams && Array.isArray(roomData.teams)) {
-      // For games with teams (like Alias)
-      // In Alias, players can be stored as strings or objects with name property
-      playerCount = roomData.teams.reduce((count, team) => {
-        if (!team.players || !Array.isArray(team.players)) {
-          return count;
-        }
-        // Handle both string players (Alias) and object players
-        const teamPlayerCount = team.players.filter(p => {
-          if (!p) return false;
-          // If player is a string, count it
-          if (typeof p === 'string' && p.trim().length > 0) {
-            return true;
-          }
-          // If player is an object with a name property, count it
-          if (typeof p === 'object' && p.name) {
-            return true;
-          }
-          return false;
-        }).length;
-        return count + teamPlayerCount;
-      }, 0);
-      
-      // Also count the host as a player (for Alias, host might not be in a team yet)
-      if (roomData.host_name && typeof roomData.host_name === 'string' && roomData.host_name.trim().length > 0) {
-        // Check if host is already counted in teams
-        const hostInTeam = roomData.teams.some(team => 
-          team.players && Array.isArray(team.players) && 
-          team.players.some(p => {
-            if (typeof p === 'string') return p === roomData.host_name;
-            if (typeof p === 'object' && p.name) return p.name === roomData.host_name;
-            return false;
-          })
-        );
-        if (!hostInTeam) {
-          playerCount += 1;
-        }
-      }
-    } else if (roomData.red_team || roomData.blue_team) {
-      // For Codenames
-      const redPlayers = roomData.red_team?.guessers?.length || 0;
-      const bluePlayers = roomData.blue_team?.guessers?.length || 0;
-      const redSpymaster = roomData.red_team?.spymaster ? 1 : 0;
-      const blueSpymaster = roomData.blue_team?.spymaster ? 1 : 0;
-      playerCount = redPlayers + bluePlayers + redSpymaster + blueSpymaster;
-    }
+    // Count only active players (active !== false)
+    const activePlayerCount = countActivePlayers(roomData);
 
-    // Don't delete rooms that are in setup phase (players might still be joining)
-    // Only delete if room is empty AND not in setup/lobby state
-    const isInSetupPhase = roomData.game_status === 'setup' || roomData.game_status === 'lobby';
-    
-    if (playerCount === 0 && !isInSetupPhase) {
-      console.log(`🗑️ Auto-deleting room ${roomId} - all players left and game is not in setup phase`);
-      await deleteRoom(collectionName, roomId);
-      unsubscribe(); // Stop listening after deletion
-    } else if (playerCount === 0 && isInSetupPhase) {
-      console.log(`ℹ️ Room ${roomId} is empty but in setup phase, skipping auto-deletion`);
+    // Delete room when no active players remain
+    // Use a small delay to handle race conditions when multiple players leave at once
+    if (activePlayerCount === 0) {
+      // Clear any existing timeout
+      if (deletionTimeout) {
+        clearTimeout(deletionTimeout);
+      }
+      
+      // Set a short delay before deletion to handle race conditions
+      deletionTimeout = setTimeout(async () => {
+        try {
+          // Double-check room still exists and is still empty
+          const verifySnapshot = await getDoc(roomRef);
+          if (verifySnapshot.exists()) {
+            const verifyData = verifySnapshot.data();
+            const verifyActiveCount = countActivePlayers(verifyData);
+            
+            if (verifyActiveCount === 0) {
+              console.log(`🗑️ Auto-deleting room ${roomId} - all active players have left`);
+              await deleteRoom(collectionName, roomId);
+              unsubscribe(); // Stop listening after deletion
+            } else {
+              console.log(`ℹ️ Room ${roomId} has active players again, skipping deletion`);
+            }
+          }
+        } catch (error) {
+          console.error(`❌ Error in empty room deletion check:`, error);
+        } finally {
+          deletionTimeout = null;
+        }
+      }, 2000); // 2 second delay to handle race conditions
+    } else {
+      // Room has active players, clear any pending deletion
+      if (deletionTimeout) {
+        clearTimeout(deletionTimeout);
+        deletionTimeout = null;
+      }
     }
   }, (error) => {
     console.error(`❌ Error in empty room listener:`, error);
+    if (deletionTimeout) {
+      clearTimeout(deletionTimeout);
+      deletionTimeout = null;
+    }
   });
 
-  return unsubscribe;
+  // Return cleanup function that also clears the timeout
+  return () => {
+    if (deletionTimeout) {
+      clearTimeout(deletionTimeout);
+      deletionTimeout = null;
+    }
+    unsubscribe();
+  };
 }
 
 /**
- * Setup timer to delete room after 1 hour
+ * Setup timer to delete room after 3 hours
  * @param {string} collectionName - The Firestore collection name
  * @param {string} roomId - The room document ID
  * @param {number} createdAt - Timestamp when room was created (Date.now() or ISO string)
@@ -240,18 +302,19 @@ export function setupRoomAgeAutoDeletion(collectionName, roomId, createdAt) {
   const createdTime = typeof createdAt === 'string' ? new Date(createdAt).getTime() : createdAt;
   const now = Date.now();
   const age = now - createdTime;
-  const oneHour = 60 * 60 * 1000;
+  const threeHours = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
   
-  // If room is already older than 1 hour, delete immediately
-  if (age >= oneHour) {
-    console.log(`🗑️ Room ${roomId} is already older than 1 hour, deleting immediately`);
+  // If room is already older than 3 hours, delete immediately
+  if (age >= threeHours) {
+    console.log(`🗑️ Room ${roomId} is already older than 3 hours, deleting immediately`);
     deleteRoom(collectionName, roomId);
     return () => {};
   }
 
   // Otherwise, set timer for remaining time
-  const remainingTime = oneHour - age;
-  console.log(`⏰ Setting up age-based auto-deletion for room ${roomId} in ${collectionName} (${Math.round(remainingTime / 1000 / 60)} minutes remaining)`);
+  const remainingTime = threeHours - age;
+  const remainingMinutes = Math.round(remainingTime / 1000 / 60);
+  console.log(`⏰ Setting up age-based auto-deletion for room ${roomId} in ${collectionName} (${remainingMinutes} minutes remaining, ~${Math.round(remainingMinutes / 60)} hours)`);
   
   const timeoutId = setTimeout(async () => {
     // Double-check room still exists before deleting
@@ -260,7 +323,7 @@ export function setupRoomAgeAutoDeletion(collectionName, roomId, createdAt) {
       const snapshot = await getDoc(roomRef);
       
       if (snapshot.exists()) {
-        console.log(`🗑️ Auto-deleting room ${roomId} - room is older than 1 hour`);
+        console.log(`🗑️ Auto-deleting room ${roomId} - room is older than 3 hours`);
         await deleteRoom(collectionName, roomId);
       }
     } catch (error) {

@@ -35,6 +35,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const isSubmittingGuess = useRef(false);
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
+  const pendingTopicRef = useRef(null); // Track topic being set during turn advancement
 
   const loadRoom = async () => {
     try {
@@ -299,6 +300,36 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                 [currentPlayerName]: prevRoom.needle_positions[currentPlayerName]
               };
               newRoom.needle_positions = preservedNeedlePositions;
+            }
+          }
+          
+          // Prevent topic flickering during turn advancement
+          // When advancing a turn, use the pending topic we're setting instead of accepting
+          // potentially stale data from Firestore snapshot
+          if (isProcessingReveal.current && pendingTopicRef.current) {
+            const isTransitioning = prevRoom?.turn_phase === 'summary' && newRoom.turn_phase === 'clue';
+            const incomingTopicInvalid = !newRoom.current_topic || 
+                                       !newRoom.current_topic.left_side || 
+                                       !newRoom.current_topic.right_side;
+            
+            // During transition or if incoming topic is invalid, always use pending topic
+            // This prevents flickering from stale Firestore data
+            if (isTransitioning || incomingTopicInvalid) {
+              newRoom.current_topic = pendingTopicRef.current;
+            } else {
+              // If incoming topic is valid, check if it matches what we set
+              // If it matches, we can accept it (the update completed successfully) and clear the ref
+              // If it doesn't match, it might be stale data, so use pending topic
+              const incomingMatches = newRoom.current_topic.left_side === pendingTopicRef.current.left_side &&
+                                    newRoom.current_topic.right_side === pendingTopicRef.current.right_side;
+              
+              if (incomingMatches && newRoom.turn_phase === 'clue') {
+                // Topic matches and we're in the new phase, clear the ref as update completed successfully
+                pendingTopicRef.current = null;
+              } else if (!incomingMatches) {
+                // Incoming topic doesn't match what we're setting, use pending topic
+                newRoom.current_topic = pendingTopicRef.current;
+              }
             }
           }
           
@@ -780,18 +811,23 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         if (!randomTopic || !randomTopic.left || !randomTopic.right) {
           console.error('❌ Invalid topic structure:', randomTopic);
           isProcessingReveal.current = false;
+          pendingTopicRef.current = null;
           return;
         }
         
+        const newTopic = { left_side: randomTopic.left, right_side: randomTopic.right };
         const randomTarget = Math.floor(Math.random() * 180);
         const newSectors = calculateSectors();
+
+        // Store the topic in ref before updating Firestore to prevent race conditions
+        pendingTopicRef.current = newTopic;
 
         try {
           const roomRef = doc(db, 'FrequencyRoom', room.id);
           await updateDoc(roomRef, {
             players: finalUpdatedPlayers,
             current_turn_index: nextTurnIndex,
-            current_topic: { left_side: randomTopic.left, right_side: randomTopic.right },
+            current_topic: newTopic,
             target_position: randomTarget,
             needle_positions: {},
             guess_submitted_names: {},
@@ -800,12 +836,17 @@ export default function FrequencyRoomScreen({ navigation, route }) {
             last_guess_result: null,
             drinking_players: null // Clear drinking players when advancing turn
           });
+          
+          // Clear pending topic ref after successful update
+          // The ref will be cleared when onSnapshot receives the correct topic
         } catch (error) {
           console.error('Error advancing to next turn:', error);
+          pendingTopicRef.current = null;
         }
       }
     } catch (error) {
       console.error('Error in advanceToNextTurn:', error);
+      pendingTopicRef.current = null;
     } finally {
       isProcessingReveal.current = false;
     }

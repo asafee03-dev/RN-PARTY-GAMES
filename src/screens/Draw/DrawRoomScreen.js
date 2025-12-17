@@ -479,15 +479,27 @@ export default function DrawRoomScreen({ navigation, route }) {
       return player;
     });
 
+    // Check for game winner (player with score >= 12)
+    const validPlayers = finalPlayersWithScores.filter(p => p && p.name && (p.active !== false));
+    const winner = validPlayers.find(p => p.score >= WINNING_SCORE && (p.active !== false));
+
     try {
       const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
-      await updateDoc(roomDocRef, {
+      const updateData = {
         players: finalPlayersWithScores,
         show_round_summary: true,
         round_winner: firstWinner,
         drinking_players: drinkingModeActive && drinkingPlayersList.length > 0 ? drinkingPlayersList : null,
         final_draw_image: null // Skip image upload for now
-      });
+      };
+      
+      // If a player reached 12 points, end the game immediately
+      if (winner) {
+        updateData.game_status = 'finished';
+        updateData.winner_name = winner.name;
+      }
+      
+      await updateDoc(roomDocRef, updateData);
     } catch (error) {
       console.error('❌ Error handling timer expiration:', error);
     }
@@ -896,11 +908,21 @@ export default function DrawRoomScreen({ navigation, route }) {
         return player;
       });
 
+      // Check for game winner (player with score >= 12)
+      const validPlayers = playersWithScores.filter(p => p && p.name && (p.active !== false));
+      const winner = validPlayers.find(p => p.score >= WINNING_SCORE && (p.active !== false));
+
       updatePayload.players = playersWithScores;
       updatePayload.show_round_summary = true;
       updatePayload.round_winner = firstWinner;
       updatePayload.drinking_players = drinkingModeActive && drinkingPlayersList.length > 0 ? drinkingPlayersList : null;
       updatePayload.final_draw_image = null; // Skip image upload for now
+      
+      // If a player reached 12 points, end the game immediately
+      if (winner) {
+        updatePayload.game_status = 'finished';
+        updatePayload.winner_name = winner.name;
+      }
     }
 
     try {
@@ -937,6 +959,12 @@ export default function DrawRoomScreen({ navigation, route }) {
       // Validate players array
       if (!currentRoom.players || !Array.isArray(currentRoom.players) || currentRoom.players.length === 0) {
         console.warn('⚠️ [DRAW] continueToNextRound - invalid players array');
+        return;
+      }
+
+      // Check if game is already finished - if so, do nothing (finished modal will show)
+      if (currentRoom.game_status === 'finished') {
+        console.log('✅ [DRAW] continueToNextRound - game already finished, skipping');
         return;
       }
 
@@ -1709,6 +1737,7 @@ export default function DrawRoomScreen({ navigation, route }) {
 
         {/* Round Summary Modal */}
         {room && room.show_round_summary && !room.drinking_players && !forceCloseModal &&
+         room.game_status !== 'finished' &&
          room.players && Array.isArray(room.players) && 
          room.players.some(p => p && p.name === currentPlayerName) &&
          currentPlayerName && (

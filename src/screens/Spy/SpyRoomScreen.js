@@ -882,6 +882,7 @@ export default function SpyRoomScreen({ navigation, route }) {
           visible={showRulesModal}
           onClose={() => setShowRulesModal(false)}
           variant="spy"
+          gameMode={room?.game_mode || 'locations'}
         />
 
         {/* Lobby State */}
@@ -891,6 +892,15 @@ export default function SpyRoomScreen({ navigation, route }) {
               <Text style={styles.lobbyTitle}>👥 חדר המתנה</Text>
             </View>
             <View style={styles.lobbyContent}>
+              {/* Show current game mode to all players in lobby */}
+              {room?.game_mode && (
+                <View style={styles.gameModeInfoBadge}>
+                  <Text style={styles.gameModeInfoText}>
+                    🎮 מצב משחק: {room.game_mode === 'word' ? 'מילה' : 'מיקומים'}
+                  </Text>
+                </View>
+              )}
+              
               {isHost && (
                 <View style={styles.hostCard}>
                   <View style={styles.hostRow}>
@@ -1116,7 +1126,7 @@ export default function SpyRoomScreen({ navigation, route }) {
               <View style={styles.playerInfoCard}>
                 <View style={[styles.playerInfoHeader, isSpy && styles.playerInfoHeaderSpy]}>
                   <Text style={styles.playerInfoTitle}>
-                    {isSpy ? '👁️‍🗨️ אתה המרגל!' : '👁️ התפקיד שלך'}
+                    {isSpy ? '👁️‍🗨️ אתה המרגל!' : (room.game_mode === 'word' ? '👁️ המילה' : '👁️ התפקיד שלך')}
                   </Text>
                 </View>
                 <View style={styles.playerInfoContent}>

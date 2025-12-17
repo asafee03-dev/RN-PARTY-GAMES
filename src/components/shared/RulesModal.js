@@ -27,6 +27,16 @@ const GAME_RULES = {
 המרגל מנצח אם מצליח להישאר בלתי מזוהה עד סוף הסבב, או אם מצליח להניצל מההצבעה. 
 הקבוצה מנצחת אם היא מזהה ומצביעה למרגל בזמן.`,
   },
+  'spy-word': {
+    title: 'חוקי המרגל – מצב מילה',
+    content: `במשחק המרגל – מצב מילה, כל השחקנים מקבלים כרטיס שמציג את אותה מילה.
+שחקן אחד הוא המרגל, והוא לא יודע את המילה.
+במהלך המשחק, כל שחקן בתורו אומר מילה הקשורה למילה הנתונה, במטרה לזהות את המרגל.
+הרמז חייב להיות חכם מספיק כדי לבדוק את האחרים, אבל לא ברור מדי כדי שלא יחשוף את המילה למרגל.
+בכל שלב במהלך המשחק, השחקנים יכולים להצביע למי שהם חושבים שהוא המרגל ולנעול את ההצבעה שלהם.
+המרגל מנצח אם הוא נשאר בלתי מזוהה עד סוף הסבב, או אם הוא מצליח להימנע מההצבעה.
+הקבוצה מנצחת אם היא מזהה נכון את המרגל ומצביעה לו בזמן.`,
+  },
   frequency: {
     title: 'חוקי התדר',
     content: `ב"התדר", המשחק מתנהל בתורות. בכל סבב, שחקן אחד מקבל הצצה סודית לתדר ולתחום הנכון על גבי המעגל. 
@@ -57,12 +67,15 @@ const THEME_COLORS = {
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-export default function RulesModal({ visible, onClose, variant = 'draw' }) {
+export default function RulesModal({ visible, onClose, variant = 'draw', gameMode = null }) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [contentReady, setContentReady] = useState(false);
   const scrollViewRef = useRef(null);
   const themeColor = THEME_COLORS[variant] || THEME_COLORS.draw;
-  const currentGameRules = GAME_RULES[variant] || GAME_RULES.draw;
+  
+  // For spy variant, use word mode rules if gameMode is 'word'
+  const rulesKey = (variant === 'spy' && gameMode === 'word') ? 'spy-word' : variant;
+  const currentGameRules = GAME_RULES[rulesKey] || GAME_RULES.draw;
 
   // Reset expanded state and scroll to top when modal opens
   useEffect(() => {

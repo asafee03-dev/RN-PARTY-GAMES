@@ -1041,16 +1041,9 @@ export default function SpyRoomScreen({ navigation, route }) {
                 </View>
               )}
 
-              {/* Show game mode and number of spies to all players */}
+              {/* Show number of spies to non-host players (game mode already shown above) */}
               {!isHost && (
                 <>
-                  {room?.game_mode && (
-                    <View style={styles.gameModeInfoBadge}>
-                      <Text style={styles.gameModeInfoText}>
-                        🎮 מצב משחק: {room.game_mode === 'word' ? 'מילה' : 'מיקומים'}
-                      </Text>
-                    </View>
-                  )}
                   {room?.number_of_spies && (
                     <View style={styles.spiesInfoBadge}>
                       <Text style={styles.spiesInfoText}>
@@ -1061,7 +1054,7 @@ export default function SpyRoomScreen({ navigation, route }) {
                 </>
               )}
 
-              {!isHost && drinkingMode && (
+              {!isHost && room?.drinking_mode === true && (
                 <View style={styles.drinkingBadge}>
                   <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה פעיל</Text>
                 </View>

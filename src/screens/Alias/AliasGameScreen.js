@@ -17,7 +17,6 @@ import { doc, getDoc, updateDoc, onSnapshot, collection, getDocs } from 'firebas
 import { generateCards } from '../../logic/alias';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
-import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899"];
 
@@ -38,7 +37,6 @@ export default function AliasGameScreen({ navigation, route }) {
   const [drinkingTeamName, setDrinkingTeamName] = useState('');
   const previousTurnRef = useRef(null); // Track previous turn to detect full round completion
   const unsubscribeRef = useRef(null);
-  const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
 
   useEffect(() => {
     const loadPlayerName = async () => {
@@ -287,47 +285,6 @@ export default function AliasGameScreen({ navigation, route }) {
   };
 
   // Setup auto-deletion when game ends
-  useEffect(() => {
-    if (room?.game_status === 'finished' && room?.id) {
-      // Cancel any existing game end timer
-      if (autoDeletionCleanupRef.current.cancelGameEnd) {
-        autoDeletionCleanupRef.current.cancelGameEnd();
-      }
-      
-      // Setup new auto-deletion timer (5 minute grace period)
-      autoDeletionCleanupRef.current.cancelGameEnd = setupGameEndDeletion('GameRoom', room.id, 5 * 60 * 1000);
-      
-      return () => {
-        if (autoDeletionCleanupRef.current.cancelGameEnd) {
-          autoDeletionCleanupRef.current.cancelGameEnd();
-        }
-      };
-    }
-  }, [room?.game_status, room?.id]);
-
-  // Setup auto-deletion for empty rooms and age-based deletion
-  useEffect(() => {
-    if (room?.id) {
-      // Cancel existing auto-deletions
-      if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
-        autoDeletionCleanupRef.current.cancelEmptyRoom();
-      }
-      if (autoDeletionCleanupRef.current.cancelAge) {
-        autoDeletionCleanupRef.current.cancelAge();
-      }
-      
-      // Setup all auto-deletions
-      const cleanup = setupAllAutoDeletions('GameRoom', room.id, {
-        createdAt: room.created_at
-      });
-      autoDeletionCleanupRef.current = cleanup;
-      
-      return () => {
-        if (cleanup.cancelEmptyRoom) cleanup.cancelEmptyRoom();
-        if (cleanup.cancelAge) cleanup.cancelAge();
-      };
-    }
-  }, [room?.id, room?.created_at]);
 
   const loadWordCardsFromDB = async () => {
     try {
@@ -798,12 +755,6 @@ export default function AliasGameScreen({ navigation, route }) {
     if (!room || !room.id) return;
     const isHost = room.host_name === playerName;
     if (!isHost) return;
-
-    // Cancel game end auto-deletion since we're resetting
-    if (autoDeletionCleanupRef.current.cancelGameEnd) {
-      autoDeletionCleanupRef.current.cancelGameEnd();
-      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
-    }
 
     try {
       const roomRef = doc(db, 'GameRoom', room.id);

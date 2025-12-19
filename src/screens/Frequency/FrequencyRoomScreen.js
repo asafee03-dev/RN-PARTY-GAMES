@@ -13,7 +13,6 @@ import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs }
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
-import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
 const PLAYER_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#10B981", "#3B82F6", "#EC4899", "#F97316", "#14B8A6"];
 const waveIcons = ["📻", "📡", "🎚️", "🎛️"];
@@ -34,7 +33,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const isProcessingReveal = useRef(false);
   const isSubmittingGuess = useRef(false);
   const unsubscribeRef = useRef(null);
-  const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
   const pendingTopicRef = useRef(null); // Track topic being set during turn advancement
 
   const loadRoom = async () => {
@@ -344,15 +342,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           unsubscribeRef.current();
           unsubscribeRef.current = null;
         }
-        if (autoDeletionCleanupRef.current.cancelGameEnd) {
-          autoDeletionCleanupRef.current.cancelGameEnd();
-        }
-        if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
-          autoDeletionCleanupRef.current.cancelEmptyRoom();
-        }
-        if (autoDeletionCleanupRef.current.cancelAge) {
-          autoDeletionCleanupRef.current.cancelAge();
-        }
         clearCurrentRoom();
         // Navigate to main menu
         const parent = navigation.getParent();
@@ -370,49 +359,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     });
   };
 
-  // Setup auto-deletion when game ends
-  useEffect(() => {
-    if (room?.game_status === 'finished' && room?.id) {
-      // Cancel any existing game end timer
-      if (autoDeletionCleanupRef.current.cancelGameEnd) {
-        autoDeletionCleanupRef.current.cancelGameEnd();
-      }
-      
-      // Setup new auto-deletion timer (5 minute grace period)
-      autoDeletionCleanupRef.current.cancelGameEnd = setupGameEndDeletion('FrequencyRoom', room.id, 5 * 60 * 1000);
-      
-      return () => {
-        if (autoDeletionCleanupRef.current.cancelGameEnd) {
-          autoDeletionCleanupRef.current.cancelGameEnd();
-        }
-      };
-    }
-  }, [room?.game_status, room?.id]);
-
-  // Setup auto-deletion for empty rooms and age-based deletion
-  useEffect(() => {
-    if (room?.id) {
-      // Cancel existing auto-deletions
-      if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
-        autoDeletionCleanupRef.current.cancelEmptyRoom();
-      }
-      if (autoDeletionCleanupRef.current.cancelAge) {
-        autoDeletionCleanupRef.current.cancelAge();
-      }
-      
-      // Setup all auto-deletions
-      const cleanup = setupAllAutoDeletions('FrequencyRoom', room.id, {
-        createdAt: room.created_at
-      });
-      autoDeletionCleanupRef.current.cancelEmptyRoom = cleanup.cancelEmptyRoom;
-      autoDeletionCleanupRef.current.cancelAge = cleanup.cancelAge;
-      
-      return () => {
-        if (cleanup.cancelEmptyRoom) cleanup.cancelEmptyRoom();
-        if (cleanup.cancelAge) cleanup.cancelAge();
-      };
-    }
-  }, [room?.id, room?.created_at]);
 
   const calculateSectors = () => {
     const twoPointWidth = 10;

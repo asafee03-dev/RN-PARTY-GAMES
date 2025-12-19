@@ -11,7 +11,6 @@ import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs }
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
-import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
 export default function SpyRoomScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -31,7 +30,6 @@ export default function SpyRoomScreen({ navigation, route }) {
 
   const timerInterval = useRef(null);
   const unsubscribeRef = useRef(null);
-  const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
 
   // Load player name on mount (like Alias does)
   useEffect(() => {
@@ -345,15 +343,6 @@ export default function SpyRoomScreen({ navigation, route }) {
           unsubscribeRef.current();
           unsubscribeRef.current = null;
         }
-        if (autoDeletionCleanupRef.current.cancelGameEnd) {
-          autoDeletionCleanupRef.current.cancelGameEnd();
-        }
-        if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
-          autoDeletionCleanupRef.current.cancelEmptyRoom();
-        }
-        if (autoDeletionCleanupRef.current.cancelAge) {
-          autoDeletionCleanupRef.current.cancelAge();
-        }
         clearCurrentRoom();
         // Navigate to main menu
         const parent = navigation.getParent();
@@ -371,49 +360,6 @@ export default function SpyRoomScreen({ navigation, route }) {
     });
   };
 
-  // Setup auto-deletion when game ends
-  useEffect(() => {
-    if (room?.game_status === 'finished' && room?.id) {
-      // Cancel any existing game end timer
-      if (autoDeletionCleanupRef.current.cancelGameEnd) {
-        autoDeletionCleanupRef.current.cancelGameEnd();
-      }
-      
-      // Setup new auto-deletion timer (5 minute grace period)
-      autoDeletionCleanupRef.current.cancelGameEnd = setupGameEndDeletion('SpyRoom', room.id, 5 * 60 * 1000);
-      
-      return () => {
-        if (autoDeletionCleanupRef.current.cancelGameEnd) {
-          autoDeletionCleanupRef.current.cancelGameEnd();
-        }
-      };
-    }
-  }, [room?.game_status, room?.id]);
-
-  // Setup auto-deletion for empty rooms and age-based deletion
-  useEffect(() => {
-    if (room?.id) {
-      // Cancel existing auto-deletions
-      if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
-        autoDeletionCleanupRef.current.cancelEmptyRoom();
-      }
-      if (autoDeletionCleanupRef.current.cancelAge) {
-        autoDeletionCleanupRef.current.cancelAge();
-      }
-      
-      // Setup all auto-deletions
-      const cleanup = setupAllAutoDeletions('SpyRoom', room.id, {
-        createdAt: room.created_at
-      });
-      autoDeletionCleanupRef.current.cancelEmptyRoom = cleanup.cancelEmptyRoom;
-      autoDeletionCleanupRef.current.cancelAge = cleanup.cancelAge;
-      
-      return () => {
-        if (cleanup.cancelEmptyRoom) cleanup.cancelEmptyRoom();
-        if (cleanup.cancelAge) cleanup.cancelAge();
-      };
-    }
-  }, [room?.id, room?.created_at]);
 
   // Watch for all_votes_submitted and trigger endGame
   useEffect(() => {
@@ -739,10 +685,6 @@ export default function SpyRoomScreen({ navigation, route }) {
     if (!room || !room.id || !room.players || !Array.isArray(room.players) || !isHost) return;
     
     // Cancel game end auto-deletion since we're resetting
-    if (autoDeletionCleanupRef.current.cancelGameEnd) {
-      autoDeletionCleanupRef.current.cancelGameEnd();
-      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
-    }
     
     // Cancel timer
     if (timerInterval.current) {

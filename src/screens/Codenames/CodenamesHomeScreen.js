@@ -172,7 +172,8 @@ export default function CodenamesHomeScreen({ navigation, route }) {
         key_map: [],
         guesses_remaining: 0,
         turn_phase: 'clue',
-        created_at: Timestamp.now() // Store as Firestore Timestamp for age calculation
+        created_at: Date.now(), // Store as timestamp for age calculation
+        expires_at: Timestamp.fromMillis(Date.now() + 2 * 60 * 60 * 1000) // 2 hours from creation
       };
       
       console.log('🔵 [CODENAMES] About to call setDoc() - execution checkpoint 1');

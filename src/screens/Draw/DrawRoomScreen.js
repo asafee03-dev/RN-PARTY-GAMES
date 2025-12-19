@@ -12,7 +12,6 @@ import RulesModal from '../../components/shared/RulesModal';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
-import { handlePlayerExit } from '../../utils/roomManagement';
 import storage from '../../utils/storage';
 
 const WINNING_SCORE = 12;
@@ -1150,27 +1149,22 @@ export default function DrawRoomScreen({ navigation, route }) {
     // Note: We don't update Firestore show_round_summary here because other players might still be viewing it
     // Instead, we rely on the component unmounting and the modal visibility being tied to room state
     
-    // Handle player exit - marks player as inactive and sets deletion signal if last player
+    // Mark player as inactive instead of removing
     if (room && room.id && currentPlayerName) {
       try {
-        await handlePlayerExit('DrawRoom', room.id, currentPlayerName, room);
-        console.log('✅ [DRAW] Exit handler completed for player:', currentPlayerName);
+        const updatedPlayers = room.players.map(p => {
+          if (p && p.name === currentPlayerName) {
+            return { ...p, active: false };
+          }
+          return p;
+        });
+        const roomRef = doc(db, 'DrawRoom', room.id);
+        await updateDoc(roomRef, {
+          players: updatedPlayers
+        });
+        console.log('🔄 Marked player as inactive on goBack:', currentPlayerName);
       } catch (error) {
-        console.error('❌ [DRAW] Error in exit handler:', error);
-        // Fallback: try to mark as inactive manually
-        try {
-          const updatedPlayers = room.players.map(p => {
-            if (p && p.name === currentPlayerName) {
-              return { ...p, active: false };
-            }
-            return p;
-          });
-          const roomRef = doc(db, 'DrawRoom', room.id);
-          await updateDoc(roomRef, { players: updatedPlayers });
-          console.log('🔄 [DRAW] Fallback: Marked player as inactive');
-        } catch (fallbackError) {
-          console.error('❌ [DRAW] Fallback also failed:', fallbackError);
-        }
+        console.error('Error marking player as inactive:', error);
       }
     }
     

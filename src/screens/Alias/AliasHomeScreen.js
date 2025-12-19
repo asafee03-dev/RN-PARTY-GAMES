@@ -113,7 +113,8 @@ export default function AliasHomeScreen({ navigation, route }) {
         round_active: false,
         current_round_score: 0,
         golden_rounds_enabled: false,
-        created_at: Timestamp.now() // Store as Firestore Timestamp for age calculation
+        created_at: Date.now(), // Store as timestamp for age calculation
+        expires_at: Timestamp.fromMillis(Date.now() + 2 * 60 * 60 * 1000) // 2 hours from creation
       };
 
       console.log('🔵 Creating room with code:', newRoomCode);

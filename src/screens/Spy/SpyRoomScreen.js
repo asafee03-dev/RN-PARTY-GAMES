@@ -11,7 +11,7 @@ import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs }
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
-import { setupGameEndDeletion, setupAllAutoDeletions, handlePlayerExit } from '../../utils/roomManagement';
+import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
 export default function SpyRoomScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -784,16 +784,6 @@ export default function SpyRoomScreen({ navigation, route }) {
   };
 
   const goBack = async () => {
-    // Handle player exit - marks player as inactive and sets deletion signal if last player
-    if (room && room.id && currentPlayerName) {
-      try {
-        await handlePlayerExit('SpyRoom', room.id, currentPlayerName, room);
-        console.log('✅ [SPY] Exit handler completed for player:', currentPlayerName);
-      } catch (error) {
-        console.error('❌ [SPY] Error in exit handler:', error);
-      }
-    }
-    
     // Cleanup all listeners and timers
     if (timerInterval.current) {
       clearInterval(timerInterval.current);

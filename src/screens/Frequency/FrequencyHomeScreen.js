@@ -162,7 +162,8 @@ export default function FrequencyHomeScreen({ navigation, route }) {
         game_status: 'lobby',
         current_turn_index: 0,
         needle_positions: {},
-        created_at: Timestamp.now() // Store as Firestore Timestamp for age calculation
+        created_at: Date.now(), // Store as timestamp for age calculation
+        expires_at: Timestamp.fromMillis(Date.now() + 2 * 60 * 60 * 1000) // 2 hours from creation
       };
 
       console.log('🔵 [FREQUENCY] Ensuring Firestore is ready and online...');

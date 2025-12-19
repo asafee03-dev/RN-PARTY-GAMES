@@ -14,7 +14,7 @@ import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
-import { setupGameEndDeletion, setupAllAutoDeletions, handlePlayerExit } from '../../utils/roomManagement';
+import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
 export default function CodenamesGameScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -659,16 +659,6 @@ export default function CodenamesGameScreen({ navigation, route }) {
   };
 
   const goBack = async () => {
-    // Handle player exit - marks player as inactive and sets deletion signal if last player
-    if (room && room.id && currentPlayerName) {
-      try {
-        await handlePlayerExit('CodenamesRoom', room.id, currentPlayerName, room);
-        console.log('✅ [CODENAMES] Exit handler completed for player:', currentPlayerName);
-      } catch (error) {
-        console.error('❌ [CODENAMES] Error in exit handler:', error);
-      }
-    }
-    
     // Cleanup listeners
     if (unsubscribeRef.current) {
       unsubscribeRef.current();

@@ -13,7 +13,7 @@ import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs }
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
-import { setupGameEndDeletion, setupAllAutoDeletions, handlePlayerExit } from '../../utils/roomManagement';
+import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
 const PLAYER_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#10B981", "#3B82F6", "#EC4899", "#F97316", "#14B8A6"];
 const waveIcons = ["📻", "📡", "🎚️", "🎛️"];
@@ -911,16 +911,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   };
 
   const goBack = async () => {
-    // Handle player exit - marks player as inactive and sets deletion signal if last player
-    if (room && room.id && currentPlayerName) {
-      try {
-        await handlePlayerExit('FrequencyRoom', room.id, currentPlayerName, room);
-        console.log('✅ [FREQUENCY] Exit handler completed for player:', currentPlayerName);
-      } catch (error) {
-        console.error('❌ [FREQUENCY] Error in exit handler:', error);
-      }
-    }
-    
     // Cleanup all listeners and timers
     if (needleUpdateTimeout.current) {
       clearTimeout(needleUpdateTimeout.current);

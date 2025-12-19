@@ -86,7 +86,8 @@ export default function SpyHomeScreen({ navigation, route }) {
         players: [{ name: playerName }],
         game_status: 'lobby',
         number_of_spies: 1, // Default to 1 spy
-        created_at: Timestamp.now() // Store as Firestore Timestamp for age calculation
+        created_at: Date.now(), // Store as timestamp for age calculation
+        expires_at: Timestamp.fromMillis(Date.now() + 2 * 60 * 60 * 1000) // 2 hours from creation
       };
 
       console.log('🔵 [SPY] Ensuring Firestore is ready...');

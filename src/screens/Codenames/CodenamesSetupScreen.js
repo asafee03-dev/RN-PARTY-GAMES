@@ -10,6 +10,7 @@ import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
+import { handlePlayerExit } from '../../utils/roomManagement';
 
 export default function CodenamesSetupScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -458,7 +459,17 @@ export default function CodenamesSetupScreen({ navigation, route }) {
     await copyRoomLink(roomCode, 'codenames');
   };
 
-  const goBack = () => {
+  const goBack = async () => {
+    // Handle player exit - marks player as inactive and sets deletion signal if last player
+    if (room && room.id && currentPlayerName) {
+      try {
+        await handlePlayerExit('CodenamesRoom', room.id, currentPlayerName, room);
+        console.log('✅ [CODENAMES] Exit handler completed for player:', currentPlayerName);
+      } catch (error) {
+        console.error('❌ [CODENAMES] Error in exit handler:', error);
+      }
+    }
+    
     const parent = navigation.getParent();
     if (parent) {
       parent.reset({

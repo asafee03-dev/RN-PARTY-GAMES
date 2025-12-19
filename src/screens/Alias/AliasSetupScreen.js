@@ -9,6 +9,7 @@ import RulesModal from '../../components/shared/RulesModal';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import { db } from '../../firebase';
 import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
+import { handlePlayerExit } from '../../utils/roomManagement';
 import storage from '../../utils/storage';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
@@ -554,7 +555,17 @@ export default function AliasSetupScreen({ navigation, route }) {
         <UnifiedTopBar
           roomCode={roomCode}
           variant="alias"
-          onExit={() => {
+          onExit={async () => {
+            // Handle player exit - marks player as inactive and sets deletion signal if last player
+            if (room && room.id && playerName) {
+              try {
+                await handlePlayerExit('GameRoom', room.id, playerName, room);
+                console.log('✅ [ALIAS] Exit handler completed for player:', playerName);
+              } catch (error) {
+                console.error('❌ [ALIAS] Error in exit handler:', error);
+              }
+            }
+            
             const parent = navigation.getParent();
             if (parent) {
               parent.reset({

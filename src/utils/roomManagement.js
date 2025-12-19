@@ -385,3 +385,152 @@ export function setupGameEndDeletion(collectionName, roomId, gracePeriodMs = 5 *
   return setupGameEndAutoDeletion(collectionName, roomId, gracePeriodMs);
 }
 
+/**
+ * Handle player leaving room - marks player as inactive and sets deletion signal if needed
+ * This should be called when a player explicitly leaves a room (goBack, navigation, etc.)
+ * @param {string} collectionName - The Firestore collection name
+ * @param {string} roomId - The room document ID
+ * @param {string} playerName - Name of the player leaving
+ * @param {Object} roomData - Current room data (optional, will fetch if not provided)
+ * @returns {Promise<boolean>} - True if deletion signal was set, false otherwise
+ */
+export async function handlePlayerExit(collectionName, roomId, playerName, roomData = null) {
+  if (!collectionName || !roomId || !playerName) {
+    console.warn('⚠️ [EXIT] Cannot handle exit: missing parameters', { collectionName, roomId, playerName });
+    return false;
+  }
+
+  try {
+    const roomRef = doc(db, collectionName, roomId);
+    
+    // Fetch room data if not provided
+    if (!roomData) {
+      const snapshot = await getDoc(roomRef);
+      if (!snapshot.exists()) {
+        console.log(`ℹ️ [EXIT] Room ${roomId} already deleted, nothing to do`);
+        return false;
+      }
+      roomData = snapshot.data();
+    }
+
+    console.log(`🚪 [EXIT] Player "${playerName}" leaving room ${roomId} in ${collectionName}`);
+
+    // Mark player as inactive/remove based on game type
+    let updatedData = {};
+    let willBeLastPlayer = false;
+
+    // For games with players array (Spy, Draw, Frequency)
+    if (roomData.players && Array.isArray(roomData.players)) {
+      const updatedPlayers = roomData.players.map(p => {
+        if (p && p.name === playerName) {
+          return { ...p, active: false };
+        }
+        return p;
+      });
+      updatedData.players = updatedPlayers;
+      
+      // Count remaining active players (excluding the one leaving)
+      const remainingActive = updatedPlayers.filter(p => 
+        p && p.name && p.name !== playerName && p.active !== false
+      ).length;
+      willBeLastPlayer = remainingActive === 0;
+    }
+    // For games with teams array (Alias)
+    else if (roomData.teams && Array.isArray(roomData.teams)) {
+      const updatedTeams = roomData.teams.map(team => {
+        if (!team.players || !Array.isArray(team.players)) {
+          return team;
+        }
+        // Remove player from team
+        const filteredPlayers = team.players.filter(p => {
+          if (typeof p === 'string') return p !== playerName;
+          if (typeof p === 'object' && p.name) return p.name !== playerName;
+          return true;
+        });
+        return { ...team, players: filteredPlayers };
+      });
+      updatedData.teams = updatedTeams;
+      
+      // Count remaining players (excluding the one leaving and host if they're the same)
+      let remainingCount = 0;
+      updatedTeams.forEach(team => {
+        if (team.players && Array.isArray(team.players)) {
+          remainingCount += team.players.filter(p => {
+            if (typeof p === 'string') return p.trim().length > 0 && p !== playerName;
+            if (typeof p === 'object' && p.name) return p.name !== playerName && p.active !== false;
+            return false;
+          }).length;
+        }
+      });
+      // Count host if not the leaving player and not in any team
+      if (roomData.host_name && roomData.host_name !== playerName) {
+        const hostInTeam = updatedTeams.some(team => 
+          team.players && Array.isArray(team.players) && 
+          team.players.some(p => {
+            if (typeof p === 'string') return p === roomData.host_name;
+            if (typeof p === 'object' && p.name) return p.name === roomData.host_name;
+            return false;
+          })
+        );
+        if (!hostInTeam) {
+          remainingCount++;
+        }
+      }
+      willBeLastPlayer = remainingCount === 0;
+    }
+    // For Codenames (red_team/blue_team structure)
+    else if (roomData.red_team || roomData.blue_team) {
+      const updatedRedTeam = { ...roomData.red_team };
+      const updatedBlueTeam = { ...roomData.blue_team };
+      
+      // Remove from red team
+      if (updatedRedTeam.spymaster === playerName) {
+        updatedRedTeam.spymaster = '';
+      }
+      if (updatedRedTeam.guessers && Array.isArray(updatedRedTeam.guessers)) {
+        updatedRedTeam.guessers = updatedRedTeam.guessers.filter(g => g !== playerName);
+      }
+      
+      // Remove from blue team
+      if (updatedBlueTeam.spymaster === playerName) {
+        updatedBlueTeam.spymaster = '';
+      }
+      if (updatedBlueTeam.guessers && Array.isArray(updatedBlueTeam.guessers)) {
+        updatedBlueTeam.guessers = updatedBlueTeam.guessers.filter(g => g !== playerName);
+      }
+      
+      updatedData.red_team = updatedRedTeam;
+      updatedData.blue_team = updatedBlueTeam;
+      
+      // Count remaining players
+      const redGuessers = (updatedRedTeam.guessers || []).filter(g => g && g.trim().length > 0).length;
+      const blueGuessers = (updatedBlueTeam.guessers || []).filter(g => g && g.trim().length > 0).length;
+      const redSpymaster = (updatedRedTeam.spymaster && updatedRedTeam.spymaster.trim().length > 0) ? 1 : 0;
+      const blueSpymaster = (updatedBlueTeam.spymaster && updatedBlueTeam.spymaster.trim().length > 0) ? 1 : 0;
+      willBeLastPlayer = (redGuessers + blueGuessers + redSpymaster + blueSpymaster) === 0;
+    }
+
+    // If this will be the last player, set deletion signal
+    if (willBeLastPlayer) {
+      updatedData.marked_for_deletion = true;
+      console.log(`✅ [EXIT] Setting deletion signal for room ${roomId} - last player leaving`);
+    } else {
+      console.log(`ℹ️ [EXIT] Other players remain in room ${roomId}, not setting deletion signal`);
+    }
+
+    // Update room with player removal and deletion signal if needed
+    await updateDoc(roomRef, updatedData);
+    
+    if (willBeLastPlayer) {
+      console.log(`✅ [EXIT] Successfully set marked_for_deletion: true for room ${roomId}`);
+      return true;
+    } else {
+      console.log(`✅ [EXIT] Successfully marked player "${playerName}" as inactive in room ${roomId}`);
+      return false;
+    }
+  } catch (error) {
+    console.error(`❌ [EXIT] Error handling player exit for room ${roomId}:`, error);
+    return false;
+  }
+}
+

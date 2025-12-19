@@ -2,6 +2,35 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    // Helper function to check if a room has any players
+    // Note: This is a simplified check - counts all players regardless of active status
+    // The client-side logic properly filters by active players before deletion
+    // Firestore Rules syntax: must use expressions, not if statements
+    function hasPlayers(room) {
+      // Check for players array (Spy, Draw, Frequency games)
+      // Even if players have active: false, we consider them as "players" in rules
+      // Client logic will only delete when active players count is 0
+      return (room.players != null && room.players is list && room.players.size() > 0) ||
+             // Check for teams structure (Alias games) - simplified: check if teams array exists and has elements
+             // Note: We can't loop, so we check if teams array exists and is non-empty
+             // This is a best-effort check; client-side logic handles active player filtering
+             (room.teams != null && room.teams is list && room.teams.size() > 0) ||
+             // Check for Codenames team structures
+             (room.red_team != null && 
+              ((room.red_team.spymaster != null && room.red_team.spymaster != '') ||
+               (room.red_team.guessers != null && room.red_team.guessers.size() > 0))) ||
+             (room.blue_team != null && 
+              ((room.blue_team.spymaster != null && room.blue_team.spymaster != '') ||
+               (room.blue_team.guessers != null && room.blue_team.guessers.size() > 0)));
+    }
+    
+    // Helper function to check if room is in a deletable state
+    function isDeletable(room) {
+      // Can delete if game is finished OR if no players remain
+      // This allows cleanup when all players have left or game ends
+      return room.game_status == 'finished' || !hasPlayers(room);
+    }
+    
     // Reference data collections - read-only for all
     match /WordCard/{document=**} {
       allow read: if true;
@@ -28,22 +57,19 @@ service cloud.firestore {
       // Allow reads - needed to join and play
       allow read: if true;
       
-      // Allow creates - validate basic structure and expires_at field
+      // Allow creates - validate basic structure
       allow create: if request.resource.data.room_code is string &&
                       request.resource.data.host_name is string &&
-                      request.resource.data.game_status is string &&
-                      request.resource.data.expires_at is timestamp;
+                      request.resource.data.game_status is string;
       
       // Allow updates - needed for gameplay, validate structure
-      // Note: expires_at should not be modified after creation (TTL is set at creation)
       allow update: if resource != null && // Room must exist
                       request.resource.data.room_code is string &&
                       request.resource.data.host_name is string &&
-                      request.resource.data.game_status is string &&
-                      request.resource.data.expires_at == resource.data.expires_at; // expires_at cannot be changed
+                      request.resource.data.game_status is string;
       
-      // Allow deletes - simple check, TTL handles automatic deletion via expires_at
-      allow delete: if resource != null;
+      // Allow deletes only in safe conditions (prevents deleting active games)
+      allow delete: if resource != null && isDeletable(resource.data);
     }
     
     // CodenamesRoom
@@ -52,17 +78,14 @@ service cloud.firestore {
       
       allow create: if request.resource.data.room_code is string &&
                       request.resource.data.host_name is string &&
-                      request.resource.data.game_status is string &&
-                      request.resource.data.expires_at is timestamp;
+                      request.resource.data.game_status is string;
       
       allow update: if resource != null &&
                       request.resource.data.room_code is string &&
                       request.resource.data.host_name is string &&
-                      request.resource.data.game_status is string &&
-                      request.resource.data.expires_at == resource.data.expires_at; // expires_at cannot be changed
+                      request.resource.data.game_status is string;
       
-      // Allow deletes - simple check, TTL handles automatic deletion via expires_at
-      allow delete: if resource != null;
+      allow delete: if resource != null && isDeletable(resource.data);
     }
     
     // DrawRoom
@@ -71,17 +94,14 @@ service cloud.firestore {
       
       allow create: if request.resource.data.room_code is string &&
                       request.resource.data.host_name is string &&
-                      request.resource.data.game_status is string &&
-                      request.resource.data.expires_at is timestamp;
+                      request.resource.data.game_status is string;
       
       allow update: if resource != null &&
                       request.resource.data.room_code is string &&
                       request.resource.data.host_name is string &&
-                      request.resource.data.game_status is string &&
-                      request.resource.data.expires_at == resource.data.expires_at; // expires_at cannot be changed
+                      request.resource.data.game_status is string;
       
-      // Allow deletes - simple check, TTL handles automatic deletion via expires_at
-      allow delete: if resource != null;
+      allow delete: if resource != null && isDeletable(resource.data);
     }
     
     // SpyRoom
@@ -90,17 +110,14 @@ service cloud.firestore {
       
       allow create: if request.resource.data.room_code is string &&
                       request.resource.data.host_name is string &&
-                      request.resource.data.game_status is string &&
-                      request.resource.data.expires_at is timestamp;
+                      request.resource.data.game_status is string;
       
       allow update: if resource != null &&
                       request.resource.data.room_code is string &&
                       request.resource.data.host_name is string &&
-                      request.resource.data.game_status is string &&
-                      request.resource.data.expires_at == resource.data.expires_at; // expires_at cannot be changed
+                      request.resource.data.game_status is string;
       
-      // Allow deletes - simple check, TTL handles automatic deletion via expires_at
-      allow delete: if resource != null;
+      allow delete: if resource != null && isDeletable(resource.data);
     }
     
     // FrequencyRoom
@@ -109,17 +126,14 @@ service cloud.firestore {
       
       allow create: if request.resource.data.room_code is string &&
                       request.resource.data.host_name is string &&
-                      request.resource.data.game_status is string &&
-                      request.resource.data.expires_at is timestamp;
+                      request.resource.data.game_status is string;
       
       allow update: if resource != null &&
                       request.resource.data.room_code is string &&
                       request.resource.data.host_name is string &&
-                      request.resource.data.game_status is string &&
-                      request.resource.data.expires_at == resource.data.expires_at; // expires_at cannot be changed
+                      request.resource.data.game_status is string;
       
-      // Allow deletes - simple check, TTL handles automatic deletion via expires_at
-      allow delete: if resource != null;
+      allow delete: if resource != null && isDeletable(resource.data);
     }
     
     // Default deny for any other collections
@@ -128,3 +142,4 @@ service cloud.firestore {
     }
   }
 }
+

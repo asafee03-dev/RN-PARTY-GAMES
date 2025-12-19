@@ -14,6 +14,7 @@ import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
+import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 
 export default function CodenamesGameScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -27,6 +28,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
   const [forceCloseModal, setForceCloseModal] = useState(false);
   const [drinkingMode, setDrinkingMode] = useState(false);
   const unsubscribeRef = useRef(null);
+  const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
 
   useEffect(() => {
     const initializeRoom = async () => {
@@ -199,6 +201,49 @@ export default function CodenamesGameScreen({ navigation, route }) {
     }
   }, [room?.game_status]);
 
+  // Setup auto-deletion when game ends
+  useEffect(() => {
+    if (room?.game_status === 'finished' && room?.id) {
+      // Cancel any existing game end timer
+      if (autoDeletionCleanupRef.current.cancelGameEnd) {
+        autoDeletionCleanupRef.current.cancelGameEnd();
+      }
+      
+      // Setup new auto-deletion timer (5 minute grace period)
+      autoDeletionCleanupRef.current.cancelGameEnd = setupGameEndDeletion('CodenamesRoom', room.id, 5 * 60 * 1000);
+      
+      return () => {
+        if (autoDeletionCleanupRef.current.cancelGameEnd) {
+          autoDeletionCleanupRef.current.cancelGameEnd();
+        }
+      };
+    }
+  }, [room?.game_status, room?.id]);
+
+  // Setup auto-deletion for empty rooms and age-based deletion
+  useEffect(() => {
+    if (room?.id) {
+      // Cancel existing auto-deletions
+      if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
+        autoDeletionCleanupRef.current.cancelEmptyRoom();
+      }
+      if (autoDeletionCleanupRef.current.cancelAge) {
+        autoDeletionCleanupRef.current.cancelAge();
+      }
+      
+      // Setup all auto-deletions
+      const cleanup = setupAllAutoDeletions('CodenamesRoom', room.id, {
+        createdAt: room.created_at
+      });
+      autoDeletionCleanupRef.current.cancelEmptyRoom = cleanup.cancelEmptyRoom;
+      autoDeletionCleanupRef.current.cancelAge = cleanup.cancelAge;
+      
+      return () => {
+        if (cleanup.cancelEmptyRoom) cleanup.cancelEmptyRoom();
+        if (cleanup.cancelAge) cleanup.cancelAge();
+      };
+    }
+  }, [room?.id, room?.created_at]);
 
   const getPlayerRole = () => {
     if (!room || !currentPlayerName) return null;
@@ -641,6 +686,10 @@ export default function CodenamesGameScreen({ navigation, route }) {
     if (!isHost) return;
     
     // Cancel game end auto-deletion since we're resetting
+    if (autoDeletionCleanupRef.current.cancelGameEnd) {
+      autoDeletionCleanupRef.current.cancelGameEnd();
+      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
+    }
     
     // Force close modal immediately - set before any async operations
     setForceCloseModal(true);

@@ -1,14 +1,14 @@
-import { collection, doc, getDoc, getDocs, query, setDoc, where, Timestamp } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import Svg, { Path, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
+import Svg, { Defs, Path, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
-import storage from '../../utils/storage';
-import { generateUniqueRoomCode } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
+import { generateUniqueRoomCode } from '../../utils/roomManagement';
+import storage from '../../utils/storage';
 
 const PLAYER_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#10B981", "#3B82F6", "#EC4899", "#F97316", "#14B8A6"];
 
@@ -162,8 +162,7 @@ export default function FrequencyHomeScreen({ navigation, route }) {
         game_status: 'lobby',
         current_turn_index: 0,
         needle_positions: {},
-        created_at: Date.now(), // Store as timestamp for age calculation
-        expires_at: Timestamp.fromMillis(Date.now() + 2 * 60 * 60 * 1000) // 2 hours from creation
+        created_at: Date.now() // Store as timestamp for age calculation
       };
 
       console.log('🔵 [FREQUENCY] Ensuring Firestore is ready and online...');

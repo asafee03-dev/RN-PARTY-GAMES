@@ -47,6 +47,7 @@ export default function DrawRoomScreen({ navigation, route }) {
   const unsubscribeRef = useRef(null);
   const roomRef = useRef(room);
   const currentPlayerNameRef = useRef(currentPlayerName);
+  const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
   const isContinuingRoundRef = useRef(false);
 
   useEffect(() => {
@@ -65,10 +66,15 @@ export default function DrawRoomScreen({ navigation, route }) {
         if (savedName) {
           setCurrentPlayerName(savedName);
         }
-        // Load drinking mode from local storage (room data will be loaded later)
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
+        // Load drinking mode from room data (preferred) or local storage (fallback)
+        if (roomData.drinking_mode !== undefined) {
+          setDrinkingMode(roomData.drinking_mode);
+          await storage.setItem('drinkingMode', roomData.drinking_mode.toString());
+        } else {
+          const savedMode = await storage.getItem('drinkingMode');
+          if (savedMode) {
+            setDrinkingMode(savedMode === 'true');
+          }
         }
       } catch (e) {
         console.warn('Could not load player name:', e);
@@ -297,6 +303,15 @@ export default function DrawRoomScreen({ navigation, route }) {
         if (unsubscribeRef.current) {
           unsubscribeRef.current();
           unsubscribeRef.current = null;
+        }
+        if (autoDeletionCleanupRef.current.cancelGameEnd) {
+          autoDeletionCleanupRef.current.cancelGameEnd();
+        }
+        if (autoDeletionCleanupRef.current.cancelEmptyRoom) {
+          autoDeletionCleanupRef.current.cancelEmptyRoom();
+        }
+        if (autoDeletionCleanupRef.current.cancelAge) {
+          autoDeletionCleanupRef.current.cancelAge();
         }
         clearCurrentRoom();
         // Navigate to main menu
@@ -1082,6 +1097,12 @@ export default function DrawRoomScreen({ navigation, route }) {
 
   const resetGame = async () => {
     if (!room || !room.id || !isHost) return;
+
+    // Cancel game end auto-deletion since we're resetting
+    if (autoDeletionCleanupRef.current.cancelGameEnd) {
+      autoDeletionCleanupRef.current.cancelGameEnd();
+      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
+    }
 
     // Force close modal immediately
     setForceCloseModal(true);

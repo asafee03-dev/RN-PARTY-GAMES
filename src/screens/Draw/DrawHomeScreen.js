@@ -4,7 +4,7 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, setDoc, query, collection, where, getDocs, onSnapshot, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, query, collection, where, getDocs, onSnapshot } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
@@ -97,8 +97,7 @@ export default function DrawHomeScreen({ navigation, route }) {
         players: [{ name: playerName, score: 0, active: true }],
         game_status: 'lobby',
         current_turn_index: 0,
-        created_at: Date.now(), // Store as timestamp for age calculation
-        expires_at: Timestamp.fromMillis(Date.now() + 2 * 60 * 60 * 1000) // 2 hours from creation
+        created_at: Date.now() // Store as timestamp for age calculation
       };
       
       console.log('🔵 [DRAW] Ensuring Firestore is ready...');

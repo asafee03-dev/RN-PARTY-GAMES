@@ -1,4 +1,4 @@
-import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../firebase';
 
 /**
@@ -250,6 +250,14 @@ export function setupEmptyRoomAutoDeletion(collectionName, roomId) {
             
             if (verifyActiveCount === 0) {
               console.log(`🗑️ Auto-deleting room ${roomId} - all active players have left`);
+              // Set deletion signal to allow rules-based deletion even with residual player data
+              try {
+                await updateDoc(roomRef, { marked_for_deletion: true });
+                console.log(`✅ Set deletion signal for room ${roomId}`);
+              } catch (signalError) {
+                console.warn(`⚠️ Could not set deletion signal for room ${roomId}:`, signalError);
+                // Continue with deletion attempt even if signal fails
+              }
               await deleteRoom(collectionName, roomId);
               unsubscribe(); // Stop listening after deletion
             } else {

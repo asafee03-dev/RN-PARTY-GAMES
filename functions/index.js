@@ -5,17 +5,50 @@ admin.initializeApp();
 const db = admin.firestore();
 
 /**
+ * Helper function to convert created_at to milliseconds
+ * Handles both Firestore Timestamp and number (for backward compatibility)
+ */
+function getCreatedAtMillis(createdAt) {
+  if (!createdAt) {
+    return null;
+  }
+  
+  // If it's a Firestore Timestamp
+  if (createdAt.toMillis && typeof createdAt.toMillis === 'function') {
+    return createdAt.toMillis();
+  }
+  
+  // If it's already a number (milliseconds) - backward compatibility
+  if (typeof createdAt === 'number') {
+    return createdAt;
+  }
+  
+  // If it's a Firestore Timestamp object (seconds/nanoseconds)
+  if (createdAt.seconds !== undefined) {
+    return createdAt.seconds * 1000 + (createdAt.nanoseconds || 0) / 1000000;
+  }
+  
+  return null;
+}
+
+/**
  * Scheduled function to automatically delete rooms older than 1.5 hours
  * Runs every 30 minutes to check for and delete old rooms
  * This is a true backup cleanup that works even when no clients are connected
+ * 
+ * Note: Uses Admin SDK which bypasses Firestore Security Rules
  */
 exports.cleanupOldRooms = functions.pubsub
   .schedule('every 30 minutes')
   .timeZone('UTC')
   .onRun(async (context) => {
-    console.log('🧹 Starting scheduled room cleanup...');
+    const startTime = admin.firestore.Timestamp.now();
+    const startTimeMillis = startTime.toMillis();
+    const oneAndHalfHoursAgo = startTimeMillis - (1.5 * 60 * 60 * 1000); // 1.5 hours in milliseconds
     
-    const oneAndHalfHoursAgo = Date.now() - (1.5 * 60 * 60 * 1000); // 1.5 hours in milliseconds
+    console.log(`🧹 Starting scheduled room cleanup at ${startTime.toDate().toISOString()}...`);
+    console.log(`📅 Looking for rooms created before ${new Date(oneAndHalfHoursAgo).toISOString()}`);
+    
     const roomCollections = [
       'GameRoom',
       'CodenamesRoom',
@@ -26,17 +59,14 @@ exports.cleanupOldRooms = functions.pubsub
     
     let totalDeleted = 0;
     let totalChecked = 0;
+    let totalMissingCreatedAt = 0;
     
     for (const collectionName of roomCollections) {
       try {
         console.log(`📋 Checking ${collectionName} for old rooms...`);
         
-        // Query rooms with created_at older than 1.5 hours
-        // Note: created_at is stored as a number (Date.now()), so we can query it
-        // However, to be safe and handle edge cases, we'll fetch all rooms and filter
-        // For large collections, consider adding an index or using pagination
-        const roomsSnapshot = await db.collection(collectionName)
-          .get();
+        // Fetch all rooms (Admin SDK bypasses rules, so we can read everything)
+        const roomsSnapshot = await db.collection(collectionName).get();
         
         const deletions = [];
         
@@ -46,18 +76,44 @@ exports.cleanupOldRooms = functions.pubsub
           
           totalChecked++;
           
+          // Get created_at in milliseconds (handles both Timestamp and number)
+          const createdAtMillis = getCreatedAtMillis(roomData.created_at);
+          
           // Check if room should be deleted according to rules:
           // 1. Game is finished, OR
           // 2. Room is 1.5 hours old, OR
-          // 3. Has deletion signal
-          const shouldDelete = 
-            roomData.game_status === 'finished' ||
-            (roomData.created_at && (Date.now() - roomData.created_at) >= (1.5 * 60 * 60 * 1000)) ||
-            roomData.marked_for_deletion === true ||
-            roomData.should_delete === true;
+          // 3. Has deletion signal, OR
+          // 4. Missing created_at (treat as deletable for safety)
+          let shouldDelete = false;
+          let deleteReason = '';
+          
+          if (roomData.game_status === 'finished') {
+            shouldDelete = true;
+            deleteReason = 'game finished';
+          } else if (roomData.marked_for_deletion === true || roomData.should_delete === true) {
+            shouldDelete = true;
+            deleteReason = 'deletion signal';
+          } else if (createdAtMillis === null) {
+            // Missing created_at - treat as deletable for safety
+            shouldDelete = true;
+            deleteReason = 'missing created_at';
+            totalMissingCreatedAt++;
+          } else if (createdAtMillis <= oneAndHalfHoursAgo) {
+            // Room is 1.5 hours old
+            shouldDelete = true;
+            deleteReason = 'age >= 1.5 hours';
+          }
           
           if (shouldDelete) {
-            deletions.push({ ref: docSnapshot.ref, roomId, age: roomData.created_at ? Math.round((Date.now() - roomData.created_at) / 1000 / 60) : 'unknown' });
+            const ageMinutes = createdAtMillis 
+              ? Math.round((startTimeMillis - createdAtMillis) / 1000 / 60)
+              : 'unknown';
+            deletions.push({ 
+              ref: docSnapshot.ref, 
+              roomId, 
+              age: ageMinutes,
+              reason: deleteReason
+            });
           }
         });
         
@@ -67,13 +123,14 @@ exports.cleanupOldRooms = functions.pubsub
           const batch = db.batch();
           const batchDeletions = deletions.slice(i, i + maxBatchSize);
           
-          batchDeletions.forEach(({ ref, roomId, age }) => {
+          batchDeletions.forEach(({ ref, roomId, age, reason }) => {
             batch.delete(ref);
             totalDeleted++;
-            console.log(`🗑️ Marked ${collectionName}/${roomId} for deletion (age: ${age} minutes)`);
+            console.log(`🗑️ [${collectionName}] Deleting room ${roomId} (age: ${age} minutes, reason: ${reason})`);
           });
           
           await batch.commit();
+          console.log(`✅ Committed batch ${Math.floor(i / maxBatchSize) + 1} for ${collectionName} (${batchDeletions.length} rooms)`);
         }
         
         if (deletions.length > 0) {
@@ -84,71 +141,21 @@ exports.cleanupOldRooms = functions.pubsub
         
       } catch (error) {
         console.error(`❌ Error cleaning up ${collectionName}:`, error);
+        console.error(`   Error details:`, error.message, error.stack);
         // Continue with other collections even if one fails
       }
     }
     
-    console.log(`✅ Cleanup complete: Checked ${totalChecked} rooms, deleted ${totalDeleted} old rooms`);
+    const endTime = admin.firestore.Timestamp.now();
+    const duration = (endTime.toMillis() - startTimeMillis) / 1000;
+    
+    console.log(`✅ Cleanup complete:`);
+    console.log(`   - Checked: ${totalChecked} rooms`);
+    console.log(`   - Deleted: ${totalDeleted} rooms`);
+    console.log(`   - Missing created_at: ${totalMissingCreatedAt} rooms`);
+    console.log(`   - Duration: ${duration.toFixed(2)}s`);
+    
     return null;
   });
 
-/**
- * Alternative approach: Query all rooms and filter by age
- * This is less efficient but more reliable if the query above doesn't work
- * Uncomment and use if the scheduled function above has issues
- */
-/*
-exports.cleanupOldRoomsAlternative = functions.pubsub
-  .schedule('every 30 minutes')
-  .timeZone('UTC')
-  .onRun(async (context) => {
-    console.log('🧹 Starting scheduled room cleanup (alternative method)...');
-    
-    const oneAndHalfHoursAgo = Date.now() - (1.5 * 60 * 60 * 1000);
-    const roomCollections = [
-      'GameRoom',
-      'CodenamesRoom',
-      'DrawRoom',
-      'SpyRoom',
-      'FrequencyRoom'
-    ];
-    
-    let totalDeleted = 0;
-    
-    for (const collectionName of roomCollections) {
-      try {
-        const roomsSnapshot = await db.collection(collectionName).get();
-        const batch = db.batch();
-        let batchCount = 0;
-        
-        roomsSnapshot.forEach((docSnapshot) => {
-          const roomData = docSnapshot.data();
-          
-          if (roomData.created_at && roomData.created_at <= oneAndHalfHoursAgo) {
-            const shouldDelete = 
-              roomData.game_status === 'finished' ||
-              (Date.now() - roomData.created_at) >= (1.5 * 60 * 60 * 1000) ||
-              roomData.marked_for_deletion === true ||
-              roomData.should_delete === true;
-            
-            if (shouldDelete) {
-              batch.delete(docSnapshot.ref);
-              batchCount++;
-              totalDeleted++;
-            }
-          }
-        });
-        
-        if (batchCount > 0) {
-          await batch.commit();
-        }
-      } catch (error) {
-        console.error(`❌ Error cleaning up ${collectionName}:`, error);
-      }
-    }
-    
-    console.log(`✅ Cleanup complete: Deleted ${totalDeleted} old rooms`);
-    return null;
-  });
-*/
 

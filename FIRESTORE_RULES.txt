@@ -5,10 +5,19 @@ service cloud.firestore {
     // Helper function to check if room is old enough to be deleted (1.5 hours)
     function isRoomOldEnough(room) {
       // Check if created_at exists and room is at least 1.5 hours old
-      // created_at is stored as milliseconds (Date.now())
-      // request.time is a Firestore Timestamp, convert to milliseconds
-      return room.created_at != null && 
-             (request.time.toMillis() - room.created_at) >= 5400000; // 1.5 hours = 5400000 ms
+      // created_at can be Firestore Timestamp (with .seconds) or number (backward compatibility)
+      // request.time is a Firestore Timestamp with .toMillis() method
+      // If missing created_at, treat as old enough (deletable for safety)
+      
+      // Handle missing created_at - treat as deletable
+      return room.created_at == null ||
+             // Handle Firestore Timestamp (has .seconds property)
+             (room.created_at.seconds != null && 
+              (request.time.toMillis() - (room.created_at.seconds * 1000 + 
+               (room.created_at.nanoseconds != null ? room.created_at.nanoseconds / 1000000 : 0))) >= 5400000) ||
+             // Handle number (milliseconds) - backward compatibility
+             (room.created_at is int && (request.time.toMillis() - room.created_at) >= 5400000) ||
+             (room.created_at is float && (request.time.toMillis() - room.created_at) >= 5400000);
     }
     
     // Helper function to check if room has explicit deletion signal

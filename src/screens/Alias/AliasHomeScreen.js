@@ -4,7 +4,7 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, setDoc, collection } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, Timestamp } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
@@ -113,7 +113,7 @@ export default function AliasHomeScreen({ navigation, route }) {
         round_active: false,
         current_round_score: 0,
         golden_rounds_enabled: false,
-        created_at: Date.now() // Store as timestamp for age calculation
+        created_at: Timestamp.now() // Store as Firestore Timestamp for age calculation
       };
 
       console.log('🔵 Creating room with code:', newRoomCode);

@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, setDoc, where, Timestamp } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Path, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
@@ -162,7 +162,7 @@ export default function FrequencyHomeScreen({ navigation, route }) {
         game_status: 'lobby',
         current_turn_index: 0,
         needle_positions: {},
-        created_at: Date.now() // Store as timestamp for age calculation
+        created_at: Timestamp.now() // Store as Firestore Timestamp for age calculation
       };
 
       console.log('🔵 [FREQUENCY] Ensuring Firestore is ready and online...');

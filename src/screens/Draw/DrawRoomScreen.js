@@ -256,7 +256,6 @@ export default function DrawRoomScreen({ navigation, route }) {
         }
         
         // Check if current player is still in the room
-        const playerName = currentPlayerNameRef.current || '';
         const isPlayerInRoom = newRoom.players && Array.isArray(newRoom.players) && 
           newRoom.players.some(p => p && p.name === playerName);
         

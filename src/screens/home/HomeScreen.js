@@ -115,9 +115,12 @@ const customIconStyles = StyleSheet.create({
     position: 'relative',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   speechBubble: {
-    fontSize: 48,
+    fontSize: 42, // Reduced from 48 to prevent clipping
+    textAlign: 'center',
+    lineHeight: 48,
   },
   frequencyContainer: {
     width: 48,
@@ -406,6 +409,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden', // Ensure icons don't overflow the circular container
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,

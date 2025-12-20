@@ -15,6 +15,7 @@ import RulesModal from '../../components/shared/RulesModal';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
+import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 export default function CodenamesGameScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -29,6 +30,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
   const [drinkingMode, setDrinkingMode] = useState(false);
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
+  const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
 
   useEffect(() => {
     const initializeRoom = async () => {
@@ -124,6 +126,18 @@ export default function CodenamesGameScreen({ navigation, route }) {
     const unsubscribe = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const updatedRoom = { id: snapshot.id, ...snapshot.data() };
+        
+        // Handle reset trigger for showing ad to all players (non-host)
+        if (updatedRoom.reset_triggered_at && 
+            updatedRoom.reset_triggered_at !== lastResetTriggerRef.current &&
+            updatedRoom.game_status === 'setup' &&
+            updatedRoom.host_name !== currentPlayerName) {
+          lastResetTriggerRef.current = updatedRoom.reset_triggered_at;
+          // Show ad to non-host players when host resets
+          showInterstitialIfAvailable(() => {
+            // Ad closed, continue normally
+          });
+        }
         
         // If game returned to setup, close modal and navigate back to setup
         if (updatedRoom.game_status === 'setup') {
@@ -659,25 +673,28 @@ export default function CodenamesGameScreen({ navigation, route }) {
   };
 
   const goBack = async () => {
-    // Cleanup listeners
-    if (unsubscribeRef.current) {
-      unsubscribeRef.current();
-      unsubscribeRef.current = null;
-    }
-    
-    await clearCurrentRoom();
-    
-    // Navigate to main menu using reset to clear the stack
-    const parent = navigation.getParent();
-    if (parent) {
-      parent.reset({
-        index: 0,
-        routes: [{ name: 'Home' }]
-      });
-    } else {
-      // Fallback: navigate to Home
-      navigation.navigate('Home');
-    }
+    // Show interstitial ad before navigating to main menu
+    showInterstitialIfAvailable(async () => {
+      // Cleanup listeners
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+      
+      await clearCurrentRoom();
+      
+      // Navigate to main menu using reset to clear the stack
+      const parent = navigation.getParent();
+      if (parent) {
+        parent.reset({
+          index: 0,
+          routes: [{ name: 'Home' }]
+        });
+      } else {
+        // Fallback: navigate to Home
+        navigation.navigate('Home');
+      }
+    });
   };
 
   const resetGame = async () => {
@@ -685,68 +702,72 @@ export default function CodenamesGameScreen({ navigation, route }) {
     const isHost = room.host_name === currentPlayerName;
     if (!isHost) return;
     
-    // Cancel game end auto-deletion since we're resetting
-    if (autoDeletionCleanupRef.current.cancelGameEnd) {
-      autoDeletionCleanupRef.current.cancelGameEnd();
-      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
-    }
-    
-    // Force close modal immediately - set before any async operations
-    setForceCloseModal(true);
-    
-    // Also update local room state immediately to close modal
-    setRoom(prev => prev ? { ...prev, game_status: 'setup', winner_team: null } : prev);
-    
-    // Force a re-render to ensure modal closes
-    await new Promise(resolve => setTimeout(resolve, 50));
-    
-    const resetRedTeam = {
-      ...room.red_team,
-      revealed_words: []
-    };
-    const resetBlueTeam = {
-      ...room.blue_team,
-      revealed_words: []
-    };
-    
-    try {
-      const roomRef = doc(db, 'CodenamesRoom', room.id);
-      await updateDoc(roomRef, {
-        red_team: resetRedTeam,
-        blue_team: resetBlueTeam,
-        game_status: 'setup',
-        current_turn: 'red',
-        starting_team: 'red',
-        board_words: [],
-        key_map: [],
-        guesses_remaining: 0,
-        turn_phase: 'clue',
-        current_clue: null,
-        winner_team: null,
-        turn_start_time: null,
-        drinking_popup: null,
-        round_baseline_reveals: null
-      });
-      console.log('✅ Game reset successfully - all state cleared');
+    // Show interstitial ad first, then reset game
+    showInterstitialIfAvailable(async () => {
+      // Cancel game end auto-deletion since we're resetting
+      if (autoDeletionCleanupRef.current.cancelGameEnd) {
+        autoDeletionCleanupRef.current.cancelGameEnd();
+        autoDeletionCleanupRef.current.cancelGameEnd = () => {};
+      }
       
-      // Ensure modal is fully closed before navigation - longer delay to ensure UI updates
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Force close modal immediately - set before any async operations
+      setForceCloseModal(true);
       
-      // Navigate immediately using replace to ensure clean navigation
-      navigation.replace('CodenamesSetup', { 
-        roomCode, 
-        gameMode: room.game_mode || 'friends' 
-      });
+      // Also update local room state immediately to close modal
+      setRoom(prev => prev ? { ...prev, game_status: 'setup', winner_team: null } : prev);
       
-      // Reset force close flag after navigation
-      setTimeout(() => {
+      // Force a re-render to ensure modal closes
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      const resetRedTeam = {
+        ...room.red_team,
+        revealed_words: []
+      };
+      const resetBlueTeam = {
+        ...room.blue_team,
+        revealed_words: []
+      };
+      
+      try {
+        const roomRef = doc(db, 'CodenamesRoom', room.id);
+        await updateDoc(roomRef, {
+          red_team: resetRedTeam,
+          blue_team: resetBlueTeam,
+          game_status: 'setup',
+          current_turn: 'red',
+          starting_team: 'red',
+          board_words: [],
+          key_map: [],
+          guesses_remaining: 0,
+          turn_phase: 'clue',
+          current_clue: null,
+          winner_team: null,
+          turn_start_time: null,
+          drinking_popup: null,
+          round_baseline_reveals: null,
+          reset_triggered_at: Date.now() // Signal to other players to show ad
+        });
+        console.log('✅ Game reset successfully - all state cleared');
+        
+        // Ensure modal is fully closed before navigation - longer delay to ensure UI updates
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Navigate immediately using replace to ensure clean navigation
+        navigation.replace('CodenamesSetup', { 
+          roomCode, 
+          gameMode: room.game_mode || 'friends' 
+        });
+        
+        // Reset force close flag after navigation
+        setTimeout(() => {
+          setForceCloseModal(false);
+        }, 500);
+      } catch (error) {
+        console.error('❌ Error resetting game:', error);
+        Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
         setForceCloseModal(false);
-      }, 500);
-    } catch (error) {
-      console.error('❌ Error resetting game:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
-      setForceCloseModal(false);
-    }
+      }
+    });
   };
 
   const clearDrinkingPopup = async () => {
@@ -894,23 +915,26 @@ export default function CodenamesGameScreen({ navigation, route }) {
                   <TouchableOpacity
                     style={[styles.winnerButton, styles.winnerButtonOutline]}
                     onPress={async () => {
-                      if (unsubscribeRef.current) {
-                        unsubscribeRef.current();
-                        unsubscribeRef.current = null;
-                      }
-                      await clearCurrentRoom();
-                      
-                      // Navigate to main menu using reset to clear the stack
-                      const parent = navigation.getParent();
-                      if (parent) {
-                        parent.reset({
-                          index: 0,
-                          routes: [{ name: 'Home' }]
-                        });
-                      } else {
-                        // Fallback: navigate to Home
-                        navigation.navigate('Home');
-                      }
+                      // Show interstitial ad before navigating to main menu
+                      showInterstitialIfAvailable(async () => {
+                        if (unsubscribeRef.current) {
+                          unsubscribeRef.current();
+                          unsubscribeRef.current = null;
+                        }
+                        await clearCurrentRoom();
+                        
+                        // Navigate to main menu using reset to clear the stack
+                        const parent = navigation.getParent();
+                        if (parent) {
+                          parent.reset({
+                            index: 0,
+                            routes: [{ name: 'Home' }]
+                          });
+                        } else {
+                          // Fallback: navigate to Home
+                          navigation.navigate('Home');
+                        }
+                      });
                     }}
                   >
                     <Text style={[styles.winnerButtonText, styles.winnerButtonTextOutline]}>חזרה לתפריט הראשי</Text>

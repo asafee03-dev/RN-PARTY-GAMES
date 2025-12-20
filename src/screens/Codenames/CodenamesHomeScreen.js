@@ -4,10 +4,9 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, query, collection, where, getDocs, Timestamp } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
-import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 const agentIcons = ["🕵️", "🔍", "🎯", "📋", "🗂️", "💼", "🕶️", "🎩", "🔐", "📡"];
 
@@ -110,7 +109,7 @@ export default function CodenamesHomeScreen({ navigation, route }) {
   }, [route?.params?.prefillRoomCode]);
 
   const generateRoomCode = () => {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
+    return Math.floor(Math.random() * 10000).toString().padStart(4, '0');
   };
 
   const createRoom = async () => {
@@ -172,7 +171,8 @@ export default function CodenamesHomeScreen({ navigation, route }) {
         key_map: [],
         guesses_remaining: 0,
         turn_phase: 'clue',
-        created_at: Date.now() // Store as timestamp for age calculation
+        created_at: Date.now(), // Store as timestamp for age calculation
+        expires_at: Timestamp.fromMillis(Date.now() + (2 * 60 * 60 * 1000)) // 2 hours from now
       };
       
       console.log('🔵 [CODENAMES] About to call setDoc() - execution checkpoint 1');
@@ -219,11 +219,9 @@ export default function CodenamesHomeScreen({ navigation, route }) {
       console.log('✅ [CODENAMES] Room created and verified successfully with code:', newRoomCode);
       console.log('🔵 [CODENAMES] About to navigate - execution checkpoint 4');
       
-      // Show interstitial ad if available, then navigate
-      showInterstitialIfAvailable(() => {
-        navigation.navigate('CodenamesSetup', { roomCode: newRoomCode, gameMode: 'friends' });
-        console.log('✅ [CODENAMES] Navigation initiated - execution checkpoint 5');
-      });
+      // Navigate to setup screen
+      navigation.navigate('CodenamesSetup', { roomCode: newRoomCode, gameMode: 'friends' });
+      console.log('✅ [CODENAMES] Navigation initiated - execution checkpoint 5');
     } catch (error) {
       console.error('❌ [CODENAMES] Error creating room:', error);
       isCreatingRoomRef.current = false;
@@ -257,10 +255,8 @@ export default function CodenamesHomeScreen({ navigation, route }) {
     try {
       await storage.setItem('playerName', playerName);
       
-      // Show interstitial ad if available, then navigate
-      showInterstitialIfAvailable(() => {
-        navigation.navigate('CodenamesSetup', { roomCode: roomCode.toUpperCase(), gameMode: 'friends' });
-      });
+      // Navigate to setup screen
+      navigation.navigate('CodenamesSetup', { roomCode: roomCode.toUpperCase(), gameMode: 'friends' });
     } catch (error) {
       console.error('❌ Error joining room:', error);
       setError('שגיאה בהצטרפות לחדר. נסה שוב.');
@@ -358,7 +354,7 @@ export default function CodenamesHomeScreen({ navigation, route }) {
                     placeholderTextColor="#999"
                     style={styles.input}
                     autoCapitalize="characters"
-                    maxLength={6}
+                    maxLength={4}
                   />
                 </View>
 
@@ -368,6 +364,28 @@ export default function CodenamesHomeScreen({ navigation, route }) {
                   variant="codenames"
                   style={styles.joinButton}
                 />
+
+                <View style={styles.instructionsContainer}>
+                  <Text style={styles.instructionsTitle}>📋 איך משחקים?</Text>
+                  <View style={styles.instructionsList}>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>1. </Text>
+                      השתבצו בתקפידים לשתי קבוצות.
+                    </Text>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>2. </Text>
+                      בכל סבב קבוצה אחת משחקת.
+                    </Text>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>3. </Text>
+                      שחקן נותן רמז אחד כדי לעזור לקבוצה לנחש כמה שיותר מילים.
+                    </Text>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>4. </Text>
+                      הקבוצה שחושפת ראשונה את כלל המילים שלה— מנצחת.
+                    </Text>
+                  </View>
+                </View>
               </View>
             </View>
           </View>
@@ -505,5 +523,33 @@ const styles = StyleSheet.create({
   },
   joinButton: {
     width: '100%',
+  },
+  instructionsContainer: {
+    backgroundColor: '#F3E5F5',
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 8,
+    borderWidth: 2,
+    borderColor: '#E1BEE7',
+  },
+  instructionsTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2C3E50',
+    marginBottom: 12,
+    textAlign: 'right',
+  },
+  instructionsList: {
+    gap: 8,
+  },
+  instructionItem: {
+    fontSize: 16,
+    color: '#424242',
+    textAlign: 'right',
+    lineHeight: 24,
+  },
+  instructionNumber: {
+    fontWeight: '700',
+    color: '#9C27B0',
   },
 });

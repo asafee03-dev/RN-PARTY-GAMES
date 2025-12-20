@@ -1,4 +1,4 @@
-import * as Sharing from 'expo-sharing';
+import { Share } from 'react-native';
 import { generateDeepLink, getGameDisplayName } from './deepLinking';
 
 /**
@@ -13,7 +13,7 @@ export function generateShareMessage(inviter, game) {
 }
 
 /**
- * Share a game room link
+ * Share a game room link using native Share API
  * @param {string} game - Game type (spy, codenames, alias, frequency, draw)
  * @param {string} roomId - Room code
  * @param {string} inviter - Name of the person inviting
@@ -27,15 +27,17 @@ export async function shareGameLink(game, roomId, inviter) {
     // Combine message and link
     const shareContent = `${message}\n\n${link}`;
     
-    const isAvailable = await Sharing.isAvailableAsync();
-    if (isAvailable) {
-      await Sharing.shareAsync(shareContent, {
-        mimeType: 'text/plain',
-        dialogTitle: 'Share Game Invite'
-      });
+    const result = await Share.share({
+      message: shareContent,
+      title: 'Share Game Invite'
+    });
+    
+    // Share.share returns { action: Share.sharedAction } on success
+    // or { action: Share.dismissedAction } if user dismissed
+    if (result.action === Share.sharedAction) {
       return true;
     } else {
-      console.warn('Sharing is not available on this platform');
+      // User dismissed the share sheet
       return false;
     }
   } catch (error) {

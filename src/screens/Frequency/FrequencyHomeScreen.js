@@ -1,4 +1,4 @@
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, Timestamp } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Defs, Path, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
@@ -6,7 +6,6 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
 import storage from '../../utils/storage';
 
@@ -112,7 +111,7 @@ export default function FrequencyHomeScreen({ navigation, route }) {
   }, [route?.params?.prefillRoomCode]);
 
   const generateRoomCode = () => {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
+    return Math.floor(Math.random() * 10000).toString().padStart(4, '0');
   };
 
   const createRoom = async () => {
@@ -162,7 +161,8 @@ export default function FrequencyHomeScreen({ navigation, route }) {
         game_status: 'lobby',
         current_turn_index: 0,
         needle_positions: {},
-        created_at: Date.now() // Store as timestamp for age calculation
+        created_at: Date.now(), // Store as timestamp for age calculation
+        expires_at: Timestamp.fromMillis(Date.now() + (2 * 60 * 60 * 1000)) // 2 hours from now
       };
 
       console.log('🔵 [FREQUENCY] Ensuring Firestore is ready and online...');
@@ -193,11 +193,9 @@ export default function FrequencyHomeScreen({ navigation, route }) {
         console.warn('⚠️ [FREQUENCY] Could not save player name:', e);
       }
       
-      // Show interstitial ad if available, then navigate
+      // Navigate to room
       console.log('🔵 [FREQUENCY] Navigating to room...');
-      showInterstitialIfAvailable(() => {
-        navigation.navigate('FrequencyRoom', { roomCode: newRoomCode });
-      });
+      navigation.navigate('FrequencyRoom', { roomCode: newRoomCode });
     } catch (error) {
       console.error('❌ [FREQUENCY] Error creating room:', error);
       let errorMessage = 'שגיאה ביצירת החדר. נסה שוב.';
@@ -228,17 +226,13 @@ export default function FrequencyHomeScreen({ navigation, route }) {
     try {
       await storage.setItem('playerName', playerName);
       
-      // Show interstitial ad if available, then navigate
-      showInterstitialIfAvailable(() => {
-        navigation.navigate('FrequencyRoom', { roomCode: roomCode.toUpperCase() });
-      });
+      // Navigate to room
+      navigation.navigate('FrequencyRoom', { roomCode: roomCode.toUpperCase() });
     } catch (e) {
       console.warn('Could not save player name:', e);
       
-      // Show interstitial ad if available, then navigate
-      showInterstitialIfAvailable(() => {
-        navigation.navigate('FrequencyRoom', { roomCode: roomCode.toUpperCase() });
-      });
+      // Navigate to room
+      navigation.navigate('FrequencyRoom', { roomCode: roomCode.toUpperCase() });
     }
   };
 
@@ -333,7 +327,7 @@ export default function FrequencyHomeScreen({ navigation, route }) {
                     placeholderTextColor="#999"
                     style={styles.input}
                     autoCapitalize="characters"
-                    maxLength={6}
+                    maxLength={4}
                   />
                 </View>
 
@@ -343,6 +337,28 @@ export default function FrequencyHomeScreen({ navigation, route }) {
                   variant="frequency"
                   style={styles.joinButton}
                 />
+
+                <View style={styles.instructionsContainer}>
+                  <Text style={styles.instructionsTitle}>📋 איך משחקים?</Text>
+                  <View style={styles.instructionsList}>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>1. </Text>
+                      כולם רואים את המסך עם הנושאים.
+                    </Text>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>2. </Text>
+                      בכל תור יש שחקן שרואה את הסקאלה אליה צריך לדייק והוא נותן הרמז
+                    </Text>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>3. </Text>
+                      שאר השחקנים מנסים לכוון את המחוג שלהם לאותו אזור.
+                    </Text>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>4. </Text>
+                      ככל שהניחוש קרוב יותר — מקבלים יותר נקודות.
+                    </Text>
+                  </View>
+                </View>
               </View>
             </View>
           </View>
@@ -477,5 +493,33 @@ const styles = StyleSheet.create({
   },
   joinButton: {
     width: '100%',
+  },
+  instructionsContainer: {
+    backgroundColor: '#F3E5F5',
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 8,
+    borderWidth: 2,
+    borderColor: '#E1BEE7',
+  },
+  instructionsTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2C3E50',
+    marginBottom: 12,
+    textAlign: 'right',
+  },
+  instructionsList: {
+    gap: 8,
+  },
+  instructionItem: {
+    fontSize: 16,
+    color: '#424242',
+    textAlign: 'right',
+    lineHeight: 24,
+  },
+  instructionNumber: {
+    fontWeight: '700',
+    color: '#9C27B0',
   },
 });

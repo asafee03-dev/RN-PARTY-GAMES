@@ -4,10 +4,9 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, setDoc, collection } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, Timestamp } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
-import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
 
@@ -63,7 +62,7 @@ export default function AliasHomeScreen({ navigation, route }) {
   }, [route?.params?.prefillRoomCode]);
 
   const generateRoomCode = () => {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
+    return Math.floor(Math.random() * 10000).toString().padStart(4, '0');
   };
 
   const createRoom = async () => {
@@ -113,7 +112,8 @@ export default function AliasHomeScreen({ navigation, route }) {
         round_active: false,
         current_round_score: 0,
         golden_rounds_enabled: false,
-        created_at: Date.now() // Store as timestamp for age calculation
+        created_at: Date.now(), // Store as timestamp for age calculation
+        expires_at: Timestamp.fromMillis(Date.now() + (2 * 60 * 60 * 1000)) // 2 hours from now
       };
 
       console.log('🔵 Creating room with code:', newRoomCode);
@@ -155,10 +155,8 @@ export default function AliasHomeScreen({ navigation, route }) {
 
       console.log('✅ [ALIAS] Room created successfully with code:', newRoomCode);
       
-      // Show interstitial ad if available, then navigate
-      showInterstitialIfAvailable(() => {
-        navigation.navigate('AliasSetup', { roomCode: newRoomCode });
-      });
+      // Navigate to setup screen
+      navigation.navigate('AliasSetup', { roomCode: newRoomCode });
     } catch (error) {
       console.error('❌ [ALIAS] Error creating room:', error);
       isCreatingRoomRef.current = false;
@@ -217,17 +215,13 @@ export default function AliasHomeScreen({ navigation, route }) {
       
       await storage.setItem('playerName', playerName);
       
-      // Show interstitial ad if available, then navigate
-      showInterstitialIfAvailable(() => {
-        navigation.navigate('AliasSetup', { roomCode: roomCode.toUpperCase() });
-      });
+      // Navigate to setup screen
+      navigation.navigate('AliasSetup', { roomCode: roomCode.toUpperCase() });
     } catch (e) {
       console.warn('Could not save player name:', e);
       
-      // Show interstitial ad if available, then navigate
-      showInterstitialIfAvailable(() => {
-        navigation.navigate('AliasSetup', { roomCode: roomCode.toUpperCase() });
-      });
+      // Navigate to setup screen
+      navigation.navigate('AliasSetup', { roomCode: roomCode.toUpperCase() });
     }
   };
 
@@ -325,7 +319,7 @@ export default function AliasHomeScreen({ navigation, route }) {
                     placeholderTextColor="#999"
                     style={styles.input}
                     autoCapitalize="characters"
-                    maxLength={6}
+                    maxLength={4}
                   />
                 </View>
 

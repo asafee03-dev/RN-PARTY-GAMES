@@ -14,6 +14,7 @@ import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
+import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 const PLAYER_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#10B981", "#3B82F6", "#EC4899", "#F97316", "#14B8A6"];
 const waveIcons = ["📻", "📡", "🎚️", "🎛️"];
@@ -36,6 +37,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
   const pendingTopicRef = useRef(null); // Track topic being set during turn advancement
+  const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
 
   const loadRoom = async () => {
     try {
@@ -287,6 +289,18 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           setDrinkingMode(newRoom.drinking_mode);
           // Also sync to local storage
           storage.setItem('drinkingMode', newRoom.drinking_mode.toString()).catch(() => {});
+        }
+        
+        // Handle reset trigger for showing ad to all players (non-host)
+        if (newRoom.reset_triggered_at && 
+            newRoom.reset_triggered_at !== lastResetTriggerRef.current &&
+            newRoom.game_status === 'lobby' &&
+            newRoom.host_name !== currentPlayerName) {
+          lastResetTriggerRef.current = newRoom.reset_triggered_at;
+          // Show ad to non-host players when host resets
+          showInterstitialIfAvailable(() => {
+            // Ad closed, continue normally
+          });
         }
         
         setRoom(prevRoom => {
@@ -862,48 +876,52 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const resetGame = async () => {
     if (!room || !room?.id || !isHost) return;
 
-    // Force close modal immediately
-    setForceCloseModal(true);
+    // Show interstitial ad first, then reset game
+    showInterstitialIfAvailable(async () => {
+      // Force close modal immediately
+      setForceCloseModal(true);
 
-    if (typeof global !== 'undefined') {
-      global.currentNeedlePosition = undefined;
-      global.currentSectors = undefined;
-    }
+      if (typeof global !== 'undefined') {
+        global.currentNeedlePosition = undefined;
+        global.currentSectors = undefined;
+      }
 
-    if (needleUpdateTimeout.current) {
-      clearTimeout(needleUpdateTimeout.current);
-      needleUpdateTimeout.current = null;
-    }
-    isProcessingReveal.current = false;
-    isSubmittingGuess.current = false;
+      if (needleUpdateTimeout.current) {
+        clearTimeout(needleUpdateTimeout.current);
+        needleUpdateTimeout.current = null;
+      }
+      isProcessingReveal.current = false;
+      isSubmittingGuess.current = false;
 
-    const resetPlayers = room.players.map(p => ({ ...p, score: 0, has_guessed: false }));
+      const resetPlayers = room.players.map(p => ({ ...p, score: 0, has_guessed: false }));
 
-    try {
-      const roomRef = doc(db, 'FrequencyRoom', room.id);
-      await updateDoc(roomRef, {
-        players: resetPlayers,
-        game_status: 'lobby',
-        current_turn_index: 0,
-        needle_positions: {},
-        guess_submitted_names: {},
-        current_topic: null,
-        target_position: null,
-        current_round_sectors: null,
-        turn_phase: null,
-        last_guess_result: null,
-        winner_name: null,
-        drinking_players: null
-      });
-      
-      // Reset force close flag after a short delay
-      setTimeout(() => {
+      try {
+        const roomRef = doc(db, 'FrequencyRoom', room.id);
+        await updateDoc(roomRef, {
+          players: resetPlayers,
+          game_status: 'lobby',
+          current_turn_index: 0,
+          needle_positions: {},
+          guess_submitted_names: {},
+          current_topic: null,
+          target_position: null,
+          current_round_sectors: null,
+          turn_phase: null,
+          last_guess_result: null,
+          winner_name: null,
+          drinking_players: null,
+          reset_triggered_at: Date.now() // Signal to other players to show ad
+        });
+        
+        // Reset force close flag after a short delay
+        setTimeout(() => {
+          setForceCloseModal(false);
+        }, 100);
+      } catch (error) {
+        console.error('Error resetting game:', error);
         setForceCloseModal(false);
-      }, 100);
-    } catch (error) {
-      console.error('Error resetting game:', error);
-      setForceCloseModal(false);
-    }
+      }
+    });
   };
 
   const handleRulesPress = () => {
@@ -911,30 +929,33 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   };
 
   const goBack = async () => {
-    // Cleanup all listeners and timers
-    if (needleUpdateTimeout.current) {
-      clearTimeout(needleUpdateTimeout.current);
-      needleUpdateTimeout.current = null;
-    }
-    if (unsubscribeRef.current) {
-      unsubscribeRef.current();
-      unsubscribeRef.current = null;
-    }
-    
-    // Clear saved room state when leaving
-    await clearCurrentRoom();
-    
-    // Navigate to main menu using reset to clear the stack
-    const parent = navigation.getParent();
-    if (parent) {
-      parent.reset({
-        index: 0,
-        routes: [{ name: 'Home' }]
-      });
-    } else {
-      // Fallback: navigate to Home
-      navigation.navigate('Home');
-    }
+    // Show interstitial ad before navigating to main menu
+    showInterstitialIfAvailable(async () => {
+      // Cleanup all listeners and timers
+      if (needleUpdateTimeout.current) {
+        clearTimeout(needleUpdateTimeout.current);
+        needleUpdateTimeout.current = null;
+      }
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+      
+      // Clear saved room state when leaving
+      await clearCurrentRoom();
+      
+      // Navigate to main menu using reset to clear the stack
+      const parent = navigation.getParent();
+      if (parent) {
+        parent.reset({
+          index: 0,
+          routes: [{ name: 'Home' }]
+        });
+      } else {
+        // Fallback: navigate to Home
+        navigation.navigate('Home');
+      }
+    });
   };
 
   const isMyTurn = () => {

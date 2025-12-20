@@ -4,10 +4,9 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, query, collection, where, getDocs, Timestamp } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
-import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 const spyIcons = ["❓", "🕵️", "🔍", "🎭", "👁️", "🗝️", "🔐", "🎩", "💼", "📍"];
 
@@ -38,7 +37,7 @@ export default function SpyHomeScreen({ navigation, route }) {
   }, [route?.params?.prefillRoomCode]);
 
   const generateRoomCode = () => {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
+    return Math.floor(Math.random() * 10000).toString().padStart(4, '0');
   };
 
   const createRoom = async () => {
@@ -86,7 +85,8 @@ export default function SpyHomeScreen({ navigation, route }) {
         players: [{ name: playerName }],
         game_status: 'lobby',
         number_of_spies: 1, // Default to 1 spy
-        created_at: Date.now() // Store as timestamp for age calculation
+        created_at: Date.now(), // Store as timestamp for age calculation
+        expires_at: Timestamp.fromMillis(Date.now() + (2 * 60 * 60 * 1000)) // 2 hours from now
       };
 
       console.log('🔵 [SPY] Ensuring Firestore is ready...');
@@ -117,11 +117,9 @@ export default function SpyHomeScreen({ navigation, route }) {
         console.warn('⚠️ [SPY] Could not save player name:', e);
       }
       
-      // Show interstitial ad if available, then navigate
+      // Navigate to room
       console.log('🔵 [SPY] Navigating to room...');
-      showInterstitialIfAvailable(() => {
-        navigation.navigate('SpyRoom', { roomCode: newRoomCode });
-      });
+      navigation.navigate('SpyRoom', { roomCode: newRoomCode });
     } catch (error) {
       console.error('❌ [SPY] Error creating room:', error);
       let errorMessage = 'שגיאה ביצירת החדר. נסה שוב.';
@@ -153,10 +151,8 @@ export default function SpyHomeScreen({ navigation, route }) {
 
     storage.setItem('playerName', playerName);
     
-    // Show interstitial ad if available, then navigate
-    showInterstitialIfAvailable(() => {
-      navigation.navigate('SpyRoom', { roomCode: roomCode.toUpperCase() });
-    });
+    // Navigate to room
+    navigation.navigate('SpyRoom', { roomCode: roomCode.toUpperCase() });
   };
 
   const goBack = () => {
@@ -250,7 +246,7 @@ export default function SpyHomeScreen({ navigation, route }) {
                     placeholderTextColor="#999"
                     style={styles.input}
                     autoCapitalize="characters"
-                    maxLength={6}
+                    maxLength={4}
                   />
                 </View>
 
@@ -260,6 +256,32 @@ export default function SpyHomeScreen({ navigation, route }) {
                   variant="spy"
                   style={styles.joinButton}
                 />
+
+                <View style={styles.instructionsContainer}>
+                  <Text style={styles.instructionsTitle}>📋 איך משחקים?</Text>
+                  <View style={styles.instructionsList}>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>1. </Text>
+                      כל השחקנים מקבלים מיקום זהה/מילה — חוץ מהמרגל.
+                    </Text>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>2. </Text>
+                      המרגל לא יודע מה המיקום/מילה.
+                    </Text>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>3. </Text>
+                      השחקנים שואלים אחד את השני שאלות בתור.
+                    </Text>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>4. </Text>
+                      המרגל מנסה לגלות את המיקום/מילה בלי להיחשף.
+                    </Text>
+                    <Text style={styles.instructionItem}>
+                      <Text style={styles.instructionNumber}>5. </Text>
+                      אם המרגל מנחש נכון — הוא מנצח. אם חושפים אותו — הקבוצה מנצחת.
+                    </Text>
+                  </View>
+                </View>
               </View>
             </View>
           </View>
@@ -397,5 +419,33 @@ const styles = StyleSheet.create({
   },
   joinButton: {
     width: '100%',
+  },
+  instructionsContainer: {
+    backgroundColor: '#F3E5F5',
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 8,
+    borderWidth: 2,
+    borderColor: '#E1BEE7',
+  },
+  instructionsTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2C3E50',
+    marginBottom: 12,
+    textAlign: 'right',
+  },
+  instructionsList: {
+    gap: 8,
+  },
+  instructionItem: {
+    fontSize: 16,
+    color: '#424242',
+    textAlign: 'right',
+    lineHeight: 24,
+  },
+  instructionNumber: {
+    fontWeight: '700',
+    color: '#9C27B0',
   },
 });

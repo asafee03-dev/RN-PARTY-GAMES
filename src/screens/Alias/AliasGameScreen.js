@@ -18,6 +18,7 @@ import { generateCards } from '../../logic/alias';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
+import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899"];
 
@@ -39,6 +40,7 @@ export default function AliasGameScreen({ navigation, route }) {
   const previousTurnRef = useRef(null); // Track previous turn to detect full round completion
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
+  const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
 
   useEffect(() => {
     const loadPlayerName = async () => {
@@ -218,6 +220,18 @@ export default function AliasGameScreen({ navigation, route }) {
         } else if (roomData.drinking_popup === null && showDrinkingPopup) {
           // Popup was cleared
           setShowDrinkingPopup(false);
+        }
+        
+        // Handle reset trigger for showing ad to all players (non-host)
+        if (roomData.reset_triggered_at && 
+            roomData.reset_triggered_at !== lastResetTriggerRef.current &&
+            roomData.game_status === 'setup' &&
+            roomData.host_name !== playerName) {
+          lastResetTriggerRef.current = roomData.reset_triggered_at;
+          // Show ad to non-host players when host resets
+          showInterstitialIfAvailable(() => {
+            // Ad closed, continue normally - navigation to setup will happen via useEffect
+          });
         }
         
         // Handle state updates - match old version's exact logic
@@ -805,36 +819,43 @@ export default function AliasGameScreen({ navigation, route }) {
       autoDeletionCleanupRef.current.cancelGameEnd = () => {};
     }
 
-    try {
-      const roomRef = doc(db, 'GameRoom', room.id);
-      const resetTeams = room.teams.map(team => ({
-        ...team,
-        position: 0
-      }));
-      
-      await updateDoc(roomRef, {
-        teams: resetTeams,
-        current_turn: 0,
-        game_status: 'waiting',
-        round_active: false,
-        current_round_score: 0,
-        round_start_time: null,
-        round_start_position: null,
-        used_cards: [],
-        show_round_summary: false,
-        last_word_on_time_up: null,
-        current_word_is_golden: false,
-        winner_team: null,
-        drinking_popup: null
-      });
-      
-      setTimerKey(prev => prev + 1);
-      setTimeIsUp(false);
-      console.log('✅ Game reset successfully');
-    } catch (error) {
-      console.error('❌ Error resetting game:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
-    }
+    // Show interstitial ad first, then reset game
+    showInterstitialIfAvailable(async () => {
+      try {
+        const roomRef = doc(db, 'GameRoom', room.id);
+        const resetTeams = room.teams.map(team => ({
+          ...team,
+          position: 0
+        }));
+        
+        await updateDoc(roomRef, {
+          teams: resetTeams,
+          current_turn: 0,
+          game_status: 'setup', // Reset to setup so players return to team selection screen
+          round_active: false,
+          current_round_score: 0,
+          round_start_time: null,
+          round_start_position: null,
+          used_cards: [],
+          show_round_summary: false,
+          last_word_on_time_up: null,
+          current_word_is_golden: false,
+          winner_team: null,
+          drinking_popup: null,
+          reset_triggered_at: Date.now() // Signal to other players to show ad
+        });
+        
+        setTimerKey(prev => prev + 1);
+        setTimeIsUp(false);
+        console.log('✅ Game reset successfully - returning to setup screen');
+        
+        // Navigate to setup screen after reset
+        navigation.replace('AliasSetup', { roomCode });
+      } catch (error) {
+        console.error('❌ Error resetting game:', error);
+        Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+      }
+    });
   };
 
   const toggleCardStatus = async (cardIndex) => {
@@ -1078,23 +1099,26 @@ export default function AliasGameScreen({ navigation, route }) {
               <GradientButton
                 title="חזרה לתפריט הראשי"
                 onPress={async () => {
-                  if (unsubscribeRef.current) {
-                    unsubscribeRef.current();
-                    unsubscribeRef.current = null;
-                  }
-                  await clearCurrentRoom();
-                  
-                  // Navigate to main menu using reset to clear the stack
-                  const parent = navigation.getParent();
-                  if (parent) {
-                    parent.reset({
-                      index: 0,
-                      routes: [{ name: 'Home' }]
-                    });
-                  } else {
-                    // Fallback: navigate to Home
-                    navigation.navigate('Home');
-                  }
+                  // Show interstitial ad before navigating to main menu
+                  showInterstitialIfAvailable(async () => {
+                    if (unsubscribeRef.current) {
+                      unsubscribeRef.current();
+                      unsubscribeRef.current = null;
+                    }
+                    await clearCurrentRoom();
+                    
+                    // Navigate to main menu using reset to clear the stack
+                    const parent = navigation.getParent();
+                    if (parent) {
+                      parent.reset({
+                        index: 0,
+                        routes: [{ name: 'Home' }]
+                      });
+                    } else {
+                      // Fallback: navigate to Home
+                      navigation.navigate('Home');
+                    }
+                  });
                 }}
                 variant="outline"
                 style={styles.winnerButton}

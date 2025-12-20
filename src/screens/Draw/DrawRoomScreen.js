@@ -12,6 +12,7 @@ import RulesModal from '../../components/shared/RulesModal';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
+import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 import storage from '../../utils/storage';
 
 const WINNING_SCORE = 12;
@@ -49,6 +50,7 @@ export default function DrawRoomScreen({ navigation, route }) {
   const currentPlayerNameRef = useRef(currentPlayerName);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
   const isContinuingRoundRef = useRef(false);
+  const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
 
   useEffect(() => {
     roomRef.current = room;
@@ -238,6 +240,19 @@ export default function DrawRoomScreen({ navigation, route }) {
           setDrinkingMode(newRoom.drinking_mode);
           // Also sync to local storage
           storage.setItem('drinkingMode', newRoom.drinking_mode.toString()).catch(() => {});
+        }
+        
+        // Handle reset trigger for showing ad to all players (non-host)
+        const playerName = currentPlayerNameRef.current || '';
+        if (newRoom.reset_triggered_at && 
+            newRoom.reset_triggered_at !== lastResetTriggerRef.current &&
+            newRoom.game_status === 'lobby' &&
+            newRoom.host_name !== playerName) {
+          lastResetTriggerRef.current = newRoom.reset_triggered_at;
+          // Show ad to non-host players when host resets
+          showInterstitialIfAvailable(() => {
+            // Ad closed, continue normally
+          });
         }
         
         // Check if current player is still in the room
@@ -1104,93 +1119,100 @@ export default function DrawRoomScreen({ navigation, route }) {
       autoDeletionCleanupRef.current.cancelGameEnd = () => {};
     }
 
-    // Force close modal immediately
-    setForceCloseModal(true);
+    // Show interstitial ad first, then reset game
+    showInterstitialIfAvailable(async () => {
+      // Force close modal immediately
+      setForceCloseModal(true);
 
-    // Cancel all timers
-    if (timerCheckInterval.current) {
-      clearInterval(timerCheckInterval.current);
-      timerCheckInterval.current = null;
-    }
+      // Cancel all timers
+      if (timerCheckInterval.current) {
+        clearInterval(timerCheckInterval.current);
+        timerCheckInterval.current = null;
+      }
 
-    const resetPlayers = room.players.map(p => ({ ...p, score: 0, current_guess: '', has_submitted: false }));
+      const resetPlayers = room.players.map(p => ({ ...p, score: 0, current_guess: '', has_submitted: false }));
 
-    try {
-      const roomRef = doc(db, 'DrawRoom', room.id);
-      await updateDoc(roomRef, {
-        players: resetPlayers,
-        game_status: 'lobby',
-        current_turn_index: 0,
-        current_word: null,
-        drawing_data: null,
-        show_round_summary: false,
-        round_winner: null,
-        winner_name: null,
-        drinking_players: null,
-        all_guesses: [],
-        final_draw_image: null,
-        turn_start_time: null
-      });
-      setLocalStrokes([]);
-      
-      // Reset force close flag after a short delay to allow state to update
-      setTimeout(() => {
+      try {
+        const roomRef = doc(db, 'DrawRoom', room.id);
+        await updateDoc(roomRef, {
+          players: resetPlayers,
+          game_status: 'lobby',
+          current_turn_index: 0,
+          current_word: null,
+          drawing_data: null,
+          show_round_summary: false,
+          round_winner: null,
+          winner_name: null,
+          drinking_players: null,
+          all_guesses: [],
+          final_draw_image: null,
+          turn_start_time: null,
+          reset_triggered_at: Date.now() // Signal to other players to show ad
+        });
+        setLocalStrokes([]);
+        
+        // Reset force close flag after a short delay to allow state to update
+        setTimeout(() => {
+          setForceCloseModal(false);
+        }, 100);
+      } catch (error) {
+        console.error('Error resetting game:', error);
+        Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
         setForceCloseModal(false);
-      }, 100);
-    } catch (error) {
-      console.error('Error resetting game:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
-      setForceCloseModal(false);
-    }
+      }
+    });
   };
 
   const goBack = async () => {
-    // Cleanup: Clear any active modals/popups in local state
-    // Note: We don't update Firestore show_round_summary here because other players might still be viewing it
-    // Instead, we rely on the component unmounting and the modal visibility being tied to room state
-    
-    // Mark player as inactive instead of removing
-    if (room && room.id && currentPlayerName) {
-      try {
-        const updatedPlayers = room.players.map(p => {
-          if (p && p.name === currentPlayerName) {
-            return { ...p, active: false };
-          }
-          return p;
-        });
-        const roomRef = doc(db, 'DrawRoom', room.id);
-        await updateDoc(roomRef, {
-          players: updatedPlayers
-        });
-        console.log('🔄 Marked player as inactive on goBack:', currentPlayerName);
-      } catch (error) {
-        console.error('Error marking player as inactive:', error);
+    // Show interstitial ad before navigating to main menu
+    showInterstitialIfAvailable(async () => {
+      // Cleanup: Clear any active modals/popups in local state
+      // Note: We don't update Firestore show_round_summary here because other players might still be viewing it
+      // Instead, we rely on the component unmounting and the modal visibility being tied to room state
+      
+      // Mark player as inactive instead of removing
+      if (room && room.id && currentPlayerName) {
+        try {
+          const updatedPlayers = room.players.map(p => {
+            if (p && p.name === currentPlayerName) {
+              return { ...p, active: false };
+            }
+            return p;
+          });
+          const roomRef = doc(db, 'DrawRoom', room.id);
+          await updateDoc(roomRef, {
+            players: updatedPlayers
+          });
+          console.log('🔄 Marked player as inactive on goBack:', currentPlayerName);
+        } catch (error) {
+          console.error('Error marking player as inactive:', error);
+        }
       }
-    }
-    
-    // Cleanup all listeners and timers
-    if (timerCheckInterval.current) {
-      clearInterval(timerCheckInterval.current);
-      timerCheckInterval.current = null;
-    }
-    if (unsubscribeRef.current) {
-      unsubscribeRef.current();
-      unsubscribeRef.current = null;
-    }
-    
-    await clearCurrentRoom();
-    
-    // Navigate to main menu using reset to clear the stack
-    const parent = navigation.getParent();
-    if (parent) {
-      parent.reset({
-        index: 0,
-        routes: [{ name: 'Home' }]
-      });
-    } else {
-      // Fallback: navigate to Home
-      navigation.navigate('Home');
-    }
+      
+      // Cleanup all listeners and timers
+      if (timerCheckInterval.current) {
+        clearInterval(timerCheckInterval.current);
+        timerCheckInterval.current = null;
+      }
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+      
+      await clearCurrentRoom();
+      
+      // Navigate to main menu using reset to clear the stack
+      const parent = navigation.getParent();
+      if (parent) {
+        parent.reset({
+          index: 0,
+          routes: [{ name: 'Home' }]
+        });
+      } else {
+        // Fallback: navigate to Home
+        navigation.navigate('Home');
+      }
+    });
   };
 
   const isMyTurn = () => {

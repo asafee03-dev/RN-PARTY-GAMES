@@ -760,8 +760,10 @@ const styles = StyleSheet.create({
   },
   toggleItem: {
     flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#4FA8FF', // Alias theme color - כחול בהיר
     borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#4FA8FF', // Alias theme color border
     padding: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -771,7 +773,7 @@ const styles = StyleSheet.create({
   toggleLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: '#FFFFFF', // White text for good contrast on blue background
     marginRight: 8,
   },
   compactSwitch: {

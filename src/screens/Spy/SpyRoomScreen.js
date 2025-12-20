@@ -12,6 +12,7 @@ import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
+import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 export default function SpyRoomScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -32,6 +33,7 @@ export default function SpyRoomScreen({ navigation, route }) {
   const timerInterval = useRef(null);
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
+  const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
 
   // Load player name on mount (like Alias does)
   useEffect(() => {
@@ -296,6 +298,18 @@ export default function SpyRoomScreen({ navigation, route }) {
         // Sync game mode from room data
         if (newRoom.game_mode !== undefined && newRoom.game_mode !== null) {
           setGameMode(newRoom.game_mode);
+        }
+        
+        // Handle reset trigger for showing ad to all players (non-host)
+        if (newRoom.reset_triggered_at && 
+            newRoom.reset_triggered_at !== lastResetTriggerRef.current &&
+            newRoom.game_status === 'lobby' &&
+            newRoom.host_name !== currentPlayerName) {
+          lastResetTriggerRef.current = newRoom.reset_triggered_at;
+          // Show ad to non-host players when host resets
+          showInterstitialIfAvailable(() => {
+            // Ad closed, continue normally
+          });
         }
         
         setRoom(prevRoom => {
@@ -738,45 +752,49 @@ export default function SpyRoomScreen({ navigation, route }) {
   const resetGame = async () => {
     if (!room || !room.id || !room.players || !Array.isArray(room.players) || !isHost) return;
     
-    // Cancel game end auto-deletion since we're resetting
-    if (autoDeletionCleanupRef.current.cancelGameEnd) {
-      autoDeletionCleanupRef.current.cancelGameEnd();
-      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
-    }
-    
-    // Cancel timer
-    if (timerInterval.current) {
-      clearInterval(timerInterval.current);
-      timerInterval.current = null;
-    }
-    
-    const resetPlayers = room.players.map(p => ({ name: p.name }));
-    
-    try {
-      const roomRef = doc(db, 'SpyRoom', room.id);
-      await updateDoc(roomRef, {
-        players: resetPlayers,
-        game_status: 'lobby',
-        game_start_time: null,
-        spy_name: null,
-        spy_names: null,
-        chosen_location: null,
-        all_locations: null,
-        eliminated_locations: null,
-        all_votes_submitted: false,
-        spy_guess: null,
-        spy_guess_correct: null,
-        spy_guess_player: null
-        // Note: game_mode is preserved when resetting
-      });
-      // Reset local state
-      setSpyGuess('');
-      setSpyGuessSubmitted(false);
-      console.log('✅ Game reset successfully - all state cleared');
-    } catch (error) {
-      console.error('❌ Error resetting game:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
-    }
+    // Show interstitial ad first, then reset game
+    showInterstitialIfAvailable(async () => {
+      // Cancel game end auto-deletion since we're resetting
+      if (autoDeletionCleanupRef.current.cancelGameEnd) {
+        autoDeletionCleanupRef.current.cancelGameEnd();
+        autoDeletionCleanupRef.current.cancelGameEnd = () => {};
+      }
+      
+      // Cancel timer
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
+        timerInterval.current = null;
+      }
+      
+      const resetPlayers = room.players.map(p => ({ name: p.name }));
+      
+      try {
+        const roomRef = doc(db, 'SpyRoom', room.id);
+        await updateDoc(roomRef, {
+          players: resetPlayers,
+          game_status: 'lobby',
+          game_start_time: null,
+          spy_name: null,
+          spy_names: null,
+          chosen_location: null,
+          all_locations: null,
+          eliminated_locations: null,
+          all_votes_submitted: false,
+          spy_guess: null,
+          spy_guess_correct: null,
+          spy_guess_player: null,
+          reset_triggered_at: Date.now() // Signal to other players to show ad
+          // Note: game_mode is preserved when resetting
+        });
+        // Reset local state
+        setSpyGuess('');
+        setSpyGuessSubmitted(false);
+        console.log('✅ Game reset successfully - all state cleared');
+      } catch (error) {
+        console.error('❌ Error resetting game:', error);
+        Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+      }
+    });
   };
 
   const handleRulesPress = () => {
@@ -784,29 +802,32 @@ export default function SpyRoomScreen({ navigation, route }) {
   };
 
   const goBack = async () => {
-    // Cleanup all listeners and timers
-    if (timerInterval.current) {
-      clearInterval(timerInterval.current);
-      timerInterval.current = null;
-    }
-    if (unsubscribeRef.current) {
-      unsubscribeRef.current();
-      unsubscribeRef.current = null;
-    }
-    
-    await clearCurrentRoom();
-    
-    // Navigate to main menu using reset to clear the stack
-    const parent = navigation.getParent();
-    if (parent) {
-      parent.reset({
-        index: 0,
-        routes: [{ name: 'Home' }]
-      });
-    } else {
-      // Fallback: navigate to Home
-      navigation.navigate('Home');
-    }
+    // Show interstitial ad before navigating to main menu
+    showInterstitialIfAvailable(async () => {
+      // Cleanup all listeners and timers
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
+        timerInterval.current = null;
+      }
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+      
+      await clearCurrentRoom();
+      
+      // Navigate to main menu using reset to clear the stack
+      const parent = navigation.getParent();
+      if (parent) {
+        parent.reset({
+          index: 0,
+          routes: [{ name: 'Home' }]
+        });
+      } else {
+        // Fallback: navigate to Home
+        navigation.navigate('Home');
+      }
+    });
   };
 
   const formatTime = (seconds) => {

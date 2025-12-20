@@ -4,10 +4,9 @@ import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, setDoc, query, collection, where, getDocs, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, query, collection, where, getDocs, onSnapshot, Timestamp } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
-import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
 const drawIcons = ["🎨", "✏️", "🖌️", "🖍️", "✨"];
 
@@ -50,7 +49,7 @@ export default function DrawHomeScreen({ navigation, route }) {
   }, []);
 
   const generateRoomCode = () => {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
+    return Math.floor(Math.random() * 10000).toString().padStart(4, '0');
   };
 
   const handleCreateRoom = async () => {
@@ -97,7 +96,8 @@ export default function DrawHomeScreen({ navigation, route }) {
         players: [{ name: playerName, score: 0, active: true }],
         game_status: 'lobby',
         current_turn_index: 0,
-        created_at: Date.now() // Store as timestamp for age calculation
+        created_at: Date.now(), // Store as timestamp for age calculation
+        expires_at: Timestamp.fromMillis(Date.now() + (2 * 60 * 60 * 1000)) // 2 hours from now
       };
       
       console.log('🔵 [DRAW] Ensuring Firestore is ready...');
@@ -128,11 +128,9 @@ export default function DrawHomeScreen({ navigation, route }) {
         console.warn('⚠️ [DRAW] Could not save player name:', e);
       }
       
-      // Show interstitial ad if available, then navigate
+      // Navigate to room
       console.log('🔵 [DRAW] Navigating to room...');
-      showInterstitialIfAvailable(() => {
-        navigation.navigate('DrawRoom', { roomCode: code });
-      });
+      navigation.navigate('DrawRoom', { roomCode: code });
     } catch (error) {
       console.error('❌ [DRAW] Error creating room:', error);
       let errorMessage = 'שגיאה ביצירת החדר. נסה שוב.';
@@ -196,10 +194,8 @@ export default function DrawHomeScreen({ navigation, route }) {
         unsubscribeRef.current = null;
       }
       
-      // Show interstitial ad if available, then navigate
-      showInterstitialIfAvailable(() => {
-        navigation.navigate('DrawRoom', { roomCode: joinedRoomCode });
-      });
+      // Navigate to room
+      navigation.navigate('DrawRoom', { roomCode: joinedRoomCode });
       
       // Set up a temporary listener to catch game start if player is still on this screen
       // This listener will be cleaned up when navigating to DrawRoom
@@ -317,7 +313,7 @@ export default function DrawHomeScreen({ navigation, route }) {
                     placeholderTextColor="#999"
                     style={styles.input}
                     autoCapitalize="characters"
-                    maxLength={6}
+                    maxLength={4}
                   />
                 </View>
 

@@ -1,4 +1,4 @@
-import { Share } from 'react-native';
+import { Share, Platform } from 'react-native';
 import { generateDeepLink, getGameDisplayName } from './deepLinking';
 
 /**
@@ -24,13 +24,24 @@ export async function shareGameLink(game, roomId, inviter) {
     const link = generateDeepLink(game, roomId, inviter);
     const message = generateShareMessage(inviter, game);
     
-    // Combine message and link
+    // Format the share content with the link on its own line
+    // Putting the URL on a separate line helps messaging apps recognize it as a clickable link
     const shareContent = `${message}\n\n${link}`;
     
-    const result = await Share.share({
+    // For React Native Share, use url parameter on iOS (if available) for better link recognition
+    // On Android, include URL in message - most messaging apps will recognize it
+    const shareOptions = {
       message: shareContent,
       title: 'Share Game Invite'
-    });
+    };
+    
+    // On iOS, we can also include url parameter for better deep link handling
+    // Note: url parameter is iOS-only, so we include link in message for cross-platform compatibility
+    if (Platform.OS === 'ios') {
+      shareOptions.url = link;
+    }
+    
+    const result = await Share.share(shareOptions);
     
     // Share.share returns { action: Share.sharedAction } on success
     // or { action: Share.dismissedAction } if user dismissed

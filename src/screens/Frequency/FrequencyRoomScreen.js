@@ -37,6 +37,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
   const pendingTopicRef = useRef(null); // Track topic being set during turn advancement
+  const pendingTopicTimeoutRef = useRef(null); // Timeout to clear pendingTopicRef if update doesn't complete
   const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
 
   const loadRoom = async () => {
@@ -320,30 +321,26 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           // Prevent topic flickering during turn advancement
           // When advancing a turn, use the pending topic we're setting instead of accepting
           // potentially stale data from Firestore snapshot
-          if (isProcessingReveal.current && pendingTopicRef.current) {
+          if (pendingTopicRef.current) {
             const isTransitioning = prevRoom?.turn_phase === 'summary' && newRoom.turn_phase === 'clue';
-            const incomingTopicInvalid = !newRoom.current_topic || 
-                                       !newRoom.current_topic.left_side || 
-                                       !newRoom.current_topic.right_side;
+            const incomingTopicValid = newRoom.current_topic && 
+                                     newRoom.current_topic.left_side && 
+                                     newRoom.current_topic.right_side;
+            const incomingMatches = incomingTopicValid &&
+                                  newRoom.current_topic.left_side === pendingTopicRef.current.left_side &&
+                                  newRoom.current_topic.right_side === pendingTopicRef.current.right_side;
             
-            // During transition or if incoming topic is invalid, always use pending topic
-            // This prevents flickering from stale Firestore data
-            if (isTransitioning || incomingTopicInvalid) {
+            // Use pending topic if transitioning, if incoming doesn't match, or if incoming is invalid
+            if (isTransitioning || !incomingMatches || !incomingTopicValid) {
               newRoom.current_topic = pendingTopicRef.current;
-            } else {
-              // If incoming topic is valid, check if it matches what we set
-              // If it matches, we can accept it (the update completed successfully) and clear the ref
-              // If it doesn't match, it might be stale data, so use pending topic
-              const incomingMatches = newRoom.current_topic.left_side === pendingTopicRef.current.left_side &&
-                                    newRoom.current_topic.right_side === pendingTopicRef.current.right_side;
-              
-              if (incomingMatches && newRoom.turn_phase === 'clue') {
-                // Topic matches and we're in the new phase, clear the ref as update completed successfully
-                pendingTopicRef.current = null;
-              } else if (!incomingMatches) {
-                // Incoming topic doesn't match what we're setting, use pending topic
-                newRoom.current_topic = pendingTopicRef.current;
+            } else if (incomingMatches && newRoom.turn_phase === 'clue') {
+              // Topic matches and we're in the new phase - update completed successfully
+              // Use the incoming topic from Firestore and clear the ref
+              if (pendingTopicTimeoutRef.current) {
+                clearTimeout(pendingTopicTimeoutRef.current);
+                pendingTopicTimeoutRef.current = null;
               }
+              pendingTopicRef.current = null;
             }
           }
           
@@ -825,6 +822,10 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         if (!randomTopic || !randomTopic.left || !randomTopic.right) {
           console.error('❌ Invalid topic structure:', randomTopic);
           isProcessingReveal.current = false;
+          if (pendingTopicTimeoutRef.current) {
+            clearTimeout(pendingTopicTimeoutRef.current);
+            pendingTopicTimeoutRef.current = null;
+          }
           pendingTopicRef.current = null;
           return;
         }
@@ -835,6 +836,22 @@ export default function FrequencyRoomScreen({ navigation, route }) {
 
         // Store the topic in ref before updating Firestore to prevent race conditions
         pendingTopicRef.current = newTopic;
+        
+        // Clear any existing timeout
+        if (pendingTopicTimeoutRef.current) {
+          clearTimeout(pendingTopicTimeoutRef.current);
+          pendingTopicTimeoutRef.current = null;
+        }
+        
+        // Set timeout to clear pendingTopicRef after 3 seconds as fallback
+        // This ensures the ref doesn't stay forever if update doesn't complete
+        pendingTopicTimeoutRef.current = setTimeout(() => {
+          if (pendingTopicRef.current) {
+            console.warn('⚠️ Pending topic ref timeout - clearing after 3 seconds');
+            pendingTopicRef.current = null;
+          }
+          pendingTopicTimeoutRef.current = null;
+        }, 3000);
 
         try {
           const roomRef = doc(db, 'FrequencyRoom', room.id);
@@ -855,11 +872,19 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           // The ref will be cleared when onSnapshot receives the correct topic
         } catch (error) {
           console.error('Error advancing to next turn:', error);
+          if (pendingTopicTimeoutRef.current) {
+            clearTimeout(pendingTopicTimeoutRef.current);
+            pendingTopicTimeoutRef.current = null;
+          }
           pendingTopicRef.current = null;
         }
       }
     } catch (error) {
       console.error('Error in advanceToNextTurn:', error);
+      if (pendingTopicTimeoutRef.current) {
+        clearTimeout(pendingTopicTimeoutRef.current);
+        pendingTopicTimeoutRef.current = null;
+      }
       pendingTopicRef.current = null;
     } finally {
       isProcessingReveal.current = false;

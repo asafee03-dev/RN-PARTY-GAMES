@@ -1,9 +1,8 @@
-import React from 'react';
-import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { View, StyleSheet } from 'react-native';
+import React from 'react';
+import { Platform, StyleSheet, View } from 'react-native';
+import { AdEventType, BannerAdSize, InterstitialAd, BannerAd as RNBannerAd } from 'react-native-google-mobile-ads';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BannerAd as RNBannerAd, BannerAdSize, InterstitialAd, AdEventType } from 'react-native-google-mobile-ads';
 import { BANNER_AD_UNIT_ID, INTERSTITIAL_AD_UNIT_ID } from '../../constants/adsConfig';
 
 /**
@@ -70,6 +69,12 @@ const styles = StyleSheet.create({
 const AD_TIMEOUT_MS = 3000;
 
 /**
+ * Singleton interstitial ad instance
+ * This must persist across calls to enable proper AdMob frequency capping
+ */
+let adInstance: InterstitialAd | null = null;
+
+/**
  * Shows an interstitial ad if available
  * 
  * This function:
@@ -77,8 +82,9 @@ const AD_TIMEOUT_MS = 3000;
  * - Has a timeout fallback to prevent blocking navigation
  * - Always calls onDone() callback exactly once when finished
  * - Uses AdMob frequency capping only (no custom logic)
- * - Creates a fresh ad instance each time (no singleton)
- * - Ensures all listeners and timers are cleaned up
+ * - Uses a persistent singleton ad instance for proper frequency capping (20-minute limit)
+ * - Ensures all listeners and timers are cleaned up reliably
+ * - Handles errors silently - if ad fails to load or is frequency-capped, user proceeds immediately
  * - Silently skips on Expo Go
  * 
  * @param onDone - Callback to execute when ad is closed, fails, or times out
@@ -94,7 +100,6 @@ export async function showInterstitialIfAvailable(onDone: () => void): Promise<v
   // Guard to ensure onDone() is called exactly once
   let finished = false;
   let timeoutId: NodeJS.Timeout | null = null;
-  let adInstance: InterstitialAd | null = null;
   let loadedListener: any = null;
   let closedListener: any = null;
   let errorListener: any = null;
@@ -106,27 +111,21 @@ export async function showInterstitialIfAvailable(onDone: () => void): Promise<v
       timeoutId = null;
     }
     
-    // Remove all listeners
+    // Remove all listeners from the singleton instance to prevent memory leaks
     try {
-      if (loadedListener) {
-        loadedListener.remove();
-        loadedListener = null;
-      }
-      if (closedListener) {
-        closedListener.remove();
-        closedListener = null;
-      }
-      if (errorListener) {
-        errorListener.remove();
-        errorListener = null;
+      if (adInstance) {
+        adInstance.removeAllListeners();
       }
     } catch (error) {
-      // Ignore errors during cleanup
-      console.warn('⚠️ Error during listener cleanup:', error);
+      // Ignore errors during cleanup - fail silently
     }
     
-    // Clear ad instance reference
-    adInstance = null;
+    // Clear listener references
+    loadedListener = null;
+    closedListener = null;
+    errorListener = null;
+    
+    // Note: adInstance is NOT cleared here - it's a persistent singleton
   };
 
   const finish = () => {
@@ -148,15 +147,25 @@ export async function showInterstitialIfAvailable(onDone: () => void): Promise<v
   };
 
   try {
-    // Create a fresh ad instance (no singleton/reuse)
-    adInstance = InterstitialAd.createForAdRequest(INTERSTITIAL_AD_UNIT_ID, {
-      requestNonPersonalizedAdsOnly: false,
-    });
+    // Create ad instance only if it doesn't exist (singleton pattern)
+    // This ensures AdMob frequency capping works correctly
+    if (!adInstance) {
+      adInstance = InterstitialAd.createForAdRequest(INTERSTITIAL_AD_UNIT_ID, {
+        requestNonPersonalizedAdsOnly: false,
+      });
+    }
+
+    // Remove all existing listeners before attaching new ones to avoid duplicates
+    // This is done in cleanup, but we do it here too to ensure clean state
+    try {
+      adInstance.removeAllListeners();
+    } catch (error) {
+      // Ignore errors silently - fail gracefully
+    }
 
     // Set up timeout - if ad doesn't show within timeout, continue navigation
     timeoutId = setTimeout(() => {
       if (!finished) {
-        console.log('⏱️ Interstitial ad timeout - continuing navigation');
         finish();
       }
     }, AD_TIMEOUT_MS);
@@ -167,8 +176,6 @@ export async function showInterstitialIfAvailable(onDone: () => void): Promise<v
       if (finished) {
         return;
       }
-      
-      console.log('✅ Interstitial ad loaded');
       
       // Cancel timeout since ad loaded successfully
       if (timeoutId) {
@@ -183,8 +190,7 @@ export async function showInterstitialIfAvailable(onDone: () => void): Promise<v
           adInstance.show();
         }
       } catch (error) {
-        console.warn('⚠️ Error showing interstitial ad:', error);
-        // If show() fails, continue navigation
+        // If show() fails, continue navigation silently
         if (!finished) {
           finish();
         }
@@ -194,16 +200,14 @@ export async function showInterstitialIfAvailable(onDone: () => void): Promise<v
     // Listen for ad closed event
     closedListener = adInstance.addAdEventListener(AdEventType.CLOSED, () => {
       if (!finished) {
-        console.log('✅ Interstitial ad closed');
         finish();
       }
     });
 
     // Listen for ad errors (including frequency capping)
-    errorListener = adInstance.addAdEventListener(AdEventType.ERROR, (error: any) => {
+    // On error or frequency cap, immediately continue navigation silently
+    errorListener = adInstance.addAdEventListener(AdEventType.ERROR, () => {
       if (!finished) {
-        console.warn('⚠️ Interstitial ad error (may be frequency-capped):', error);
-        // On error (including frequency capping), continue navigation immediately
         finish();
       }
     });
@@ -212,8 +216,7 @@ export async function showInterstitialIfAvailable(onDone: () => void): Promise<v
     // AdMob will decide if an ad is available based on frequency capping
     await adInstance.load();
   } catch (error) {
-    console.warn('⚠️ Error creating/loading interstitial ad:', error);
-    // On any error, continue navigation immediately
+    // On any error (including load failures), continue navigation immediately and silently
     if (!finished) {
       finish();
     }

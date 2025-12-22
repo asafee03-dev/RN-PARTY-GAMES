@@ -703,7 +703,9 @@ export default function DrawRoomScreen({ navigation, route }) {
           turn_start_time: turnStartTime,
           show_round_summary: false,
           round_winner: null,
-          drinking_players: null
+          drinking_players: null,
+          // Explicitly clear any end-game state from previous game as a safeguard
+          winner_name: null
         };
         await updateDoc(roomDocRef, updates);
         const updatedRoom = { ...currentRoom, ...updates };
@@ -1619,7 +1621,7 @@ export default function DrawRoomScreen({ navigation, route }) {
                       <Text style={styles.noGuessesText}>עדיין אין ניחושים...</Text>
                     ) : (
                       <View style={styles.guessesHorizontalContainer}>
-                        {allGuesses.map((guess, idx) => {
+                        {[...allGuesses].reverse().map((guess, idx) => {
                           const normalizedWord = room.current_word?.toLowerCase().trim();
                           const normalizedGuess = guess.guess?.toLowerCase().trim();
                           const isCorrect = normalizedWord && normalizedGuess === normalizedWord;
@@ -1679,7 +1681,7 @@ export default function DrawRoomScreen({ navigation, route }) {
                                   <Text style={styles.drawingBadgeText}>🎨 מצייר</Text>
                                 </View>
                               )}
-                              <Text style={styles.scoreboardScore}>{player.score}</Text>
+                              <Text style={styles.scoreboardScore}>{player.score} נקודות</Text>
                             </View>
                           </View>
                         );
@@ -1845,7 +1847,7 @@ export default function DrawRoomScreen({ navigation, route }) {
                       {allGuesses.length === 0 ? (
                         <Text style={styles.noGuessesTextSummary}>לא היו ניחושים בסבב זה</Text>
                       ) : (
-                        allGuesses.map((guess, idx) => {
+                        [...allGuesses].reverse().map((guess, idx) => {
                           const isCorrect = guess.isCorrect;
                           return (
                             <View
@@ -1999,7 +2001,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: 4,
-    paddingBottom: 8,
+    paddingBottom: 120, // Extra padding to allow scrolling to see input field when keyboard is open
   },
   header: {
     flexDirection: 'row',
@@ -2691,6 +2693,7 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     alignItems: 'flex-start',
     gap: 4,
+    width: '100%', // Ensure content takes full width of card
   },
   scoreboardRankRow: {
     flexDirection: 'row',
@@ -2699,35 +2702,37 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   scoreboardRank: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     color: '#9CA3AF',
   },
   trophyIcon: {
-    fontSize: 11,
+    fontSize: 12,
   },
   scoreboardPlayerName: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '600',
     color: '#1F2937',
-    flex: 1,
+    width: '100%', // Take full width instead of flex: 1
   },
   drawingBadge: {
     backgroundColor: '#C48CFF', // Draw theme color
-    paddingHorizontal: 4,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
     borderRadius: 6,
     marginTop: 2,
+    alignSelf: 'flex-start', // Don't stretch to full width
   },
   drawingBadgeText: {
     color: '#FFFFFF',
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '600',
   },
   scoreboardScore: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#C48CFF', // Draw theme color
+    color: '#1F2937', // Dark color for better visibility
+    marginTop: 2,
   },
   modalOverlay: {
     flex: 1,
@@ -3204,8 +3209,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#E5E7EB',
     borderRadius: 8,
-    padding: 6,
-    minWidth: 80,
-    maxWidth: 120,
+    padding: 8,
+    minWidth: 100,
+    maxWidth: 140,
+    overflow: 'hidden', // Ensure content doesn't overflow
   },
 });

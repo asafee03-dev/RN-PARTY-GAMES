@@ -98,6 +98,7 @@ export default function AliasGameScreen({ navigation, route }) {
   // But only if we haven't just navigated from setup (prevent navigation loops)
   const hasNavigatedFromSetup = useRef(false);
   const isInitialLoad = useRef(true);
+  const previousGameStatusRef = useRef(null);
   
   useEffect(() => {
     // Mark initial load as complete once room is loaded
@@ -110,15 +111,31 @@ export default function AliasGameScreen({ navigation, route }) {
       hasNavigatedFromSetup.current = true;
     }
     
-    // Only redirect to setup if:
-    // 1. Game status is setup
-    // 2. We haven't just navigated from setup (to prevent loops)
-    // 3. Room has been loaded (not initial state)
-    // 4. Not during initial load (to prevent premature navigation)
-    if (room && room.game_status === 'setup' && !hasNavigatedFromSetup.current && 
-        room.teams && !isInitialLoad.current && !isLoading) {
-      // Reset flag when going back to setup
+    // Track previous game status before updating
+    const currentGameStatus = room?.game_status;
+    const previousGameStatus = previousGameStatusRef.current;
+    
+    // Reset flag when transitioning to setup from finished/playing/waiting
+    // This allows navigation back to setup when host clicks "משחק חדש"
+    if (currentGameStatus === 'setup' && previousGameStatus && 
+        (previousGameStatus === 'finished' || previousGameStatus === 'playing' || previousGameStatus === 'waiting')) {
+      // Reset flag to allow navigation back to setup
       hasNavigatedFromSetup.current = false;
+    }
+    
+    // Update previous game status
+    if (currentGameStatus) {
+      previousGameStatusRef.current = currentGameStatus;
+    }
+    
+    // Redirect to setup if:
+    // 1. Game status is setup
+    // 2. Room has been loaded (not initial state)
+    // 3. Not during initial load (to prevent premature navigation)
+    // 4. We're allowed to navigate (flag has been reset if coming from finished/playing/waiting)
+    if (room && room.game_status === 'setup' && 
+        room.teams && !isInitialLoad.current && !isLoading &&
+        !hasNavigatedFromSetup.current) {
       navigation.replace('AliasSetup', { roomCode });
       return;
     }

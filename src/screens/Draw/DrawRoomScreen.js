@@ -1295,11 +1295,34 @@ export default function DrawRoomScreen({ navigation, route }) {
   const isHost = room.host_name === currentPlayerName;
   const currentDrawerName = getCurrentPlayerName();
   const allGuesses = getAllGuesses(room);
-  const correctGuesserNames = new Set(
-    allGuesses.filter(g => g.isCorrect).map(g => g.playerName)
-  );
-  const correctGuessers = Array.from(correctGuesserNames)
-    .map(name => room.players.find(p => p.name === name))
+  
+  // Calculate points by time for display in summary
+  const calculatePointsByTime = (timestamp, turnStartTime) => {
+    if (!timestamp || !turnStartTime) return 1;
+    const elapsed = Math.floor((timestamp - turnStartTime) / 1000);
+    if (elapsed <= 20) return 3;
+    if (elapsed <= 40) return 2;
+    return 1;
+  };
+  
+  // Create map of correct guessers with their points
+  const correctGuessersMap = new Map();
+  allGuesses.forEach(g => {
+    if (g.isCorrect && g.timestamp) {
+      const points = calculatePointsByTime(g.timestamp, room.turn_start_time);
+      // If player already guessed correctly, take the highest points
+      if (!correctGuessersMap.has(g.playerName) || correctGuessersMap.get(g.playerName) < points) {
+        correctGuessersMap.set(g.playerName, points);
+      }
+    }
+  });
+  
+  // Convert to array with points information
+  const correctGuessers = Array.from(correctGuessersMap.entries())
+    .map(([name, points]) => {
+      const player = room.players.find(p => p.name === name);
+      return player ? { ...player, pointsEarned: points } : null;
+    })
     .filter(Boolean);
 
   return (
@@ -1676,11 +1699,6 @@ export default function DrawRoomScreen({ navigation, route }) {
                                 )}
                               </View>
                               <Text style={styles.scoreboardPlayerName} numberOfLines={1}>{player.name}</Text>
-                              {isCurrentTurn && (
-                                <View style={styles.drawingBadge}>
-                                  <Text style={styles.drawingBadgeText}>🎨 מצייר</Text>
-                                </View>
-                              )}
                               <Text style={styles.scoreboardScore}>{player.score} נקודות</Text>
                             </View>
                           </View>
@@ -1795,7 +1813,9 @@ export default function DrawRoomScreen({ navigation, route }) {
                         <View style={styles.winnersList}>
                           {correctGuessers.map((player) => (
                             <View key={player.name} style={styles.winnerBadge}>
-                              <Text style={styles.winnerBadgeText}>{player.name} +1 ⭐</Text>
+                              <Text style={styles.winnerBadgeText}>
+                                {player.name} +{player.pointsEarned} נקודות
+                              </Text>
                             </View>
                           ))}
                         </View>

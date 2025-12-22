@@ -64,10 +64,10 @@ const createRectangularSpiral = () => {
 const generateSpiralPathLines = (spiralSquares) => {
   const lines = [];
   const backgrounds = [];
-  const CIRCLE_RADIUS = 20; // Half of 40px circle size
-  const GAP = 6;
-  const CELL_SIZE = 40 + GAP; // 46px total per cell
-  const TRACK_WIDTH = 36; // Distance between the two parallel lines
+  const CIRCLE_RADIUS = 15; // Half of 30px circle size
+  const GAP = 4;
+  const CELL_SIZE = 30 + GAP; // 34px total per cell
+  const TRACK_WIDTH = 25; // Distance between the two parallel lines
   
   // First pass: calculate all segments with their directions
   const segments = [];
@@ -306,8 +306,8 @@ export default function GameBoard({ teams, goldenSquares = [] }) {
             const isGoldenSquare = goldenSquares.includes(square.position);
             
             // Calculate absolute position based on row and col
-            const left = square.col * (40 + 6); // square width + gap
-            const top = square.row * (40 + 6); // square height + gap
+            const left = square.col * (30 + 4); // square width + gap
+            const top = square.row * (30 + 4); // square height + gap
             
             return (
               <View
@@ -364,8 +364,8 @@ export default function GameBoard({ teams, goldenSquares = [] }) {
           {/* Spiral path connecting lines - rendered on top of circles */}
           <Svg
             style={styles.pathSvg}
-            width={454}
-            height={270}
+            width={336}
+            height={200}
           >
             {(() => {
               const { lines, backgrounds } = generateSpiralPathLines(spiralSquares);
@@ -447,13 +447,13 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 3,
     borderColor: '#3B82F6',
-    width: 478, // Fixed width: 10 columns * 40px + 9 gaps * 6px + padding 24px
-    height: 294, // Fixed height: 6 rows * 40px + 5 gaps * 6px + padding 24px
+    width: 360, // Fixed width: 10 columns * 30px + 9 gaps * 4px + padding 24px
+    height: 224, // Fixed height: 6 rows * 30px + 5 gaps * 4px + padding 24px
     alignSelf: 'center',
   },
   grid: {
-    width: 454, // 10 columns * 40px + 9 gaps * 6px = 400 + 54
-    height: 270, // 6 rows * 40px + 5 gaps * 6px = 240 + 30
+    width: 336, // 10 columns * 30px + 9 gaps * 4px = 300 + 36
+    height: 200, // 6 rows * 30px + 5 gaps * 4px = 180 + 20
     position: 'relative',
   },
   pathSvg: {
@@ -463,9 +463,9 @@ const styles = StyleSheet.create({
     zIndex: 1, // Lines pass through circles, but circles render on top
   },
   square: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: '#FFFFFF',
     borderWidth: 2,
     borderColor: '#3B82F6',
@@ -491,15 +491,15 @@ const styles = StyleSheet.create({
     borderColor: '#8B5CF6',
   },
   squareNumber: {
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: 'bold',
     color: '#1E40AF',
   },
   squareEmoji: {
-    fontSize: 21,
+    fontSize: 16,
   },
   goldenEmoji: {
-    fontSize: 16,
+    fontSize: 12,
   },
   teamIndicators: {
     position: 'absolute',
@@ -508,9 +508,9 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   teamDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     borderWidth: 1,
     borderColor: '#FFFFFF',
   },
@@ -538,12 +538,12 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
   },
   legendText: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: '600',
     color: '#1F2937',
   },
   legendPosition: {
-    fontSize: 12,
+    fontSize: 10,
     color: '#3B82F6',
     fontWeight: '600',
   },

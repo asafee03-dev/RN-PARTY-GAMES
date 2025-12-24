@@ -599,6 +599,10 @@ export default function SpyRoomScreen({ navigation, route }) {
       await updateDoc(roomRef, updates);
       console.log('✅ Game started successfully with fresh state');
       setRoom(prev => ({ ...prev, ...updates }));
+      
+      // Log analytics event
+      const { logGameStart } = await import('../../utils/analytics');
+      logGameStart('spy', currentRoom.id);
     } catch (error) {
       console.error('❌ Error starting game:', error);
       Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');

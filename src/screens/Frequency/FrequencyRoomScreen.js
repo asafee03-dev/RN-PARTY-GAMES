@@ -16,7 +16,7 @@ import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 
-const PLAYER_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#10B981", "#3B82F6", "#EC4899", "#F97316", "#14B8A6"];
+const PLAYER_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#FCD34D", "#3B82F6", "#EC4899", "#F97316", "#14B8A6"];
 const waveIcons = ["📻", "📡", "🎚️", "🎛️"];
 
 export default function FrequencyRoomScreen({ navigation, route }) {
@@ -559,6 +559,10 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         await updateDoc(roomRef, updates);
         console.log('✅ Game started successfully');
         setRoom(prev => ({ ...prev, ...updates }));
+        
+        // Log analytics event
+        const { logGameStart } = await import('../../utils/analytics');
+        logGameStart('frequency', room.id);
       } catch (error) {
         console.error('❌ Error starting game:', error);
         Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');

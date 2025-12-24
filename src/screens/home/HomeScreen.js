@@ -231,9 +231,8 @@ export default function HomeScreen({ navigation }) {
   };
 
   return (
-    <LinearGradient
-      colors={['#FEF3C7', '#FED7AA', '#FECACA']} // from-amber-50 via-orange-50 to-rose-50
-      style={styles.container}
+    <View
+      style={[styles.container, { backgroundColor: '#FAEFE1' }]}
     >
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -315,7 +314,7 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
       </ScrollView>
-    </LinearGradient>
+    </View>
   );
 }
 

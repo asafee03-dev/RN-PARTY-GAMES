@@ -155,6 +155,10 @@ export default function AliasHomeScreen({ navigation, route }) {
 
       console.log('✅ [ALIAS] Room created successfully with code:', newRoomCode);
       
+      // Log analytics event
+      const { logCreateRoom } = await import('../../utils/analytics');
+      logCreateRoom('alias', newRoomCode);
+      
       // Navigate to setup screen
       navigation.navigate('AliasSetup', { roomCode: newRoomCode });
     } catch (error) {
@@ -214,6 +218,10 @@ export default function AliasHomeScreen({ navigation, route }) {
       }
       
       await storage.setItem('playerName', playerName);
+      
+      // Log analytics event
+      const { logJoinRoom } = await import('../../utils/analytics');
+      logJoinRoom('alias', roomCode.toUpperCase());
       
       // Navigate to setup screen
       navigation.navigate('AliasSetup', { roomCode: roomCode.toUpperCase() });

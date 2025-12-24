@@ -188,6 +188,11 @@ export async function showInterstitialIfAvailable(onDone: () => void): Promise<v
         // Double-check we haven't finished before showing
         if (!finished && adInstance) {
           adInstance.show();
+          
+          // Log analytics event for ad impression
+          import('../utils/analytics').then(({ logAdImpression }) => {
+            logAdImpression('interstitial');
+          });
         }
       } catch (error) {
         // If show() fails, continue navigation silently

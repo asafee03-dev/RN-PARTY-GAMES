@@ -219,6 +219,10 @@ export default function CodenamesHomeScreen({ navigation, route }) {
       console.log('✅ [CODENAMES] Room created and verified successfully with code:', newRoomCode);
       console.log('🔵 [CODENAMES] About to navigate - execution checkpoint 4');
       
+      // Log analytics event
+      const { logCreateRoom } = await import('../../utils/analytics');
+      logCreateRoom('codenames', newRoomCode);
+      
       // Navigate to setup screen
       navigation.navigate('CodenamesSetup', { roomCode: newRoomCode, gameMode: 'friends' });
       console.log('✅ [CODENAMES] Navigation initiated - execution checkpoint 5');
@@ -254,6 +258,10 @@ export default function CodenamesHomeScreen({ navigation, route }) {
 
     try {
       await storage.setItem('playerName', playerName);
+      
+      // Log analytics event
+      const { logJoinRoom } = await import('../../utils/analytics');
+      logJoinRoom('codenames', roomCode.toUpperCase());
       
       // Navigate to setup screen
       navigation.navigate('CodenamesSetup', { roomCode: roomCode.toUpperCase(), gameMode: 'friends' });

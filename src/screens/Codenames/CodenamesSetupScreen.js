@@ -435,6 +435,11 @@ export default function CodenamesSetupScreen({ navigation, route }) {
         await updateDoc(roomRef, updates);
         console.log('✅ Game started successfully with fresh state');
         setRoom(prev => ({ ...prev, ...updates }));
+        
+        // Log analytics event
+        const { logGameStart } = await import('../../utils/analytics');
+        logGameStart('codenames', currentRoom.id);
+        
         navigation.navigate('CodenamesGame', { roomCode });
       } catch (error) {
         console.error('❌ Error starting game:', error);

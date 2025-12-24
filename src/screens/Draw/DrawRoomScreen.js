@@ -713,6 +713,10 @@ export default function DrawRoomScreen({ navigation, route }) {
         roomRef.current = updatedRoom; // Update ref immediately so isMyTurn() works correctly for first turn
         console.log('✅ Game started successfully');
         console.log(`🔵 [DRAW] First turn - Player at index ${firstTurnIndex}: ${updatedRoom.players[firstTurnIndex]?.name}, Current player: ${currentPlayerName}`);
+        
+        // Log analytics event
+        const { logGameStart } = await import('../../utils/analytics');
+        logGameStart('draw', currentRoom.id);
       } catch (error) {
         console.error('❌ Error starting game:', error);
         Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');

@@ -185,6 +185,10 @@ export default function FrequencyHomeScreen({ navigation, route }) {
       
       console.log('✅ [FREQUENCY] Room created successfully with code:', newRoomCode);
       
+      // Log analytics event
+      const { logCreateRoom } = await import('../../utils/analytics');
+      logCreateRoom('frequency', newRoomCode);
+      
       // Save player name BEFORE navigation (like Alias does)
       try {
         await storage.setItem('playerName', playerName);
@@ -226,10 +230,18 @@ export default function FrequencyHomeScreen({ navigation, route }) {
     try {
       await storage.setItem('playerName', playerName);
       
+      // Log analytics event
+      const { logJoinRoom } = await import('../../utils/analytics');
+      logJoinRoom('frequency', roomCode.toUpperCase());
+      
       // Navigate to room
       navigation.navigate('FrequencyRoom', { roomCode: roomCode.toUpperCase() });
     } catch (e) {
       console.warn('Could not save player name:', e);
+      
+      // Log analytics event
+      const { logJoinRoom } = await import('../../utils/analytics');
+      logJoinRoom('frequency', roomCode.toUpperCase());
       
       // Navigate to room
       navigation.navigate('FrequencyRoom', { roomCode: roomCode.toUpperCase() });

@@ -121,6 +121,10 @@ export default function DrawHomeScreen({ navigation, route }) {
       // No need to verify - if setDoc succeeds, document exists
       console.log('✅ [DRAW] Room created successfully with code:', code);
       
+      // Log analytics event
+      const { logCreateRoom } = await import('../../utils/analytics');
+      logCreateRoom('draw', code);
+      
       // Save player name before navigation
       try {
         await storage.setItem('playerName', playerName);
@@ -187,6 +191,10 @@ export default function DrawHomeScreen({ navigation, route }) {
       
       await storage.setItem('playerName', playerName);
       joinedRoomCodeRef.current = joinedRoomCode;
+      
+      // Log analytics event
+      const { logJoinRoom } = await import('../../utils/analytics');
+      logJoinRoom('draw', joinedRoomCode);
       
       // Set up listener to watch for game status changes
       if (unsubscribeRef.current) {

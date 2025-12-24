@@ -12,6 +12,7 @@ import DrawNavigator from './DrawNavigator';
 import { clearNavigationState, saveNavigationState } from '../utils/navigationState';
 import { parseDeepLink } from '../utils/deepLinking';
 import storage from '../utils/storage';
+import { logAppOpen } from '../utils/analytics';
 
 const Stack = createNativeStackNavigator();
 
@@ -28,6 +29,9 @@ export default function AppNavigator() {
         // This prevents restoring stale screens or deleted rooms
         await clearNavigationState();
         console.log('✅ Cleared saved navigation state on app initialization');
+        
+        // Log app_open event (only once per app session)
+        logAppOpen();
       } catch (error) {
         console.warn('⚠️ Error clearing navigation state:', error);
       } finally {

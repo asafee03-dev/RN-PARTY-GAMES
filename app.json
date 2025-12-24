@@ -2,7 +2,7 @@
   "expo": {
     "name": "PARTY GAMES",
     "slug": "party-games-native",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/images/partygameslogo.png",
     "scheme": "partygames",
@@ -13,7 +13,10 @@
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "associatedDomains": [
+        "applinks:www.party-games-app.com"
+      ]
     },
     "android": {
       "adaptiveIcon": {
@@ -51,7 +54,8 @@
           "iosAppId": "ca-app-pub-2071998287051065~8129109675",
           "androidAppId": "ca-app-pub-2071998287051065~5934384693"
         }
-      ]
+      ],
+      "./plugins/with-modular-headers.js"
     ],
     "experiments": {
       "reactCompiler": true

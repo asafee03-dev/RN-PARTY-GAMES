@@ -109,6 +109,10 @@ export default function SpyHomeScreen({ navigation, route }) {
       
       console.log('✅ [SPY] Room created successfully with code:', newRoomCode);
       
+      // Log analytics event
+      const { logCreateRoom } = await import('../../utils/analytics');
+      logCreateRoom('spy', newRoomCode);
+      
       // Save player name BEFORE navigation (like Alias does)
       try {
         await storage.setItem('playerName', playerName);
@@ -150,6 +154,11 @@ export default function SpyHomeScreen({ navigation, route }) {
     }
 
     storage.setItem('playerName', playerName);
+    
+    // Log analytics event
+    import('../../utils/analytics').then(({ logJoinRoom }) => {
+      logJoinRoom('spy', roomCode.toUpperCase());
+    });
     
     // Navigate to room
     navigation.navigate('SpyRoom', { roomCode: roomCode.toUpperCase() });

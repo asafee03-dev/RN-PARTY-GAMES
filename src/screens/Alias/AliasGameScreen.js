@@ -432,6 +432,12 @@ export default function AliasGameScreen({ navigation, route }) {
       // Try update first - if room doesn't exist, updateDoc will throw
       try {
         await updateDoc(roomRef, updates);
+        
+        // Log analytics event (only once when game first starts)
+        if (room.game_status !== 'playing') {
+          const { logGameStart } = await import('../../utils/analytics');
+          logGameStart('alias', room.id);
+        }
       } catch (error) {
         if (error.code === 'not-found') {
           Alert.alert('שגיאה', 'החדר נמחק. אנא צא מהחדר וחזור.');

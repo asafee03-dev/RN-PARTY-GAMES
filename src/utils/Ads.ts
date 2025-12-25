@@ -1,25 +1,29 @@
 /**
  * Ads Abstraction Layer - Platform-agnostic entry point
  * 
- * Metro bundler will automatically resolve platform-specific files:
- * - On iOS/Android: resolves to Ads.native.tsx
- * - On Web: resolves to Ads.web.tsx
+ * This file conditionally imports from platform-specific implementations:
+ * - Ads.native.tsx on iOS/Android
+ * - Ads.web.tsx on Web
  * 
- * This file conditionally imports based on platform to ensure web builds work correctly.
+ * Uses require() to prevent web builds from trying to bundle native ad libraries.
  */
 
 import { Platform } from 'react-native';
 
-// Conditionally import based on platform
-// TypeScript needs both imports, but Metro will only bundle the correct one
-// @ts-ignore - Metro bundler will only bundle the correct platform file during build
-import * as nativeAds from './Ads.native';
-// @ts-ignore - Metro bundler will only bundle the correct platform file during build
-import * as webAds from './Ads.web';
+// Use require() to conditionally import based on platform
+// This prevents web builds from trying to import react-native-google-mobile-ads
+let adsModule: any;
 
-// Export based on platform
-// Metro bundler will tree-shake the unused import during build
-export const areAdsEnabled = Platform.OS === 'web' ? webAds.areAdsEnabled : nativeAds.areAdsEnabled;
-export const showInterstitialIfAvailable = Platform.OS === 'web' ? webAds.showInterstitialIfAvailable : nativeAds.showInterstitialIfAvailable;
-export default Platform.OS === 'web' ? webAds.default : nativeAds.default;
+if (Platform.OS === 'web') {
+  // Web platform - use web stubs (no ads)
+  adsModule = require('./Ads.web');
+} else {
+  // Native platforms (iOS/Android) - use native implementation
+  adsModule = require('./Ads.native');
+}
+
+// Re-export the functions
+export const areAdsEnabled: () => boolean = adsModule.areAdsEnabled;
+export const showInterstitialIfAvailable: (onDone: () => void) => Promise<void> = adsModule.showInterstitialIfAvailable;
+export default adsModule.default;
 

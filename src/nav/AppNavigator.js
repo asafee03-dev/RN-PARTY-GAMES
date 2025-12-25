@@ -1,18 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
-import HomeNavigator from './HomeNavigator';
-import AliasNavigator from './AliasNavigator';
-import FrequencyNavigator from './FrequencyNavigator';
-import CodenamesNavigator from './CodenamesNavigator';
-import SpyNavigator from './SpyNavigator';
-import DrawNavigator from './DrawNavigator';
-import { clearNavigationState, saveNavigationState } from '../utils/navigationState';
-import { parseDeepLink } from '../utils/deepLinking';
-import storage from '../utils/storage';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import { logAppOpen } from '../utils/analytics';
+import { parseDeepLink } from '../utils/deepLinking';
+import { clearNavigationState, saveNavigationState } from '../utils/navigationState';
+import storage from '../utils/storage';
+import AliasNavigator from './AliasNavigator';
+import CodenamesNavigator from './CodenamesNavigator';
+import DrawNavigator from './DrawNavigator';
+import FrequencyNavigator from './FrequencyNavigator';
+import HomeNavigator from './HomeNavigator';
+import SpyNavigator from './SpyNavigator';
 
 const Stack = createNativeStackNavigator();
 
@@ -43,46 +43,26 @@ export default function AppNavigator() {
     initializeApp();
   }, []);
 
-  // Handle deep links
-  useEffect(() => {
-    if (!isReady || !navigationRef.current) return;
-
-    // Handle initial URL (when app opens from a link)
-    const handleInitialURL = async () => {
-      try {
-        const initialUrl = await Linking.getInitialURL();
-        if (initialUrl) {
-          handleDeepLink(initialUrl);
-        }
-      } catch (error) {
-        console.warn('⚠️ Error getting initial URL:', error);
-      }
-    };
-
-    // Handle URL changes (when app is already open)
-    const subscription = Linking.addEventListener('url', ({ url }) => {
-      handleDeepLink(url);
-    });
-
-    handleInitialURL();
-
-    return () => {
-      subscription.remove();
-    };
-  }, [isReady]);
-
   // Navigate based on deep link
-  const handleDeepLink = async (url) => {
-    if (!navigationRef.current) return;
+  // Handles both HTTPS Universal Links (https://party-games-app.com/join?...)
+  // and custom scheme deep links (partygames://join?...)
+  const handleDeepLink = useCallback(async (url) => {
+    if (!navigationRef.current || !url) {
+      return;
+    }
 
     try {
+      console.log('🔗 Handling deep link:', url);
+      
       const parsed = parseDeepLink(url);
       if (!parsed) {
-        // Not a valid deep link, ignore
+        console.log('⚠️ Invalid deep link format, ignoring:', url);
         return;
       }
 
       const { game, roomId, inviter } = parsed;
+      console.log('✅ Parsed deep link:', { game, roomId, inviter });
+
       const gameTypeCapitalized = game.charAt(0).toUpperCase() + game.slice(1);
 
       // Check if player has a saved nickname
@@ -97,12 +77,14 @@ export default function AppNavigator() {
           screenName = 'CodenamesSetup';
         }
 
+        console.log(`🚀 Navigating to ${gameTypeCapitalized} -> ${screenName} with roomCode: ${roomId}`);
         navigationRef.current.navigate(gameTypeCapitalized, {
           screen: screenName,
           params: { roomCode: roomId, fromDeepLink: true }
         });
       } else {
         // No nickname - navigate to home screen with pre-filled room code
+        console.log(`🚀 Navigating to ${gameTypeCapitalized}Home with prefillRoomCode: ${roomId}`);
         navigationRef.current.navigate(gameTypeCapitalized, {
           screen: `${gameTypeCapitalized}Home`,
           params: { prefillRoomCode: roomId, inviter }
@@ -111,7 +93,53 @@ export default function AppNavigator() {
     } catch (error) {
       console.warn('⚠️ Error handling deep link:', error);
     }
-  };
+  }, []);
+
+  // Handle deep links - both cold start and warm start
+  useEffect(() => {
+    if (!isReady) {
+      return;
+    }
+
+    let subscription = null;
+
+    // Wait a bit for navigation to be ready
+    const timeoutId = setTimeout(() => {
+      if (!navigationRef.current) {
+        console.warn('⚠️ Navigation ref not ready for deep link handling');
+        return;
+      }
+
+      // Handle initial URL (cold start - when app opens from a link)
+      const handleInitialURL = async () => {
+        try {
+          const initialUrl = await Linking.getInitialURL();
+          if (initialUrl) {
+            console.log('🔗 Cold start - initial URL:', initialUrl);
+            handleDeepLink(initialUrl);
+          }
+        } catch (error) {
+          console.warn('⚠️ Error getting initial URL:', error);
+        }
+      };
+
+      // Handle URL changes (warm start - when app is already open)
+      subscription = Linking.addEventListener('url', ({ url }) => {
+        console.log('🔗 Warm start - URL event:', url);
+        handleDeepLink(url);
+      });
+
+      // Check for initial URL
+      handleInitialURL();
+    }, 100);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (subscription) {
+        subscription.remove();
+      }
+    };
+  }, [isReady, handleDeepLink]);
 
   // Save navigation state whenever it changes
   const handleStateChange = (state) => {

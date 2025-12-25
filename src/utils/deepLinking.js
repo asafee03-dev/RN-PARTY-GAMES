@@ -1,17 +1,17 @@
 /**
  * Deep Linking Utilities
- * Handles both custom scheme deep links (partygames://) and Universal Links (https://)
+ * Generates HTTPS web URLs for sharing and handles both Universal Links (https://) and custom scheme deep links (partygames://)
  * 
- * Custom scheme: partygames://join?game=spy&roomId=ABC123&inviter=Asaf
- * Universal Link: https://www.party-games-app.com/join?game=spy&roomId=ABC123&inviter=Asaf
+ * Primary format (for sharing): https://party-games-app.com/join?game=spy&roomId=ABC123&inviter=Asaf
+ * Custom scheme (backward compatibility only): partygames://join?game=spy&roomId=ABC123&inviter=Asaf
  */
 
 /**
- * Generate a deep link URL for joining a game room
+ * Generate a web URL for joining a game room
  * @param {string} game - Game type (spy, codenames, alias, frequency, draw)
  * @param {string} roomId - Room code
  * @param {string} inviter - Name of the person inviting
- * @returns {string} Deep link URL
+ * @returns {string} HTTPS web URL
  */
 export function generateDeepLink(game, roomId, inviter) {
   const params = new URLSearchParams({
@@ -19,12 +19,12 @@ export function generateDeepLink(game, roomId, inviter) {
     roomId: roomId.toUpperCase(),
     inviter: inviter
   });
-  return `partygames://join?${params.toString()}`;
+  return `https://party-games-app.com/join?${params.toString()}`;
 }
 
 /**
  * Parse a deep link URL and extract parameters
- * Supports both custom scheme (partygames://) and Universal Links (https://www.party-games-app.com)
+ * Supports both Universal Links (https://party-games-app.com) and custom scheme (partygames://) for backward compatibility
  * @param {string} url - Deep link URL
  * @returns {Object|null} Parsed parameters { game, roomId, inviter } or null if invalid
  */
@@ -37,13 +37,15 @@ export function parseDeepLink(url) {
     let path = '';
     let queryString = '';
 
-    // Handle Universal Links: https://www.party-games-app.com/join?game=spy&roomId=ABC123
-    if (url.startsWith('https://www.party-games-app.com/')) {
+    // Handle Universal Links: https://party-games-app.com/join?game=spy&roomId=ABC123
+    // Support both www and non-www versions
+    if (url.startsWith('https://party-games-app.com/') || url.startsWith('https://www.party-games-app.com/')) {
       const urlObj = new URL(url);
       path = urlObj.pathname;
       queryString = urlObj.search.substring(1); // Remove leading '?'
     }
     // Handle custom scheme: partygames://join?game=spy&roomId=ABC123
+    // (Still supported for backward compatibility, but not used in shares)
     else if (url.startsWith('partygames://')) {
       // Remove the scheme prefix
       const withoutScheme = url.replace('partygames://', '');

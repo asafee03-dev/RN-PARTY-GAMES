@@ -25,16 +25,20 @@ export const copyToClipboard = async (text, successMessage = null) => {
  * Generate a room join link
  * @param {string} roomCode - Room code
  * @param {string} gameType - Type of game (alias, spy, frequency, draw, codenames)
- * @returns {string} - Join link
+ * @param {string} inviter - Optional name of the person inviting
+ * @returns {string} - HTTPS web URL for joining the room
  */
-export const generateRoomLink = (roomCode, gameType = 'alias') => {
-  // For now, we'll use a simple format
-  // In production, this would be your actual app URL
-  const baseUrl = Platform.OS === 'web' 
-    ? window.location.origin 
-    : 'https://myapp.com';
+export const generateRoomLink = (roomCode, gameType = 'alias', inviter = '') => {
+  const params = new URLSearchParams({
+    game: gameType.toLowerCase(),
+    roomId: roomCode.toUpperCase()
+  });
   
-  return `${baseUrl}/join/${gameType}/${roomCode}`;
+  if (inviter) {
+    params.set('inviter', inviter);
+  }
+  
+  return `https://party-games-app.com/join?${params.toString()}`;
 };
 
 /**

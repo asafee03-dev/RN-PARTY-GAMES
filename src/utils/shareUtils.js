@@ -9,7 +9,7 @@ import { generateDeepLink, getGameDisplayName } from './deepLinking';
  */
 export function generateShareMessage(inviter, game) {
   const gameName = getGameDisplayName(game);
-  return `${inviter} invited you to play ${gameName}.\nTap to join if you have the app installed. If not, please install it.`;
+  return `${inviter} invited you to play ${gameName}.\nTap the link to join!`;
 }
 
 /**

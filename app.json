@@ -15,6 +15,7 @@
         "ITSAppUsesNonExemptEncryption": false
       },
       "associatedDomains": [
+        "applinks:party-games-app.com",
         "applinks:www.party-games-app.com"
       ]
     },

@@ -10,9 +10,5 @@ config.resolver.sourceExts = [...config.resolver.sourceExts, 'js', 'jsx', 'ts', 
 // Disable Expo Router if app directory exists but we want to use App.js
 config.resolver.platforms = ['ios', 'android', 'native', 'web'];
 
-// Ensure platform-specific file resolution works correctly
-// This ensures that .web.tsx files are used for web builds and .native.tsx for native builds
-config.resolver.platforms = ['web', 'native', 'ios', 'android'];
-
 module.exports = config;
 

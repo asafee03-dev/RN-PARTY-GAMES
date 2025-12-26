@@ -325,53 +325,35 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           const currentTurnIndex = newRoom.current_turn_index;
           const currentRoundId = `${currentTurnIndex}-${newRoom.turn_phase || 'unknown'}-${newRoom.topic_update_timestamp || 0}`;
           
+          // Update refs to track current state (always update, don't block based on refs)
+          lastTurnIndexRef.current = currentTurnIndex;
+          if (newRoom.current_round_id) {
+            lastRoundIdRef.current = newRoom.current_round_id;
+          } else {
+            lastRoundIdRef.current = currentRoundId;
+          }
+          
           // If we have a previous room, check if this update is from an older round/turn
-          if (prevRoom && prevRoom.game_status === 'playing') {
+          // Only block if we're certain it's a stale update from background
+          if (prevRoom && prevRoom.game_status === 'playing' && newRoom.game_status === 'playing') {
             const prevTurnIndex = prevRoom.current_turn_index;
-            const prevRoundId = `${prevTurnIndex}-${prevRoom.turn_phase || 'unknown'}-${prevRoom.topic_update_timestamp || 0}`;
             
-            // If the new update is from an older turn, ignore it (this can happen when app returns from background)
-            if (currentTurnIndex < prevTurnIndex && prevRoom.game_status === 'playing' && newRoom.game_status === 'playing') {
-              console.warn('⚠️ Ignoring out-of-order update: new turn index is older than current');
+            // Only block if turn index is significantly older (more than 1 turn difference)
+            // This prevents blocking valid updates during normal gameplay
+            if (currentTurnIndex < prevTurnIndex - 1) {
+              console.warn('⚠️ Ignoring out-of-order update: new turn index is significantly older than current');
               return prevRoom;
             }
             
-            // If we're in the same turn but the round ID suggests this is an older update, be cautious
+            // If we're in the same turn but the topic timestamp suggests this is an older update, be cautious
+            // Only block if timestamps are significantly different (more than 5 seconds)
             if (currentTurnIndex === prevTurnIndex && 
                 newRoom.topic_update_timestamp && 
                 prevRoom.topic_update_timestamp &&
-                newRoom.topic_update_timestamp < prevRoom.topic_update_timestamp) {
+                prevRoom.topic_update_timestamp - newRoom.topic_update_timestamp > 5000) {
               console.warn('⚠️ Ignoring older topic update in same turn');
               // Keep previous topic but allow other fields to update
               newRoom.current_topic = prevRoom.current_topic;
-            }
-            
-            // Validate round ID - if new round ID doesn't match expected, be cautious
-            if (lastRoundIdRef.current && newRoom.current_round_id && 
-                newRoom.current_round_id !== lastRoundIdRef.current &&
-                currentTurnIndex === prevTurnIndex) {
-              // This might be a stale update - check timestamps
-              if (newRoom.topic_update_timestamp && prevRoom.topic_update_timestamp &&
-                  newRoom.topic_update_timestamp < prevRoom.topic_update_timestamp) {
-                console.warn('⚠️ Round ID mismatch with older timestamp - keeping previous state');
-                return prevRoom;
-              }
-            }
-            
-            // Update refs to track current state
-            lastTurnIndexRef.current = currentTurnIndex;
-            if (newRoom.current_round_id) {
-              lastRoundIdRef.current = newRoom.current_round_id;
-            } else {
-              lastRoundIdRef.current = currentRoundId;
-            }
-          } else if (!prevRoom) {
-            // First load - initialize refs
-            lastTurnIndexRef.current = currentTurnIndex;
-            if (newRoom.current_round_id) {
-              lastRoundIdRef.current = newRoom.current_round_id;
-            } else {
-              lastRoundIdRef.current = currentRoundId;
             }
           }
           
@@ -701,17 +683,9 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       return;
     }
     
-    // Validate that we're in the correct phase and round
+    // Validate that we're in the correct phase
     if (room.turn_phase !== 'guessing') {
       console.warn('⚠️ Cannot submit guess - not in guessing phase');
-      return;
-    }
-    
-    // Ensure we're not submitting a guess for an old round
-    // Check if the turn index matches what we expect
-    if (lastTurnIndexRef.current !== null && room.current_turn_index !== lastTurnIndexRef.current) {
-      console.warn('⚠️ Turn index mismatch - possible stale state, refreshing...');
-      // Don't submit - let the realtime listener update the state first
       return;
     }
 

@@ -756,49 +756,52 @@ export default function SpyRoomScreen({ navigation, route }) {
   const resetGame = async () => {
     if (!room || !room.id || !room.players || !Array.isArray(room.players) || !isHost) return;
     
-    // Show interstitial ad first, then reset game
-    showInterstitialIfAvailable(async () => {
-      // Cancel game end auto-deletion since we're resetting
-      if (autoDeletionCleanupRef.current.cancelGameEnd) {
-        autoDeletionCleanupRef.current.cancelGameEnd();
-        autoDeletionCleanupRef.current.cancelGameEnd = () => {};
-      }
-      
-      // Cancel timer
-      if (timerInterval.current) {
-        clearInterval(timerInterval.current);
-        timerInterval.current = null;
-      }
-      
-      const resetPlayers = room.players.map(p => ({ name: p.name }));
-      
-      try {
-        const roomRef = doc(db, 'SpyRoom', room.id);
-        await updateDoc(roomRef, {
-          players: resetPlayers,
-          game_status: 'lobby',
-          game_start_time: null,
-          spy_name: null,
-          spy_names: null,
-          chosen_location: null,
-          all_locations: null,
-          eliminated_locations: null,
-          all_votes_submitted: false,
-          spy_guess: null,
-          spy_guess_correct: null,
-          spy_guess_player: null,
-          reset_triggered_at: Date.now() // Signal to other players to show ad
-          // Note: game_mode is preserved when resetting
-        });
-        // Reset local state
-        setSpyGuess('');
-        setSpyGuessSubmitted(false);
-        console.log('✅ Game reset successfully - all state cleared');
-      } catch (error) {
-        console.error('❌ Error resetting game:', error);
-        Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
-      }
-    });
+    // Cancel game end auto-deletion since we're resetting
+    if (autoDeletionCleanupRef.current.cancelGameEnd) {
+      autoDeletionCleanupRef.current.cancelGameEnd();
+      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
+    }
+    
+    // Cancel timer
+    if (timerInterval.current) {
+      clearInterval(timerInterval.current);
+      timerInterval.current = null;
+    }
+    
+    const resetPlayers = room.players.map(p => ({ name: p.name }));
+    
+    try {
+      // Update game state FIRST - this moves all players to lobby screen
+      const roomRef = doc(db, 'SpyRoom', room.id);
+      await updateDoc(roomRef, {
+        players: resetPlayers,
+        game_status: 'lobby',
+        game_start_time: null,
+        spy_name: null,
+        spy_names: null,
+        chosen_location: null,
+        all_locations: null,
+        eliminated_locations: null,
+        all_votes_submitted: false,
+        spy_guess: null,
+        spy_guess_correct: null,
+        spy_guess_player: null,
+        reset_triggered_at: Date.now() // Signal to other players to show ad
+        // Note: game_mode is preserved when resetting
+      });
+      // Reset local state
+      setSpyGuess('');
+      setSpyGuessSubmitted(false);
+      console.log('✅ Game reset successfully - all state cleared');
+
+      // Show ad AFTER state is updated - all players are now on lobby screen
+      showInterstitialIfAvailable(() => {
+        // Ad closed, continue normally
+      });
+    } catch (error) {
+      console.error('❌ Error resetting game:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+    }
   };
 
   const handleRulesPress = () => {

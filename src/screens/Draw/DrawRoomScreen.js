@@ -51,6 +51,10 @@ export default function DrawRoomScreen({ navigation, route }) {
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
   const isContinuingRoundRef = useRef(false);
   const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
+  const pendingWordRef = useRef(null); // Track word being set during turn advancement
+  const pendingWordTimeoutRef = useRef(null); // Timeout to clear pendingWordRef if update doesn't complete
+  const lastWordUpdateTimestampRef = useRef(null); // Track last word update timestamp to prevent out-of-order updates
+  const lastTurnIndexRef = useRef(null); // Track last turn index to detect turn changes
 
   useEffect(() => {
     roomRef.current = room;
@@ -172,6 +176,11 @@ export default function DrawRoomScreen({ navigation, route }) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
+      if (pendingWordTimeoutRef.current) {
+        clearTimeout(pendingWordTimeoutRef.current);
+        pendingWordTimeoutRef.current = null;
+      }
+      pendingWordRef.current = null;
       if (timerCheckInterval.current) {
         clearInterval(timerCheckInterval.current);
         timerCheckInterval.current = null;
@@ -244,12 +253,14 @@ export default function DrawRoomScreen({ navigation, route }) {
         
         // Handle reset trigger for showing ad to all players (non-host)
         const playerName = currentPlayerNameRef.current || '';
+        // Handle reset trigger for showing ad to all players (non-host)
+        // Show ad AFTER state has been updated to lobby (all players are on lobby screen)
         if (newRoom.reset_triggered_at && 
             newRoom.reset_triggered_at !== lastResetTriggerRef.current &&
             newRoom.game_status === 'lobby' &&
             newRoom.host_name !== playerName) {
           lastResetTriggerRef.current = newRoom.reset_triggered_at;
-          // Show ad to non-host players when host resets
+          // Show ad to non-host players - they're already on lobby screen
           showInterstitialIfAvailable(() => {
             // Ad closed, continue normally
           });
@@ -280,8 +291,95 @@ export default function DrawRoomScreen({ navigation, route }) {
           console.log(`🔄 [DRAW] Game status changed: ${prevRoom.game_status} → ${newRoom.game_status}`);
         }
         
-        // Always update room so strokes propagate to all players and UI updates
-        setRoom(newRoom);
+        // Prevent word flickering and out-of-order updates during turn advancement
+        setRoom(prevRoomState => {
+          // Prevent out-of-order updates when app returns from background
+          // Use turn index and timestamp to ensure we only apply updates from the current or newer turn
+          const currentTurnIndex = newRoom.current_turn_index;
+          
+          // If we have a previous room, check if this update is from an older turn
+          if (prevRoomState && prevRoomState.game_status === 'playing' && newRoom.game_status === 'playing') {
+            const prevTurnIndex = prevRoomState.current_turn_index;
+            
+            // If the new update is from an older turn, ignore it (this can happen when app returns from background)
+            if (currentTurnIndex < prevTurnIndex) {
+              console.warn('⚠️ [DRAW] Ignoring out-of-order update: new turn index is older than current');
+              return prevRoomState;
+            }
+            
+            // If we're in the same turn but the word update timestamp suggests this is an older update, be cautious
+            if (currentTurnIndex === prevTurnIndex && 
+                newRoom.word_update_timestamp && 
+                prevRoomState.word_update_timestamp &&
+                newRoom.word_update_timestamp < prevRoomState.word_update_timestamp) {
+              console.warn('⚠️ [DRAW] Ignoring older word update in same turn');
+              // Keep previous word but allow other fields to update
+              newRoom.current_word = prevRoomState.current_word;
+            }
+            
+            // Update refs to track current state
+            lastTurnIndexRef.current = currentTurnIndex;
+          } else if (!prevRoomState) {
+            // First load - initialize refs
+            lastTurnIndexRef.current = currentTurnIndex;
+          }
+          
+          // Prevent word flickering during turn advancement
+          // When advancing a turn, use the pending word we're setting instead of accepting
+          // potentially stale data from Firestore snapshot
+          if (pendingWordRef.current) {
+            const pendingWord = pendingWordRef.current;
+            const isTransitioning = prevRoomState?.show_round_summary === true && newRoom.show_round_summary === false;
+            const incomingWordValid = newRoom.current_word && typeof newRoom.current_word === 'string' && newRoom.current_word.trim().length > 0;
+            const incomingMatches = incomingWordValid && newRoom.current_word === pendingWord;
+            
+            // Use pending word if transitioning, if incoming doesn't match, or if incoming is invalid
+            if (isTransitioning || !incomingMatches || !incomingWordValid) {
+              // Use pending word
+              newRoom.current_word = pendingWord;
+            } else if (incomingMatches && !newRoom.show_round_summary) {
+              // Word matches and we're in the new phase - update completed successfully
+              // Use the incoming word from Firestore and clear the ref
+              if (pendingWordTimeoutRef.current) {
+                clearTimeout(pendingWordTimeoutRef.current);
+                pendingWordTimeoutRef.current = null;
+              }
+              pendingWordRef.current = null;
+            }
+          } else {
+            // No pending word - ensure we have a valid word when in playing state
+            // If we're transitioning from summary to playing and there's no word, this is an error
+            if (prevRoomState?.show_round_summary === true && newRoom.show_round_summary === false && 
+                (!newRoom.current_word || typeof newRoom.current_word !== 'string' || newRoom.current_word.trim().length === 0)) {
+              console.warn('⚠️ [DRAW] Missing word during turn transition - keeping previous word');
+              // Keep previous word if new one is invalid during transition
+              if (prevRoomState.current_word) {
+                newRoom.current_word = prevRoomState.current_word;
+              }
+            }
+          }
+          
+          // Prevent word from changing mid-turn (unless it's being set by continueToNextRound)
+          if (prevRoomState && 
+              prevRoomState.game_status === 'playing' && 
+              newRoom.game_status === 'playing' &&
+              prevRoomState.current_turn_index === newRoom.current_turn_index &&
+              !pendingWordRef.current &&
+              prevRoomState.current_word &&
+              newRoom.current_word &&
+              prevRoomState.current_word !== newRoom.current_word) {
+            console.warn('⚠️ [DRAW] Word changed mid-turn - keeping previous word');
+            newRoom.current_word = prevRoomState.current_word;
+          }
+          
+          // Update timestamp ref to track this update
+          if (newRoom.word_update_timestamp) {
+            lastWordUpdateTimestampRef.current = newRoom.word_update_timestamp;
+          }
+          
+          return newRoom;
+        });
+        
         roomRef.current = newRoom; // Update ref immediately for isMyTurn() checks
         setIsLoading(false); // Ensure loading state is cleared when room updates
         
@@ -628,6 +726,14 @@ export default function DrawRoomScreen({ navigation, route }) {
       setRoom(roomData);
       setIsLoading(false);
       
+      // Initialize refs from loaded room data
+      if (roomData.game_status === 'playing' && roomData.current_turn_index !== undefined) {
+        lastTurnIndexRef.current = roomData.current_turn_index;
+        if (roomData.word_update_timestamp) {
+          lastWordUpdateTimestampRef.current = roomData.word_update_timestamp;
+        }
+      }
+      
       // Setup realtime listener with room ID (not room code)
       if (roomData.id) {
         setupRealtimeListener(roomData.id);
@@ -692,6 +798,7 @@ export default function DrawRoomScreen({ navigation, route }) {
       try {
         const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
         const turnStartTime = Date.now();
+        const wordUpdateTimestamp = Date.now();
         const updates = {
           game_status: 'playing',
           current_turn_index: firstTurnIndex,
@@ -704,9 +811,14 @@ export default function DrawRoomScreen({ navigation, route }) {
           show_round_summary: false,
           round_winner: null,
           drinking_players: null,
+          word_update_timestamp: wordUpdateTimestamp, // Add timestamp to track word updates
           // Explicitly clear any end-game state from previous game as a safeguard
           winner_name: null
         };
+        
+        // Initialize refs
+        lastTurnIndexRef.current = firstTurnIndex;
+        lastWordUpdateTimestampRef.current = wordUpdateTimestamp;
         await updateDoc(roomDocRef, updates);
         const updatedRoom = { ...currentRoom, ...updates };
         setRoom(updatedRoom);
@@ -1082,6 +1194,26 @@ export default function DrawRoomScreen({ navigation, route }) {
 
         const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
         const turnStartTime = Date.now();
+        const wordUpdateTimestamp = Date.now();
+        
+        // Store the word in ref before updating Firestore to prevent race conditions
+        pendingWordRef.current = randomWord.word;
+        
+        // Clear any existing timeout
+        if (pendingWordTimeoutRef.current) {
+          clearTimeout(pendingWordTimeoutRef.current);
+          pendingWordTimeoutRef.current = null;
+        }
+        
+        // Set timeout to clear pendingWordRef after 5 seconds as fallback
+        // This ensures the ref doesn't stay forever if update doesn't complete
+        pendingWordTimeoutRef.current = setTimeout(() => {
+          if (pendingWordRef.current === randomWord.word) {
+            console.warn('⚠️ [DRAW] Pending word ref timeout - clearing after 5 seconds');
+            pendingWordRef.current = null;
+          }
+          pendingWordTimeoutRef.current = null;
+        }, 5000);
         
         // Update atomically: first clear word, then set new word with turn index
         // This prevents word from being visible before turn is set
@@ -1095,13 +1227,26 @@ export default function DrawRoomScreen({ navigation, route }) {
           players: resetPlayers,
           all_guesses: [],
           final_draw_image: null,
-          turn_start_time: turnStartTime
+          turn_start_time: turnStartTime,
+          word_update_timestamp: wordUpdateTimestamp // Add timestamp to track word updates
         });
+        
+        // Update refs immediately to track the new turn
+        lastTurnIndexRef.current = nextTurnIndex;
+        lastWordUpdateTimestampRef.current = wordUpdateTimestamp;
 
         console.log(`✅ [DRAW] Moved to next round - Turn index: ${nextTurnIndex}, Player: ${currentRoom.players[nextTurnIndex]?.name}, Word: ${randomWord.word}`);
         setLocalStrokes([]);
       } catch (error) {
         console.error('❌ Error moving to next turn:', error);
+        // Clear pending word ref on error
+        if (pendingWordTimeoutRef.current) {
+          clearTimeout(pendingWordTimeoutRef.current);
+          pendingWordTimeoutRef.current = null;
+        }
+        if (pendingWordRef.current === randomWord.word) {
+          pendingWordRef.current = null;
+        }
       }
     }
     } finally {
@@ -1124,48 +1269,51 @@ export default function DrawRoomScreen({ navigation, route }) {
       autoDeletionCleanupRef.current.cancelGameEnd = () => {};
     }
 
-    // Show interstitial ad first, then reset game
-    showInterstitialIfAvailable(async () => {
-      // Force close modal immediately
-      setForceCloseModal(true);
+    // Force close modal immediately
+    setForceCloseModal(true);
 
-      // Cancel all timers
-      if (timerCheckInterval.current) {
-        clearInterval(timerCheckInterval.current);
-        timerCheckInterval.current = null;
-      }
+    // Cancel all timers
+    if (timerCheckInterval.current) {
+      clearInterval(timerCheckInterval.current);
+      timerCheckInterval.current = null;
+    }
 
-      const resetPlayers = room.players.map(p => ({ ...p, score: 0, current_guess: '', has_submitted: false }));
+    const resetPlayers = room.players.map(p => ({ ...p, score: 0, current_guess: '', has_submitted: false }));
 
-      try {
-        const roomRef = doc(db, 'DrawRoom', room.id);
-        await updateDoc(roomRef, {
-          players: resetPlayers,
-          game_status: 'lobby',
-          current_turn_index: 0,
-          current_word: null,
-          drawing_data: null,
-          show_round_summary: false,
-          round_winner: null,
-          winner_name: null,
-          drinking_players: null,
-          all_guesses: [],
-          final_draw_image: null,
-          turn_start_time: null,
-          reset_triggered_at: Date.now() // Signal to other players to show ad
-        });
-        setLocalStrokes([]);
-        
-        // Reset force close flag after a short delay to allow state to update
-        setTimeout(() => {
-          setForceCloseModal(false);
-        }, 100);
-      } catch (error) {
-        console.error('Error resetting game:', error);
-        Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+    try {
+      // Update game state FIRST - this moves all players to lobby screen
+      const roomRef = doc(db, 'DrawRoom', room.id);
+      await updateDoc(roomRef, {
+        players: resetPlayers,
+        game_status: 'lobby',
+        current_turn_index: 0,
+        current_word: null,
+        drawing_data: null,
+        show_round_summary: false,
+        round_winner: null,
+        winner_name: null,
+        drinking_players: null,
+        all_guesses: [],
+        final_draw_image: null,
+        turn_start_time: null,
+        reset_triggered_at: Date.now() // Signal to other players to show ad
+      });
+      setLocalStrokes([]);
+      
+      // Reset force close flag after a short delay to allow state to update
+      setTimeout(() => {
         setForceCloseModal(false);
-      }
-    });
+      }, 100);
+
+      // Show ad AFTER state is updated - all players are now on lobby screen
+      showInterstitialIfAvailable(() => {
+        // Ad closed, continue normally
+      });
+    } catch (error) {
+      console.error('Error resetting game:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+      setForceCloseModal(false);
+    }
   };
 
   const goBack = async () => {

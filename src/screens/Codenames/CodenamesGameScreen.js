@@ -128,12 +128,14 @@ export default function CodenamesGameScreen({ navigation, route }) {
         const updatedRoom = { id: snapshot.id, ...snapshot.data() };
         
         // Handle reset trigger for showing ad to all players (non-host)
+        // Handle reset trigger for showing ad to all players (non-host)
+        // Show ad AFTER state has been updated to setup (all players are on setup screen)
         if (updatedRoom.reset_triggered_at && 
             updatedRoom.reset_triggered_at !== lastResetTriggerRef.current &&
             updatedRoom.game_status === 'setup' &&
             updatedRoom.host_name !== currentPlayerName) {
           lastResetTriggerRef.current = updatedRoom.reset_triggered_at;
-          // Show ad to non-host players when host resets
+          // Show ad to non-host players - they're already on setup screen
           showInterstitialIfAvailable(() => {
             // Ad closed, continue normally
           });
@@ -702,72 +704,75 @@ export default function CodenamesGameScreen({ navigation, route }) {
     const isHost = room.host_name === currentPlayerName;
     if (!isHost) return;
     
-    // Show interstitial ad first, then reset game
-    showInterstitialIfAvailable(async () => {
-      // Cancel game end auto-deletion since we're resetting
-      if (autoDeletionCleanupRef.current.cancelGameEnd) {
-        autoDeletionCleanupRef.current.cancelGameEnd();
-        autoDeletionCleanupRef.current.cancelGameEnd = () => {};
-      }
+    // Cancel game end auto-deletion since we're resetting
+    if (autoDeletionCleanupRef.current.cancelGameEnd) {
+      autoDeletionCleanupRef.current.cancelGameEnd();
+      autoDeletionCleanupRef.current.cancelGameEnd = () => {};
+    }
+    
+    // Force close modal immediately - set before any async operations
+    setForceCloseModal(true);
+    
+    // Also update local room state immediately to close modal
+    setRoom(prev => prev ? { ...prev, game_status: 'setup', winner_team: null } : prev);
+    
+    // Force a re-render to ensure modal closes
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    const resetRedTeam = {
+      ...room.red_team,
+      revealed_words: []
+    };
+    const resetBlueTeam = {
+      ...room.blue_team,
+      revealed_words: []
+    };
+    
+    try {
+      // Update game state FIRST - this moves all players to setup screen
+      const roomRef = doc(db, 'CodenamesRoom', room.id);
+      await updateDoc(roomRef, {
+        red_team: resetRedTeam,
+        blue_team: resetBlueTeam,
+        game_status: 'setup',
+        current_turn: 'red',
+        starting_team: 'red',
+        board_words: [],
+        key_map: [],
+        guesses_remaining: 0,
+        turn_phase: 'clue',
+        current_clue: null,
+        winner_team: null,
+        turn_start_time: null,
+        drinking_popup: null,
+        round_baseline_reveals: null,
+        reset_triggered_at: Date.now() // Signal to other players to show ad
+      });
+      console.log('✅ Game reset successfully - all state cleared');
       
-      // Force close modal immediately - set before any async operations
-      setForceCloseModal(true);
+      // Ensure modal is fully closed before navigation - longer delay to ensure UI updates
+      await new Promise(resolve => setTimeout(resolve, 300));
       
-      // Also update local room state immediately to close modal
-      setRoom(prev => prev ? { ...prev, game_status: 'setup', winner_team: null } : prev);
+      // Navigate immediately using replace to ensure clean navigation
+      navigation.replace('CodenamesSetup', { 
+        roomCode, 
+        gameMode: room.game_mode || 'friends' 
+      });
       
-      // Force a re-render to ensure modal closes
-      await new Promise(resolve => setTimeout(resolve, 50));
-      
-      const resetRedTeam = {
-        ...room.red_team,
-        revealed_words: []
-      };
-      const resetBlueTeam = {
-        ...room.blue_team,
-        revealed_words: []
-      };
-      
-      try {
-        const roomRef = doc(db, 'CodenamesRoom', room.id);
-        await updateDoc(roomRef, {
-          red_team: resetRedTeam,
-          blue_team: resetBlueTeam,
-          game_status: 'setup',
-          current_turn: 'red',
-          starting_team: 'red',
-          board_words: [],
-          key_map: [],
-          guesses_remaining: 0,
-          turn_phase: 'clue',
-          current_clue: null,
-          winner_team: null,
-          turn_start_time: null,
-          drinking_popup: null,
-          round_baseline_reveals: null,
-          reset_triggered_at: Date.now() // Signal to other players to show ad
-        });
-        console.log('✅ Game reset successfully - all state cleared');
-        
-        // Ensure modal is fully closed before navigation - longer delay to ensure UI updates
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        // Navigate immediately using replace to ensure clean navigation
-        navigation.replace('CodenamesSetup', { 
-          roomCode, 
-          gameMode: room.game_mode || 'friends' 
-        });
-        
-        // Reset force close flag after navigation
-        setTimeout(() => {
-          setForceCloseModal(false);
-        }, 500);
-      } catch (error) {
-        console.error('❌ Error resetting game:', error);
-        Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+      // Reset force close flag after navigation
+      setTimeout(() => {
         setForceCloseModal(false);
-      }
-    });
+      }, 500);
+
+      // Show ad AFTER state is updated - all players are now on setup screen
+      showInterstitialIfAvailable(() => {
+        // Ad closed, continue normally
+      });
+    } catch (error) {
+      console.error('❌ Error resetting game:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+      setForceCloseModal(false);
+    }
   };
 
   const clearDrinkingPopup = async () => {

@@ -39,6 +39,9 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const pendingTopicRef = useRef(null); // Track topic being set during turn advancement
   const pendingTopicTimeoutRef = useRef(null); // Timeout to clear pendingTopicRef if update doesn't complete
   const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
+  const lastStateUpdateTimestampRef = useRef(null); // Track last state update timestamp to prevent out-of-order updates
+  const lastTurnIndexRef = useRef(null); // Track last turn index to detect turn changes
+  const lastRoundIdRef = useRef(null); // Track round identifier to prevent mixing guesses from different rounds
 
   const loadRoom = async () => {
     try {
@@ -141,6 +144,17 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         }
       }
       setRoom(roomData);
+      
+      // Initialize refs from loaded room data
+      if (roomData.game_status === 'playing' && roomData.current_turn_index !== undefined) {
+        lastTurnIndexRef.current = roomData.current_turn_index;
+        if (roomData.current_round_id) {
+          lastRoundIdRef.current = roomData.current_round_id;
+        }
+        if (roomData.topic_update_timestamp) {
+          lastStateUpdateTimestampRef.current = roomData.topic_update_timestamp;
+        }
+      }
     } catch (error) {
       console.error('❌ Error loading room:', error);
       Alert.alert('שגיאה', 'לא הצלחנו לטעון את החדר');
@@ -293,28 +307,99 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         }
         
         // Handle reset trigger for showing ad to all players (non-host)
+        // Show ad AFTER state has been updated to lobby (all players are on lobby screen)
         if (newRoom.reset_triggered_at && 
             newRoom.reset_triggered_at !== lastResetTriggerRef.current &&
             newRoom.game_status === 'lobby' &&
             newRoom.host_name !== currentPlayerName) {
           lastResetTriggerRef.current = newRoom.reset_triggered_at;
-          // Show ad to non-host players when host resets
+          // Show ad to non-host players - they're already on lobby screen
           showInterstitialIfAvailable(() => {
             // Ad closed, continue normally
           });
         }
         
         setRoom(prevRoom => {
+          // Prevent out-of-order updates when app returns from background
+          // Use turn index and round identifier to ensure we only apply updates from the current or newer round
+          const currentTurnIndex = newRoom.current_turn_index;
+          const currentRoundId = `${currentTurnIndex}-${newRoom.turn_phase || 'unknown'}-${newRoom.topic_update_timestamp || 0}`;
+          
+          // If we have a previous room, check if this update is from an older round/turn
+          if (prevRoom && prevRoom.game_status === 'playing') {
+            const prevTurnIndex = prevRoom.current_turn_index;
+            const prevRoundId = `${prevTurnIndex}-${prevRoom.turn_phase || 'unknown'}-${prevRoom.topic_update_timestamp || 0}`;
+            
+            // If the new update is from an older turn, ignore it (this can happen when app returns from background)
+            if (currentTurnIndex < prevTurnIndex && prevRoom.game_status === 'playing' && newRoom.game_status === 'playing') {
+              console.warn('⚠️ Ignoring out-of-order update: new turn index is older than current');
+              return prevRoom;
+            }
+            
+            // If we're in the same turn but the round ID suggests this is an older update, be cautious
+            if (currentTurnIndex === prevTurnIndex && 
+                newRoom.topic_update_timestamp && 
+                prevRoom.topic_update_timestamp &&
+                newRoom.topic_update_timestamp < prevRoom.topic_update_timestamp) {
+              console.warn('⚠️ Ignoring older topic update in same turn');
+              // Keep previous topic but allow other fields to update
+              newRoom.current_topic = prevRoom.current_topic;
+            }
+            
+            // Validate round ID - if new round ID doesn't match expected, be cautious
+            if (lastRoundIdRef.current && newRoom.current_round_id && 
+                newRoom.current_round_id !== lastRoundIdRef.current &&
+                currentTurnIndex === prevTurnIndex) {
+              // This might be a stale update - check timestamps
+              if (newRoom.topic_update_timestamp && prevRoom.topic_update_timestamp &&
+                  newRoom.topic_update_timestamp < prevRoom.topic_update_timestamp) {
+                console.warn('⚠️ Round ID mismatch with older timestamp - keeping previous state');
+                return prevRoom;
+              }
+            }
+            
+            // Update refs to track current state
+            lastTurnIndexRef.current = currentTurnIndex;
+            if (newRoom.current_round_id) {
+              lastRoundIdRef.current = newRoom.current_round_id;
+            } else {
+              lastRoundIdRef.current = currentRoundId;
+            }
+          } else if (!prevRoom) {
+            // First load - initialize refs
+            lastTurnIndexRef.current = currentTurnIndex;
+            if (newRoom.current_round_id) {
+              lastRoundIdRef.current = newRoom.current_round_id;
+            } else {
+              lastRoundIdRef.current = currentRoundId;
+            }
+          }
+          
           // Preserve submitted needle positions - don't overwrite if player has already submitted
+          // BUT only preserve if we're still in the same round
           if (prevRoom && currentPlayerName) {
             const hasSubmitted = hasPlayerSubmittedGuess(prevRoom, currentPlayerName);
-            if (hasSubmitted && prevRoom.needle_positions && prevRoom.needle_positions[currentPlayerName] !== undefined) {
+            const isSameRound = prevRoom.current_turn_index === newRoom.current_turn_index && 
+                               prevRoom.turn_phase === newRoom.turn_phase;
+            
+            if (hasSubmitted && isSameRound && prevRoom.needle_positions && prevRoom.needle_positions[currentPlayerName] !== undefined) {
               // Preserve the submitted needle position even if Firestore update doesn't have it yet
+              // But only if we're in the same round
               const preservedNeedlePositions = {
                 ...(newRoom.needle_positions || {}),
                 [currentPlayerName]: prevRoom.needle_positions[currentPlayerName]
               };
               newRoom.needle_positions = preservedNeedlePositions;
+            } else if (!isSameRound && hasSubmitted) {
+              // New round - clear the submitted status for this player
+              // The guess_submitted_names should already be cleared by the turn advancement
+              // But ensure needle_positions doesn't have stale data
+              if (newRoom.needle_positions && newRoom.needle_positions[currentPlayerName] !== undefined && 
+                  !newRoom.guess_submitted_names?.[currentPlayerName]) {
+                // Remove stale needle position if player hasn't submitted in new round
+                const { [currentPlayerName]: removed, ...rest } = newRoom.needle_positions;
+                newRoom.needle_positions = rest;
+              }
             }
           }
           
@@ -322,17 +407,22 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           // When advancing a turn, use the pending topic we're setting instead of accepting
           // potentially stale data from Firestore snapshot
           if (pendingTopicRef.current) {
+            const pendingTopic = pendingTopicRef.current;
             const isTransitioning = prevRoom?.turn_phase === 'summary' && newRoom.turn_phase === 'clue';
             const incomingTopicValid = newRoom.current_topic && 
                                      newRoom.current_topic.left_side && 
                                      newRoom.current_topic.right_side;
             const incomingMatches = incomingTopicValid &&
-                                  newRoom.current_topic.left_side === pendingTopicRef.current.left_side &&
-                                  newRoom.current_topic.right_side === pendingTopicRef.current.right_side;
+                                  newRoom.current_topic.left_side === pendingTopic.left_side &&
+                                  newRoom.current_topic.right_side === pendingTopic.right_side;
             
             // Use pending topic if transitioning, if incoming doesn't match, or if incoming is invalid
             if (isTransitioning || !incomingMatches || !incomingTopicValid) {
-              newRoom.current_topic = pendingTopicRef.current;
+              // Use pending topic but remove the internal _updateId field
+              newRoom.current_topic = {
+                left_side: pendingTopic.left_side,
+                right_side: pendingTopic.right_side
+              };
             } else if (incomingMatches && newRoom.turn_phase === 'clue') {
               // Topic matches and we're in the new phase - update completed successfully
               // Use the incoming topic from Firestore and clear the ref
@@ -342,6 +432,22 @@ export default function FrequencyRoomScreen({ navigation, route }) {
               }
               pendingTopicRef.current = null;
             }
+          } else {
+            // No pending topic - ensure we have a valid topic when in playing state
+            // If we're transitioning from summary to clue and there's no topic, this is an error
+            if (prevRoom?.turn_phase === 'summary' && newRoom.turn_phase === 'clue' && 
+                (!newRoom.current_topic || !newRoom.current_topic.left_side || !newRoom.current_topic.right_side)) {
+              console.warn('⚠️ Missing topic during turn transition - keeping previous topic');
+              // Keep previous topic if new one is invalid during transition
+              if (prevRoom.current_topic) {
+                newRoom.current_topic = prevRoom.current_topic;
+              }
+            }
+          }
+          
+          // Update timestamp ref to track this update
+          if (newRoom.topic_update_timestamp) {
+            lastStateUpdateTimestampRef.current = newRoom.topic_update_timestamp;
           }
           
           if (JSON.stringify(prevRoom) !== JSON.stringify(newRoom)) {
@@ -548,17 +654,24 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       console.log('🔵 Starting Frequency game, updating room:', room.id);
       try {
         const roomRef = doc(db, 'FrequencyRoom', room.id);
+        const initialRoundId = `${room.current_turn_index || 0}-guessing-${Date.now()}`;
         const updates = {
           game_status: 'playing',
           current_topic: { left_side: randomTopic.left, right_side: randomTopic.right },
           target_position: randomTarget,
           current_round_sectors: sectors,
           turn_phase: 'guessing', // Automatically start in guessing phase
-          guess_submitted_names: {}
+          guess_submitted_names: {},
+          topic_update_timestamp: Date.now(),
+          current_round_id: initialRoundId
         };
         await updateDoc(roomRef, updates);
         console.log('✅ Game started successfully');
         setRoom(prev => ({ ...prev, ...updates }));
+        
+        // Initialize refs
+        lastTurnIndexRef.current = room.current_turn_index || 0;
+        lastRoundIdRef.current = initialRoundId;
         
         // Log analytics event
         const { logGameStart } = await import('../../utils/analytics');
@@ -585,6 +698,20 @@ export default function FrequencyRoomScreen({ navigation, route }) {
 
     if (hasPlayerSubmittedGuess(room, currentPlayerName)) {
       console.log('⚠️ Player already submitted guess, skipping...');
+      return;
+    }
+    
+    // Validate that we're in the correct phase and round
+    if (room.turn_phase !== 'guessing') {
+      console.warn('⚠️ Cannot submit guess - not in guessing phase');
+      return;
+    }
+    
+    // Ensure we're not submitting a guess for an old round
+    // Check if the turn index matches what we expect
+    if (lastTurnIndexRef.current !== null && room.current_turn_index !== lastTurnIndexRef.current) {
+      console.warn('⚠️ Turn index mismatch - possible stale state, refreshing...');
+      // Don't submit - let the realtime listener update the state first
       return;
     }
 
@@ -618,10 +745,14 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       const totalGuessersRequired = Math.max(activeGuessers.length, 0);
       const allGuessed = getGuessSubmittedCount({ guess_submitted_names: updatedGuessSubmittedNames }) === totalGuessersRequired;
     
+      // Add round identifier to ensure guesses are tied to the correct round
+      const currentRoundId = `${room.current_turn_index}-${room.turn_phase || 'guessing'}-${room.topic_update_timestamp || Date.now()}`;
+      
       const updateData = {
         needle_positions: updatedNeedlePositions,
         guess_submitted_names: updatedGuessSubmittedNames,
-        last_guess_result: null
+        last_guess_result: null,
+        current_round_id: currentRoundId // Track which round this guess belongs to
       };
       
       if (allGuessed) {
@@ -638,6 +769,10 @@ export default function FrequencyRoomScreen({ navigation, route }) {
               points_earned: playerAngle !== undefined ? getSectorScore(playerAngle, sectors) : 0
             };
           });
+
+        // Calculate clue giver points (half of total points earned by all guessers)
+        const totalPointsEarnedByGuessers = guessesSummary.reduce((sum, guess) => sum + guess.points_earned, 0);
+        const clueGiverPoints = totalPointsEarnedByGuessers / 2;
 
         // Evaluate drinking at end of round
         let drinkingPlayers = [];
@@ -680,6 +815,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           sectors: sectors,
           guesses: guessesSummary,
           clue_giver: clueGiver,
+          clue_giver_points: clueGiverPoints,
           show_popup: true
         };
         updateData.drinking_players = drinkingPlayers.length > 0 ? drinkingPlayers : null;
@@ -839,7 +975,9 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         const newSectors = calculateSectors();
 
         // Store the topic in ref before updating Firestore to prevent race conditions
-        pendingTopicRef.current = newTopic;
+        // Use a unique identifier to track this specific topic update
+        const topicUpdateId = Date.now();
+        pendingTopicRef.current = { ...newTopic, _updateId: topicUpdateId };
         
         // Clear any existing timeout
         if (pendingTopicTimeoutRef.current) {
@@ -847,18 +985,22 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           pendingTopicTimeoutRef.current = null;
         }
         
-        // Set timeout to clear pendingTopicRef after 3 seconds as fallback
+        // Set timeout to clear pendingTopicRef after 5 seconds as fallback
         // This ensures the ref doesn't stay forever if update doesn't complete
         pendingTopicTimeoutRef.current = setTimeout(() => {
-          if (pendingTopicRef.current) {
-            console.warn('⚠️ Pending topic ref timeout - clearing after 3 seconds');
+          if (pendingTopicRef.current && pendingTopicRef.current._updateId === topicUpdateId) {
+            console.warn('⚠️ Pending topic ref timeout - clearing after 5 seconds');
             pendingTopicRef.current = null;
           }
           pendingTopicTimeoutRef.current = null;
-        }, 3000);
+        }, 5000);
 
         try {
           const roomRef = doc(db, 'FrequencyRoom', room.id);
+          // Update all fields atomically to prevent partial updates
+          // Generate new round ID for the new turn
+          const newRoundId = `${nextTurnIndex}-clue-${Date.now()}`;
+          
           await updateDoc(roomRef, {
             players: finalUpdatedPlayers,
             current_turn_index: nextTurnIndex,
@@ -869,8 +1011,14 @@ export default function FrequencyRoomScreen({ navigation, route }) {
             current_round_sectors: newSectors,
             turn_phase: 'clue',
             last_guess_result: null,
-            drinking_players: null // Clear drinking players when advancing turn
+            drinking_players: null, // Clear drinking players when advancing turn
+            topic_update_timestamp: Date.now(), // Add timestamp to track topic updates
+            current_round_id: newRoundId // Set new round ID
           });
+          
+          // Update refs immediately to track the new round
+          lastTurnIndexRef.current = nextTurnIndex;
+          lastRoundIdRef.current = newRoundId;
           
           // Clear pending topic ref after successful update
           // The ref will be cleared when onSnapshot receives the correct topic
@@ -880,7 +1028,10 @@ export default function FrequencyRoomScreen({ navigation, route }) {
             clearTimeout(pendingTopicTimeoutRef.current);
             pendingTopicTimeoutRef.current = null;
           }
-          pendingTopicRef.current = null;
+          // Only clear if this is the same update that failed
+          if (pendingTopicRef.current && pendingTopicRef.current._updateId === topicUpdateId) {
+            pendingTopicRef.current = null;
+          }
         }
       }
     } catch (error) {
@@ -905,52 +1056,55 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const resetGame = async () => {
     if (!room || !room?.id || !isHost) return;
 
-    // Show interstitial ad first, then reset game
-    showInterstitialIfAvailable(async () => {
-      // Force close modal immediately
-      setForceCloseModal(true);
+    // Force close modal immediately
+    setForceCloseModal(true);
 
-      if (typeof global !== 'undefined') {
-        global.currentNeedlePosition = undefined;
-        global.currentSectors = undefined;
-      }
+    if (typeof global !== 'undefined') {
+      global.currentNeedlePosition = undefined;
+      global.currentSectors = undefined;
+    }
 
-      if (needleUpdateTimeout.current) {
-        clearTimeout(needleUpdateTimeout.current);
-        needleUpdateTimeout.current = null;
-      }
-      isProcessingReveal.current = false;
-      isSubmittingGuess.current = false;
+    if (needleUpdateTimeout.current) {
+      clearTimeout(needleUpdateTimeout.current);
+      needleUpdateTimeout.current = null;
+    }
+    isProcessingReveal.current = false;
+    isSubmittingGuess.current = false;
 
-      const resetPlayers = room.players.map(p => ({ ...p, score: 0, has_guessed: false }));
+    const resetPlayers = room.players.map(p => ({ ...p, score: 0, has_guessed: false }));
 
-      try {
-        const roomRef = doc(db, 'FrequencyRoom', room.id);
-        await updateDoc(roomRef, {
-          players: resetPlayers,
-          game_status: 'lobby',
-          current_turn_index: 0,
-          needle_positions: {},
-          guess_submitted_names: {},
-          current_topic: null,
-          target_position: null,
-          current_round_sectors: null,
-          turn_phase: null,
-          last_guess_result: null,
-          winner_name: null,
-          drinking_players: null,
-          reset_triggered_at: Date.now() // Signal to other players to show ad
-        });
-        
-        // Reset force close flag after a short delay
-        setTimeout(() => {
-          setForceCloseModal(false);
-        }, 100);
-      } catch (error) {
-        console.error('Error resetting game:', error);
+    try {
+      // Update game state FIRST - this moves all players to lobby screen
+      const roomRef = doc(db, 'FrequencyRoom', room.id);
+      await updateDoc(roomRef, {
+        players: resetPlayers,
+        game_status: 'lobby',
+        current_turn_index: 0,
+        needle_positions: {},
+        guess_submitted_names: {},
+        current_topic: null,
+        target_position: null,
+        current_round_sectors: null,
+        turn_phase: null,
+        last_guess_result: null,
+        winner_name: null,
+        drinking_players: null,
+        reset_triggered_at: Date.now() // Signal to other players to show ad
+      });
+      
+      // Reset force close flag after a short delay
+      setTimeout(() => {
         setForceCloseModal(false);
-      }
-    });
+      }, 100);
+
+      // Show ad AFTER state is updated - all players are now on lobby screen
+      showInterstitialIfAvailable(() => {
+        // Ad closed, continue normally
+      });
+    } catch (error) {
+      console.error('Error resetting game:', error);
+      setForceCloseModal(false);
+    }
   };
 
   const handleRulesPress = () => {
@@ -1181,6 +1335,26 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                 </View>
 
                 <ScrollView style={styles.summaryGuesses}>
+                  {/* Clue Giver Points */}
+                  {room.last_guess_result.clue_giver && (
+                    <View style={[styles.guessRow, styles.clueGiverRow]}>
+                      <View style={styles.guessInfo}>
+                        <Text style={styles.guessPlayerName}>
+                          {room.last_guess_result.clue_giver} (נותן הרמז)
+                        </Text>
+                        <Text style={styles.guessAngle}>
+                          קיבל חצי מסך הנקודות שניתנו בסבב
+                        </Text>
+                      </View>
+                      <View style={[styles.pointsBadge, styles.clueGiverPointsBadge, (room.last_guess_result.clue_giver_points || 0) > 0 && styles.pointsBadgeSuccess]}>
+                        <Text style={[styles.pointsText, (room.last_guess_result.clue_giver_points || 0) > 0 && styles.pointsTextSuccess]}>
+                          {(room.last_guess_result.clue_giver_points || 0) > 0 ? `+${(room.last_guess_result.clue_giver_points || 0).toFixed(1)} נק'` : '0 נקודות'}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+                  
+                  {/* Guessers Points */}
                   {(room.last_guess_result.guesses || []).map((guess, idx) => (
                     <View key={`${guess.player_name}-${idx}`} style={styles.guessRow}>
                       <View style={styles.guessInfo}>
@@ -1341,7 +1515,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                     // Use global position if available (for active dragging), otherwise fallback to stored or 90
                     return global.currentNeedlePosition || storedPosition || 90;
                   })()}
-                  canMove={!isMyTurn() && !hasPlayerSubmittedGuess(room, currentPlayerName) && room.game_status === 'playing'}
+                  canMove={!isMyTurn() && !hasPlayerSubmittedGuess(room, currentPlayerName) && room.game_status === 'playing' && room.turn_phase === 'guessing'}
                   showAllNeedles={isMyTurn() || allPlayersGuessed()}
                   allNeedles={room.needle_positions}
                   sectors={room.current_round_sectors}
@@ -1872,6 +2046,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
     borderColor: '#E5E7EB',
+  },
+  clueGiverRow: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#3B82F6',
+    borderWidth: 2,
+    marginBottom: 12,
+  },
+  clueGiverPointsBadge: {
+    backgroundColor: '#DBEAFE',
   },
   guessInfo: {
     flex: 1,

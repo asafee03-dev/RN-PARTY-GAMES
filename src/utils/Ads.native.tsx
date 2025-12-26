@@ -63,54 +63,127 @@ const styles = StyleSheet.create({
 });
 
 /**
- * Timeout in milliseconds for ad loading/display
- * If ad doesn't load or show within this time, continue navigation
- */
-const AD_TIMEOUT_MS = 3000;
-
-/**
  * Singleton interstitial ad instance
  * This must persist across calls to enable proper AdMob frequency capping
  */
 let adInstance: InterstitialAd | null = null;
 
 /**
+ * Tracks if an ad is currently being loaded
+ * Prevents multiple simultaneous load attempts
+ */
+let isLoading = false;
+
+/**
+ * Preloads an interstitial ad in the background
+ * 
+ * This function:
+ * - Only starts loading if an ad is not already loaded and not currently loading
+ * - Adds listeners to handle success or failure of the load
+ * - Ensures removeAllListeners() is called after the load attempt finishes
+ * - Uses the persistent singleton adInstance for AdMob frequency capping
+ * - Silently skips on Expo Go or if ads are disabled
+ */
+export function preloadInterstitial(): void {
+  // Check if ads are enabled
+  if (!areAdsEnabled() || !INTERSTITIAL_AD_UNIT_ID) {
+    return;
+  }
+
+  // Only load if not already loaded and not currently loading
+  if (isLoading || (adInstance?.loaded === true)) {
+    return;
+  }
+
+  try {
+    // Create ad instance only if it doesn't exist (singleton pattern)
+    // This ensures AdMob frequency capping works correctly
+    if (!adInstance) {
+      adInstance = InterstitialAd.createForAdRequest(INTERSTITIAL_AD_UNIT_ID, {
+        requestNonPersonalizedAdsOnly: false,
+      });
+    }
+
+    // Remove all existing listeners before attaching new ones
+    try {
+      adInstance.removeAllListeners();
+    } catch (error) {
+      // Ignore errors silently
+    }
+
+    // Mark as loading
+    isLoading = true;
+
+    // Listen for ad loaded event
+    const loadedListener = adInstance.addAdEventListener(AdEventType.LOADED, () => {
+      isLoading = false;
+      // Clean up listeners after load completes
+      try {
+        if (adInstance) {
+          adInstance.removeAllListeners();
+        }
+      } catch (error) {
+        // Ignore errors during cleanup
+      }
+    });
+
+    // Listen for ad errors (including frequency capping)
+    const errorListener = adInstance.addAdEventListener(AdEventType.ERROR, () => {
+      isLoading = false;
+      // Clean up listeners after load attempt finishes (success or failure)
+      try {
+        if (adInstance) {
+          adInstance.removeAllListeners();
+        }
+      } catch (error) {
+        // Ignore errors during cleanup
+      }
+    });
+
+    // Start loading the ad
+    // AdMob will decide if an ad is available based on frequency capping
+    // load() is synchronous and triggers events (LOADED or ERROR)
+    adInstance.load();
+  } catch (error) {
+    // On any error, mark as not loading
+    isLoading = false;
+    // Silently fail - AdMob frequency capping will handle availability
+  }
+}
+
+/**
  * Shows an interstitial ad if available
  * 
  * This function:
- * - Attempts to load and show an interstitial ad ONCE per call
- * - Has a timeout fallback to prevent blocking navigation
- * - Always calls onDone() callback exactly once when finished
- * - Uses AdMob frequency capping only (no custom logic)
- * - Uses a persistent singleton ad instance for proper frequency capping (20-minute limit)
- * - Ensures all listeners and timers are cleaned up reliably
- * - Handles errors silently - if ad fails to load or is frequency-capped, user proceeds immediately
+ * - Checks if ad is already loaded (adInstance?.loaded)
+ * - If loaded: Shows the ad immediately, uses CLOSED/ERROR events to call onDone() and preload next
+ * - If NOT loaded: Immediately calls onDone() and triggers preloadInterstitial()
+ * - NEVER waits for a load to happen - user proceeds instantly if ad not ready
+ * - Uses AdMob frequency capping only (no manual timers or cooldowns)
+ * - Uses a persistent singleton ad instance for proper frequency capping
  * - Silently skips on Expo Go
  * 
- * @param onDone - Callback to execute when ad is closed, fails, or times out
+ * UX Goal: User should NEVER wait for a "Loading..." state. Either the ad is ready
+ * to show instantly, or the game proceeds immediately.
+ * 
+ * @param onDone - Callback to execute when ad is closed, fails, or if ad is not available
  */
 export async function showInterstitialIfAvailable(onDone: () => void): Promise<void> {
   // Check if ads are enabled
   if (!areAdsEnabled() || !INTERSTITIAL_AD_UNIT_ID) {
     // Silently skip and call callback immediately
     onDone();
+    // Preload for next time
+    preloadInterstitial();
     return;
   }
 
   // Guard to ensure onDone() is called exactly once
   let finished = false;
-  let timeoutId: NodeJS.Timeout | null = null;
-  let loadedListener: any = null;
   let closedListener: any = null;
   let errorListener: any = null;
 
   const cleanup = () => {
-    // Clear timeout
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-      timeoutId = null;
-    }
-    
     // Remove all listeners from the singleton instance to prevent memory leaks
     try {
       if (adInstance) {
@@ -121,11 +194,8 @@ export async function showInterstitialIfAvailable(onDone: () => void): Promise<v
     }
     
     // Clear listener references
-    loadedListener = null;
     closedListener = null;
     errorListener = null;
-    
-    // Note: adInstance is NOT cleared here - it's a persistent singleton
   };
 
   const finish = () => {
@@ -144,6 +214,9 @@ export async function showInterstitialIfAvailable(onDone: () => void): Promise<v
     } catch (error) {
       console.error('❌ Error in onDone callback:', error);
     }
+    
+    // Preload next ad after current interaction completes
+    preloadInterstitial();
   };
 
   try {
@@ -155,73 +228,53 @@ export async function showInterstitialIfAvailable(onDone: () => void): Promise<v
       });
     }
 
-    // Remove all existing listeners before attaching new ones to avoid duplicates
-    // This is done in cleanup, but we do it here too to ensure clean state
+    // Remove all existing listeners before attaching new ones
     try {
       adInstance.removeAllListeners();
     } catch (error) {
       // Ignore errors silently - fail gracefully
     }
 
-    // Set up timeout - if ad doesn't show within timeout, continue navigation
-    timeoutId = setTimeout(() => {
-      if (!finished) {
-        finish();
-      }
-    }, AD_TIMEOUT_MS);
-
-    // Listen for ad loaded event
-    loadedListener = adInstance.addAdEventListener(AdEventType.LOADED, () => {
-      // Check if we've already finished (race condition protection)
-      if (finished) {
-        return;
-      }
-      
-      // Cancel timeout since ad loaded successfully
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-      
-      // Show the ad immediately when loaded
+    // CRITICAL: Check if ad is already loaded
+    // If loaded, show immediately. If not, proceed immediately without waiting.
+    if (adInstance.loaded === true) {
+      // Ad is ready - show it immediately
       try {
-        // Double-check we haven't finished before showing
-        if (!finished && adInstance) {
-          adInstance.show();
-          
-          // Log analytics event for ad impression
-          import('../utils/analytics').then(({ logAdImpression }) => {
-            logAdImpression('interstitial');
-          });
-        }
+        // Set up listeners for when ad closes or errors
+        closedListener = adInstance.addAdEventListener(AdEventType.CLOSED, () => {
+          if (!finished) {
+            finish();
+          }
+        });
+
+        errorListener = adInstance.addAdEventListener(AdEventType.ERROR, () => {
+          if (!finished) {
+            finish();
+          }
+        });
+
+        // Show the ad
+        adInstance.show();
+        
+        // Log analytics event for ad impression
+        import('../utils/analytics').then(({ logAdImpression }) => {
+          logAdImpression('interstitial');
+        }).catch(() => {
+          // Ignore analytics errors
+        });
       } catch (error) {
         // If show() fails, continue navigation silently
         if (!finished) {
           finish();
         }
       }
-    });
-
-    // Listen for ad closed event
-    closedListener = adInstance.addAdEventListener(AdEventType.CLOSED, () => {
-      if (!finished) {
-        finish();
-      }
-    });
-
-    // Listen for ad errors (including frequency capping)
-    // On error or frequency cap, immediately continue navigation silently
-    errorListener = adInstance.addAdEventListener(AdEventType.ERROR, () => {
-      if (!finished) {
-        finish();
-      }
-    });
-
-    // Load the ad - this is a one-time attempt
-    // AdMob will decide if an ad is available based on frequency capping
-    await adInstance.load();
+    } else {
+      // Ad is NOT loaded - proceed immediately without waiting
+      // This ensures user never waits for a loading state
+      finish();
+    }
   } catch (error) {
-    // On any error (including load failures), continue navigation immediately and silently
+    // On any error, continue navigation immediately and silently
     if (!finished) {
       finish();
     }

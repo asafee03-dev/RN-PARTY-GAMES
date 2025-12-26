@@ -240,12 +240,14 @@ export default function AliasGameScreen({ navigation, route }) {
         }
         
         // Handle reset trigger for showing ad to all players (non-host)
+        // Handle reset trigger for showing ad to all players (non-host)
+        // Show ad AFTER state has been updated to setup (all players are on setup screen)
         if (roomData.reset_triggered_at && 
             roomData.reset_triggered_at !== lastResetTriggerRef.current &&
             roomData.game_status === 'setup' &&
             roomData.host_name !== playerName) {
           lastResetTriggerRef.current = roomData.reset_triggered_at;
-          // Show ad to non-host players when host resets
+          // Show ad to non-host players - they're already on setup screen
           showInterstitialIfAvailable(() => {
             // Ad closed, continue normally - navigation to setup will happen via useEffect
           });
@@ -842,43 +844,46 @@ export default function AliasGameScreen({ navigation, route }) {
       autoDeletionCleanupRef.current.cancelGameEnd = () => {};
     }
 
-    // Show interstitial ad first, then reset game
-    showInterstitialIfAvailable(async () => {
-      try {
-        const roomRef = doc(db, 'GameRoom', room.id);
-        const resetTeams = room.teams.map(team => ({
-          ...team,
-          position: 0
-        }));
-        
-        await updateDoc(roomRef, {
-          teams: resetTeams,
-          current_turn: 0,
-          game_status: 'setup', // Reset to setup so players return to team selection screen
-          round_active: false,
-          current_round_score: 0,
-          round_start_time: null,
-          round_start_position: null,
-          used_cards: [],
-          show_round_summary: false,
-          last_word_on_time_up: null,
-          current_word_is_golden: false,
-          winner_team: null,
-          drinking_popup: null,
-          reset_triggered_at: Date.now() // Signal to other players to show ad
-        });
-        
-        setTimerKey(prev => prev + 1);
-        setTimeIsUp(false);
-        console.log('✅ Game reset successfully - returning to setup screen');
-        
-        // Navigate to setup screen after reset
-        navigation.replace('AliasSetup', { roomCode });
-      } catch (error) {
-        console.error('❌ Error resetting game:', error);
-        Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
-      }
-    });
+    try {
+      // Update game state FIRST - this moves all players to setup screen
+      const roomRef = doc(db, 'GameRoom', room.id);
+      const resetTeams = room.teams.map(team => ({
+        ...team,
+        position: 0
+      }));
+      
+      await updateDoc(roomRef, {
+        teams: resetTeams,
+        current_turn: 0,
+        game_status: 'setup', // Reset to setup so players return to team selection screen
+        round_active: false,
+        current_round_score: 0,
+        round_start_time: null,
+        round_start_position: null,
+        used_cards: [],
+        show_round_summary: false,
+        last_word_on_time_up: null,
+        current_word_is_golden: false,
+        winner_team: null,
+        drinking_popup: null,
+        reset_triggered_at: Date.now() // Signal to other players to show ad
+      });
+      
+      setTimerKey(prev => prev + 1);
+      setTimeIsUp(false);
+      console.log('✅ Game reset successfully - returning to setup screen');
+      
+      // Navigate to setup screen after reset
+      navigation.replace('AliasSetup', { roomCode });
+
+      // Show ad AFTER state is updated - all players are now on setup screen
+      showInterstitialIfAvailable(() => {
+        // Ad closed, continue normally
+      });
+    } catch (error) {
+      console.error('❌ Error resetting game:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+    }
   };
 
   const toggleCardStatus = async (cardIndex) => {

@@ -96,22 +96,12 @@ export default function FrequencyGauge({
 
   // Create PanResponder that always uses current canMove value from ref
   // Prevents scroll when touching/dragging gauge on mobile
-  // Recreate PanResponder when canMove changes to ensure it responds correctly
   const panResponder = React.useMemo(
     () => PanResponder.create({
-      onStartShouldSetPanResponder: (evt, gestureState) => {
-        // Always check the current ref value
-        return canMoveRef.current === true;
-      },
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-        // Always check the current ref value
-        return canMoveRef.current === true;
-      },
+      onStartShouldSetPanResponder: () => canMoveRef.current,
+      onMoveShouldSetPanResponder: () => canMoveRef.current,
       onPanResponderGrant: (evt) => {
-        // Double-check canMove before starting drag
-        if (!canMoveRef.current) {
-          return;
-        }
+        if (!canMoveRef.current) return;
         isDraggingRef.current = true;
         // Prevent parent scroll
         evt.stopPropagation();
@@ -124,11 +114,7 @@ export default function FrequencyGauge({
         }
       },
       onPanResponderMove: (evt, gestureState) => {
-        // Double-check canMove during drag
-        if (!canMoveRef.current) {
-          isDraggingRef.current = false;
-          return;
-        }
+        if (!canMoveRef.current) return;
         // Prevent parent scroll
         evt.stopPropagation();
         const { locationX, locationY } = evt.nativeEvent;
@@ -162,7 +148,7 @@ export default function FrequencyGauge({
       // Prevent scrolling when interacting with gauge
       onShouldBlockNativeResponder: () => true,
     }),
-    [getAngleFromTouch, canMove] // Recreate when canMove changes
+    [getAngleFromTouch]
   );
 
   // Render arc path

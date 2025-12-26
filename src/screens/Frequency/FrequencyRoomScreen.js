@@ -1515,7 +1515,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                     // Use global position if available (for active dragging), otherwise fallback to stored or 90
                     return global.currentNeedlePosition || storedPosition || 90;
                   })()}
-                  canMove={!isMyTurn() && !hasPlayerSubmittedGuess(room, currentPlayerName) && room.game_status === 'playing' && room.turn_phase === 'guessing'}
+                  canMove={!isMyTurn() && !hasPlayerSubmittedGuess(room, currentPlayerName) && room.game_status === 'playing'}
                   showAllNeedles={isMyTurn() || allPlayersGuessed()}
                   allNeedles={room.needle_positions}
                   sectors={room.current_round_sectors}

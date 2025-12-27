@@ -226,10 +226,6 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  const handleSettingsClick = () => {
-    navigation.navigate('Settings');
-  };
-
   return (
     <View
       style={[styles.container, { backgroundColor: '#FAEFE1' }]}
@@ -238,17 +234,6 @@ export default function HomeScreen({ navigation }) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Settings Button */}
-        <View style={styles.settingsContainer}>
-          <TouchableOpacity
-            style={styles.settingsButton}
-            onPress={handleSettingsClick}
-          >
-            <Text style={styles.settingsIcon}>⚙️</Text>
-            <Text style={styles.settingsText}>הגדרות</Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>PARTY GAMES</Text>
@@ -327,32 +312,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 20,
     paddingTop: 52,
-  },
-  settingsContainer: {
-    alignItems: 'flex-end',
-    marginBottom: 16,
-  },
-  settingsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  settingsIcon: {
-    fontSize: 20,
-    marginLeft: 8,
-  },
-  settingsText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#374151',
   },
   header: {
     alignItems: 'center',

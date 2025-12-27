@@ -1828,6 +1828,14 @@ export default function DrawRoomScreen({ navigation, route }) {
                               </Text>
                             </View>
                           ))}
+                          {/* Show drawer points if someone guessed correctly */}
+                          {currentDrawerName && room.players.find(p => p.name === currentDrawerName) && (
+                            <View key={`drawer-${currentDrawerName}`} style={styles.winnerBadge}>
+                              <Text style={styles.winnerBadgeText}>
+                                {currentDrawerName} (הצייר) +1 נקודה
+                              </Text>
+                            </View>
+                          )}
                         </View>
                       </>
                     ) : (
@@ -2762,7 +2770,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#1F2937', // Dark color for better visibility
-    marginTop: 2,
+    marginTop: 6,
+    paddingTop: 2,
   },
   modalOverlay: {
     flex: 1,

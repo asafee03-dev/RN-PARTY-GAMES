@@ -2730,7 +2730,7 @@ const styles = StyleSheet.create({
   scoreboardPlayerContent: {
     flexDirection: 'column',
     alignItems: 'flex-start',
-    gap: 4,
+    gap: 3,
     width: '100%', // Ensure content takes full width of card
   },
   scoreboardRankRow: {
@@ -2770,8 +2770,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#1F2937', // Dark color for better visibility
-    marginTop: 6,
-    paddingTop: 2,
+    marginTop: 8,
+    paddingTop: 4,
   },
   modalOverlay: {
     flex: 1,
@@ -3248,9 +3248,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#E5E7EB',
     borderRadius: 8,
-    padding: 8,
+    padding: 12,
+    paddingBottom: 10,
     minWidth: 100,
     maxWidth: 140,
-    overflow: 'hidden', // Ensure content doesn't overflow
+    overflow: 'visible', // Allow content to be fully visible
   },
 });

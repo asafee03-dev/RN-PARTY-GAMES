@@ -1,4 +1,4 @@
-import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 
 /**
@@ -48,19 +48,11 @@ export async function isRoomCodeUnique(collectionName, roomCode) {
   }
 
   try {
-    // Check by document ID
+    // Check by document ID (rooms use room_code as document ID, so this is sufficient)
     const roomRef = doc(db, collectionName, roomCode);
     const snapshot = await getDoc(roomRef);
     
-    if (snapshot.exists()) {
-      return false;
-    }
-
-    // Also check by room_code field (in case document ID is different)
-    const q = query(collection(db, collectionName), where('room_code', '==', roomCode));
-    const querySnapshot = await getDocs(q);
-    
-    return querySnapshot.empty;
+    return !snapshot.exists();
   } catch (error) {
     console.error(`❌ Error checking room code uniqueness:`, error);
     return false;
@@ -74,7 +66,7 @@ export async function isRoomCodeUnique(collectionName, roomCode) {
  * @param {number} maxRetries - Maximum number of retries (default: 10)
  * @returns {Promise<string|null>} - Unique room code or null if failed
  */
-export async function generateUniqueRoomCode(collectionName, generateCode, maxRetries = 10) {
+export async function generateUniqueRoomCode(collectionName, generateCode, maxRetries = 5) {
   for (let i = 0; i < maxRetries; i++) {
     const code = generateCode().trim().toUpperCase();
     const isUnique = await isRoomCodeUnique(collectionName, code);

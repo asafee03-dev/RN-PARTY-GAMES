@@ -40,7 +40,7 @@ const checkFirestoreReady = async () => {
       }
     }
   } catch (error) {
-    // If error, Firestore might be offline, but we'll still resolve after a timeout
+    // If error, Firestore might be offline, but we'll still resolve after a shorter timeout
     setTimeout(() => {
       if (!firestoreReady) {
         firestoreReady = true;
@@ -48,7 +48,7 @@ const checkFirestoreReady = async () => {
           firestoreReadyResolve();
         }
       }
-    }, 1000);
+    }, 300);
   }
 };
 

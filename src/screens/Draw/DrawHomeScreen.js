@@ -3,7 +3,7 @@ import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Pl
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
-import { db, waitForFirestoreReady } from '../../firebase';
+import { db } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs, onSnapshot, Timestamp } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
@@ -99,10 +99,6 @@ export default function DrawHomeScreen({ navigation, route }) {
         created_at: Date.now(), // Store as timestamp for age calculation
         expires_at: Timestamp.fromMillis(Date.now() + (2 * 60 * 60 * 1000)) // 2 hours from now
       };
-      
-      console.log('🔵 [DRAW] Ensuring Firestore is ready...');
-      await waitForFirestoreReady();
-      console.log('✅ [DRAW] Firestore confirmed online, proceeding with write');
       
       const roomRef = doc(db, 'DrawRoom', code);
       console.log('🔵 [DRAW] Calling setDoc with room code:', code);

@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator } from 'react-native';
+import { collection, doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
-import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, setDoc, collection, Timestamp } from 'firebase/firestore';
-import storage from '../../utils/storage';
+import { db } from '../../firebase';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
+import storage from '../../utils/storage';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
 
@@ -121,36 +121,16 @@ export default function AliasHomeScreen({ navigation, route }) {
       const gameRoomCollection = collection(db, 'GameRoom');
       const roomRef = doc(gameRoomCollection, newRoomCode);
 
-      console.log('🔵 [ALIAS] Ensuring Firestore is ready and online...');
-      await waitForFirestoreReady();
-      console.log('✅ [ALIAS] Firestore confirmed online, proceeding with write');
-
-      let writeCompleted = false;
       try {
         console.log('🔵 [ALIAS] setDoc() call initiated');
         await setDoc(roomRef, roomData);
-        writeCompleted = true;
         console.log('✅ [ALIAS] setDoc() write completed successfully!');
-
-        const verifySnapshot = await getDoc(roomRef);
-        if (verifySnapshot.exists()) {
-          console.log('✅ [ALIAS] Document verified in Firestore!');
-        } else {
-          console.error('❌ [ALIAS] Document not found after write!');
-          throw new Error('Document was not created - check Firestore Rules');
-        }
+        // No need to verify - if setDoc succeeds, document exists
       } catch (writeError) {
         console.error('❌ [ALIAS] Error during setDoc:', writeError);
         isCreatingRoomRef.current = false;
         setIsCreating(false);
         throw writeError;
-      }
-
-      if (!writeCompleted) {
-        console.error('❌ [ALIAS] Write did not complete, aborting navigation');
-        isCreatingRoomRef.current = false;
-        setIsCreating(false);
-        throw new Error('Firestore write did not complete');
       }
 
       console.log('✅ [ALIAS] Room created successfully with code:', newRoomCode);

@@ -3,7 +3,7 @@ import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Pl
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
-import { db, waitForFirestoreReady } from '../../firebase';
+import { db } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs, Timestamp } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
@@ -88,10 +88,6 @@ export default function SpyHomeScreen({ navigation, route }) {
         created_at: Date.now(), // Store as timestamp for age calculation
         expires_at: Timestamp.fromMillis(Date.now() + (2 * 60 * 60 * 1000)) // 2 hours from now
       };
-
-      console.log('🔵 [SPY] Ensuring Firestore is ready...');
-      await waitForFirestoreReady();
-      console.log('✅ [SPY] Firestore confirmed online, proceeding with write');
 
       const roomRef = doc(db, 'SpyRoom', newRoomCode);
       console.log('🔵 [SPY] Calling setDoc with room code:', newRoomCode);

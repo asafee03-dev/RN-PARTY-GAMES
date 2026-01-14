@@ -3,7 +3,7 @@ import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Pl
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
-import { db, waitForFirestoreReady } from '../../firebase';
+import { db } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs, Timestamp } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
@@ -178,30 +178,11 @@ export default function CodenamesHomeScreen({ navigation, route }) {
       console.log('🔵 [CODENAMES] About to call setDoc() - execution checkpoint 1');
       const roomRef = doc(db, 'CodenamesRoom', newRoomCode);
       
-      console.log('🔵 [CODENAMES] Ensuring Firestore is ready and online...');
-      await waitForFirestoreReady();
-      console.log('✅ [CODENAMES] Firestore confirmed online, proceeding with write');
-      
-      let writeCompleted = false;
       try {
-        console.log('🔵 [CODENAMES] setDoc() call initiated - execution checkpoint 2');
-        console.log('🔵 [CODENAMES] Room code:', newRoomCode);
-        console.log('🔵 [CODENAMES] Room data:', JSON.stringify(roomData, null, 2));
+        console.log('🔵 [CODENAMES] setDoc() call initiated');
         await setDoc(roomRef, roomData);
-        writeCompleted = true;
-        console.log('✅ [CODENAMES] setDoc() write completed successfully! - execution checkpoint 3');
-        
-        // Verify the document was actually created
-        console.log('🔵 [CODENAMES] Verifying document exists...');
-        const verifySnapshot = await getDoc(roomRef);
-        console.log('🔵 [CODENAMES] Verification snapshot:', verifySnapshot.exists() ? 'EXISTS' : 'NOT FOUND');
-        if (!verifySnapshot.exists()) {
-          console.error('❌ [CODENAMES] Document not found after write!');
-          console.error('❌ [CODENAMES] Room code:', newRoomCode);
-          console.error('❌ [CODENAMES] Collection: CodenamesRoom');
-          throw new Error('Document was not created - check Firestore Rules');
-        }
-        console.log('✅ [CODENAMES] Document verified in Firestore!');
+        console.log('✅ [CODENAMES] setDoc() write completed successfully!');
+        // No need to verify - if setDoc succeeds, document exists
       } catch (writeError) {
         console.error('❌ [CODENAMES] Error during setDoc:', writeError);
         console.error('❌ [CODENAMES] Error code:', writeError.code);
@@ -210,13 +191,7 @@ export default function CodenamesHomeScreen({ navigation, route }) {
         throw writeError;
       }
       
-      if (!writeCompleted) {
-        console.error('❌ [CODENAMES] Write did not complete, aborting navigation');
-        isCreatingRoomRef.current = false;
-        throw new Error('Firestore write did not complete');
-      }
-      
-      console.log('✅ [CODENAMES] Room created and verified successfully with code:', newRoomCode);
+      console.log('✅ [CODENAMES] Room created successfully with code:', newRoomCode);
       console.log('🔵 [CODENAMES] About to navigate - execution checkpoint 4');
       
       // Log analytics event

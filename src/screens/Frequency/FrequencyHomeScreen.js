@@ -5,7 +5,7 @@ import Svg, { Defs, Path, Stop, LinearGradient as SvgLinearGradient } from 'reac
 import GradientBackground from '../../components/codenames/GradientBackground';
 import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
-import { db, waitForFirestoreReady } from '../../firebase';
+import { db } from '../../firebase';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
 import storage from '../../utils/storage';
 
@@ -164,10 +164,6 @@ export default function FrequencyHomeScreen({ navigation, route }) {
         created_at: Date.now(), // Store as timestamp for age calculation
         expires_at: Timestamp.fromMillis(Date.now() + (2 * 60 * 60 * 1000)) // 2 hours from now
       };
-
-      console.log('🔵 [FREQUENCY] Ensuring Firestore is ready and online...');
-      await waitForFirestoreReady();
-      console.log('✅ [FREQUENCY] Firestore confirmed online, proceeding with write');
 
       const roomRef = doc(db, 'FrequencyRoom', newRoomCode);
       console.log('🔵 [FREQUENCY] Calling setDoc with room code:', newRoomCode);

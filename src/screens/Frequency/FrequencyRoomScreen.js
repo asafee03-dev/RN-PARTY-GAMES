@@ -336,9 +336,18 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           if (prevRoom && prevRoom.game_status === 'playing' && newRoom.game_status === 'playing') {
             const prevTurnIndex = prevRoom.current_turn_index;
             
-            // Only block if turn index is significantly older (more than 1 turn difference)
-            // This prevents blocking valid updates during normal gameplay
-            if (currentTurnIndex < prevTurnIndex - 1) {
+            // Only block if turn index is significantly older (more than 1 turn difference).
+            // Allow a valid round rollover from the last player back to index 0.
+            const playerCount = Math.max(
+              Array.isArray(newRoom.players) ? newRoom.players.length : 0,
+              Array.isArray(prevRoom.players) ? prevRoom.players.length : 0
+            );
+            const isRoundRollover =
+              playerCount > 1 &&
+              prevTurnIndex === playerCount - 1 &&
+              currentTurnIndex === 0;
+
+            if (currentTurnIndex < prevTurnIndex - 1 && !isRoundRollover) {
               console.warn('⚠️ Ignoring out-of-order update: new turn index is significantly older than current');
               return prevRoom;
             }

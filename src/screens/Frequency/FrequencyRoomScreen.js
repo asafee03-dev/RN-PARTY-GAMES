@@ -337,17 +337,29 @@ export default function FrequencyRoomScreen({ navigation, route }) {
             const prevTurnIndex = prevRoom.current_turn_index;
             
             // Only block if turn index is significantly older (more than 1 turn difference).
-            // Allow a valid round rollover from the last player back to index 0.
-            const playerCount = Math.max(
-              Array.isArray(newRoom.players) ? newRoom.players.length : 0,
-              Array.isArray(prevRoom.players) ? prevRoom.players.length : 0
+            // Allow valid wrap transitions for active-player rotation, even when indexes are sparse.
+            const activePlayers = (prevRoom.players || []).filter(
+              p => p && p.name && (p.active !== false)
             );
-            const isRoundRollover =
-              playerCount > 1 &&
-              prevTurnIndex === playerCount - 1 &&
-              currentTurnIndex === 0;
+            const prevTurnPlayerName = prevRoom.players?.[prevTurnIndex]?.name;
+            const prevActiveIndex = activePlayers.findIndex(p => p.name === prevTurnPlayerName);
 
-            if (currentTurnIndex < prevTurnIndex - 1 && !isRoundRollover) {
+            let expectedNextTurnIndex = null;
+            if (activePlayers.length > 0) {
+              const safePrevActiveIndex = prevActiveIndex === -1 ? 0 : prevActiveIndex;
+              const nextActiveIndex = (safePrevActiveIndex + 1) % activePlayers.length;
+              const nextPlayerName = activePlayers[nextActiveIndex]?.name;
+              expectedNextTurnIndex = (prevRoom.players || []).findIndex(
+                p => p && p.name === nextPlayerName
+              );
+            }
+
+            const isExpectedNextActiveTurn =
+              expectedNextTurnIndex !== -1 &&
+              expectedNextTurnIndex !== null &&
+              currentTurnIndex === expectedNextTurnIndex;
+
+            if (currentTurnIndex < prevTurnIndex - 1 && !isExpectedNextActiveTurn) {
               console.warn('⚠️ Ignoring out-of-order update: new turn index is significantly older than current');
               return prevRoom;
             }

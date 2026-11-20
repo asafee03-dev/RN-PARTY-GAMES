@@ -7,12 +7,40 @@ import BannerAd from '../../components/shared/BannerAd';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot, collection, getDocs, runTransaction, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
+import { getActivePlayers, getActingHostName, markPlayerInactive } from '../../utils/gameSync';
+
+const GAME_SECONDS = 360; // 6 minutes
+// If the acting host's phone is asleep, any player may end an overdue game
+// after this grace period (the transaction makes duplicate attempts harmless).
+const OVERDUE_GRACE_SECONDS = 5;
+
+// Actual number of spies in the current game (may be lower than the lobby setting)
+const getSpyCount = (roomData) =>
+  (Array.isArray(roomData?.spy_names) && roomData.spy_names.length) || roomData?.number_of_spies || 1;
+
+// Votes each player must cast: one per spy, but never more than the number of
+// other active players (otherwise voting could never complete after people leave).
+const getRequiredVotes = (roomData) => {
+  const others = getActivePlayers(roomData).length - 1;
+  return Math.max(1, Math.min(getSpyCount(roomData), others));
+};
+
+// Voting is complete when every *active* player has cast all their votes.
+const allActiveVoted = (roomData) => {
+  const active = getActivePlayers(roomData);
+  const required = getRequiredVotes(roomData);
+  return active.length > 0 && active.every(p => (p.votes || []).length >= required);
+};
+
+// A game is identified by its start time; used inside transactions so a stale
+// device can't end or vote in a newer game.
+const isSameGame = (a, b) => (a?.game_start_time ?? null) === (b?.game_start_time ?? null);
 
 export default function SpyRoomScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -34,6 +62,18 @@ export default function SpyRoomScreen({ navigation, route }) {
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
   const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
+  const latestRoomRef = useRef(null); // Latest room for timers/listeners (avoids stale closures)
+  const currentPlayerNameRef = useRef('');
+  const isEndingGameRef = useRef(false);
+  const isVotingRef = useRef(false);
+
+  useEffect(() => {
+    latestRoomRef.current = room;
+  }, [room]);
+
+  useEffect(() => {
+    currentPlayerNameRef.current = currentPlayerName;
+  }, [currentPlayerName]);
 
   // Load player name on mount (like Alias does)
   useEffect(() => {
@@ -117,6 +157,14 @@ export default function SpyRoomScreen({ navigation, route }) {
   // Cleanup timers/listeners on navigation away
   useEffect(() => {
     const unsubscribeNav = navigation.addListener('beforeRemove', () => {
+      // Mark as inactive so voting doesn't wait for a player who left
+      const current = latestRoomRef.current;
+      const me = currentPlayerNameRef.current;
+      if (current?.id && me) {
+        markPlayerInactive('SpyRoom', current.id, me).catch(err => {
+          console.error('Error marking player as inactive:', err);
+        });
+      }
       if (timerInterval.current) {
         clearInterval(timerInterval.current);
         timerInterval.current = null;
@@ -136,14 +184,20 @@ export default function SpyRoomScreen({ navigation, route }) {
         clearInterval(timerInterval.current);
       }
 
-      const updateTimer = async () => {
-        const elapsed = Math.floor((Date.now() - room.game_start_time) / 1000);
-        const remaining = Math.max(0, 360 - elapsed);
-        setTimeLeft(remaining);
+      const updateTimer = () => {
+        const current = latestRoomRef.current;
+        if (!current?.game_start_time) return;
+        const elapsedMs = Date.now() - current.game_start_time;
+        setTimeLeft(Math.max(0, GAME_SECONDS - Math.floor(elapsedMs / 1000)));
 
-        if (remaining === 0) {
-          clearInterval(timerInterval.current);
-          await endGame(room);
+        // Only the acting host ends the game on time; others take over if the
+        // host's phone is asleep and the game is overdue. Keep ticking until the
+        // status actually changes so the fallback can kick in.
+        if (elapsedMs >= GAME_SECONDS * 1000) {
+          const overdue = elapsedMs >= (GAME_SECONDS + OVERDUE_GRACE_SECONDS) * 1000;
+          if (getActingHostName(current) === currentPlayerNameRef.current || overdue) {
+            endGame('timer');
+          }
         }
       };
 
@@ -240,8 +294,24 @@ export default function SpyRoomScreen({ navigation, route }) {
           navigation.goBack();
           return;
         }
+        // Returning player who had left - mark active again
+        const existing = roomData.players.find(p => p && p.name === playerName);
+        if (existing && existing.active === false) {
+          const result = await atomicPlayerJoin(
+            'SpyRoom',
+            roomData.id,
+            playerName,
+            null,
+            (players, name) => players.findIndex(p => p && p.name === name),
+            (p) => ({ ...p, active: true })
+          );
+          if (result.success && result.roomData) {
+            setRoom(result.roomData);
+            return;
+          }
+        }
       }
-      
+
       // Use atomic join for lobby state
       if (playerName && roomData.game_status === 'lobby') {
         const result = await atomicPlayerJoin(
@@ -250,7 +320,7 @@ export default function SpyRoomScreen({ navigation, route }) {
           playerName,
           () => ({ name: playerName }), // createPlayerObject
           (players, name) => players.findIndex(p => p && p.name === name), // findPlayerIndex
-          null, // updatePlayerObject (no update needed for new joins)
+          (p) => (p.active === false ? { ...p, active: true } : null), // Reactivate a returning player
           3 // maxRetries
         );
         
@@ -304,7 +374,7 @@ export default function SpyRoomScreen({ navigation, route }) {
         if (newRoom.reset_triggered_at && 
             newRoom.reset_triggered_at !== lastResetTriggerRef.current &&
             newRoom.game_status === 'lobby' &&
-            newRoom.host_name !== currentPlayerName) {
+            newRoom.host_name !== currentPlayerNameRef.current) {
           lastResetTriggerRef.current = newRoom.reset_triggered_at;
           // Show ad to non-host players when host resets
           showInterstitialIfAvailable(() => {
@@ -321,21 +391,9 @@ export default function SpyRoomScreen({ navigation, route }) {
             return newRoom;
           }
           
-          // If game is playing, only allow updates that don't change critical game state
-          if (prevRoom.game_status === 'playing' && newRoom.game_status === 'playing') {
-            const criticalFieldsChanged = 
-              JSON.stringify(prevRoom.all_locations) !== JSON.stringify(newRoom.all_locations) ||
-              JSON.stringify(prevRoom.chosen_location) !== JSON.stringify(newRoom.chosen_location) ||
-              prevRoom.spy_name !== newRoom.spy_name ||
-              JSON.stringify(prevRoom.players.map(p => ({ name: p.name, is_spy: p.is_spy, location: p.location, role: p.role }))) !==
-              JSON.stringify(newRoom.players.map(p => ({ name: p.name, is_spy: p.is_spy, location: p.location, role: p.role })));
-            
-            if (criticalFieldsChanged) {
-              console.warn('⚠️ Blocked critical game state change during active game');
-              return prevRoom;
-            }
-          }
-          
+          // Always apply the server state. (A previous "block critical changes"
+          // check here could leave a player on a different spy/location than
+          // everyone else if the game was started twice.)
           // Update numberOfSpies if it changed in room (only in lobby)
           if (newRoom.game_status === 'lobby' && newRoom.number_of_spies !== undefined && 
               newRoom.number_of_spies !== null && newRoom.number_of_spies !== numberOfSpies) {
@@ -429,23 +487,24 @@ export default function SpyRoomScreen({ navigation, route }) {
     }
   }, [room?.id, room?.created_at]);
 
-  // Watch for all_votes_submitted and trigger endGame
+  // End the game once voting is complete. Re-evaluated whenever the room
+  // changes, so it also fires when the last missing voter *leaves*.
+  // Any device may trigger it; the transaction re-checks on the server.
   useEffect(() => {
     if (!room || room.game_status !== 'playing') return;
-    if (room.all_votes_submitted !== true) return;
-    
-    console.log('🔵 All votes submitted, ending game...');
-    endGame(room);
-  }, [room?.all_votes_submitted, room?.game_status, room?.id]);
+    if (room.all_votes_submitted === true || allActiveVoted(room)) {
+      endGame('votes');
+    }
+  }, [room]);
 
   const startGame = async () => {
-    if (!room || !room.players || !Array.isArray(room.players) || room.players.length < 3) {
+    const currentRoom = room;
+    if (!currentRoom || !currentRoom.id || currentRoom.host_name !== currentPlayerName) return;
+
+    if (getActivePlayers(currentRoom).length < 3) {
       Alert.alert('שגיאה', 'נדרשים לפחות 3 שחקנים!');
       return;
     }
-
-    // Use realtime listener state (more efficient than re-reading)
-    const currentRoom = room;
 
     if (currentRoom.game_status !== 'lobby') {
       console.warn('⚠️ Cannot start game - room is not in lobby state:', currentRoom.game_status);
@@ -454,159 +513,116 @@ export default function SpyRoomScreen({ navigation, route }) {
     }
 
     const currentGameMode = currentRoom.game_mode || 'locations';
-    const freshPlayers = currentRoom.players.map(p => ({ name: p.name }));
-    const numSpies = currentRoom.number_of_spies || 1;
-    
-    // Validate number of spies
-    const maxSpies = Math.max(1, Math.floor(freshPlayers.length / 2)); // At most half the players
-    const actualNumSpies = Math.min(numSpies, maxSpies);
 
-    // Select random spies
-    const shuffledPlayers = [...freshPlayers].sort(() => Math.random() - 0.5);
-    const spyIndices = new Set();
-    const spyNames = [];
-    
-    for (let i = 0; i < actualNumSpies && i < shuffledPlayers.length; i++) {
-      spyIndices.add(shuffledPlayers[i].name);
-      spyNames.push(shuffledPlayers[i].name);
-    }
-
-    let updatedPlayers = [];
-    let chosenLocation = '';
+    // Content queries can't run inside a transaction - load them first
+    let randomLocation = null;
     let allLocationNames = [];
-    let chosenWord = '';
+    let randomWord = '';
 
-    if (currentGameMode === 'locations') {
-      // Locations mode - existing behavior
-      let locations = [];
-      try {
+    try {
+      if (currentGameMode === 'locations') {
+        const locations = [];
         const locationsSnapshot = await getDocs(collection(db, 'SpyLocation'));
-        locationsSnapshot.forEach((doc) => {
-          locations.push({ id: doc.id, ...doc.data() });
-        });
-      } catch (error) {
-        console.error('❌ Error loading locations:', error);
-        Alert.alert('שגיאה', 'שגיאה בטעינת מיקומים. נסה שוב.');
-        return;
-      }
-      
-      if (!locations || locations.length === 0) {
-        Alert.alert('שגיאה', 'אין מיקומים במערכת!');
-        return;
-      }
-
-      const randomLocation = locations[Math.floor(Math.random() * locations.length)];
-
-      if (!randomLocation || !randomLocation.location || !randomLocation.roles || !Array.isArray(randomLocation.roles)) {
-        console.error('❌ Invalid location structure:', randomLocation);
-        Alert.alert('שגיאה', 'שגיאה: מיקום לא תקין. נסה שוב.');
-        return;
-      }
-
-      updatedPlayers = freshPlayers.map((player) => {
-        if (spyIndices.has(player.name)) {
-          return {
-            name: player.name,
-            is_spy: true,
-            location: '',
-            role: '',
-            votes: [] // Array for multiple votes
-          };
-        } else {
-          const randomRole = randomLocation.roles[Math.floor(Math.random() * randomLocation.roles.length)];
-          return {
-            name: player.name,
-            is_spy: false,
-            location: randomLocation.location,
-            role: randomRole,
-            votes: [] // Array for multiple votes
-          };
+        locationsSnapshot.forEach((d) => locations.push({ id: d.id, ...d.data() }));
+        const valid = locations.filter(l => l && l.location && Array.isArray(l.roles) && l.roles.length > 0);
+        if (valid.length === 0) {
+          Alert.alert('שגיאה', 'אין מיקומים במערכת!');
+          return;
         }
-      });
-
-      chosenLocation = randomLocation.location || '';
-      allLocationNames = locations.map(loc => loc.location).filter(loc => loc != null);
-    } else {
-      // Word mode - new behavior
-      let words = [];
-      try {
+        randomLocation = valid[Math.floor(Math.random() * valid.length)];
+        allLocationNames = locations.map(loc => loc.location).filter(loc => loc != null);
+      } else {
+        const words = [];
         const wordsSnapshot = await getDocs(collection(db, 'WordCard'));
-        wordsSnapshot.forEach((doc) => {
-          const wordData = doc.data();
-          if (wordData.word && typeof wordData.word === 'string' && wordData.word.trim().length > 0) {
-            words.push(wordData.word.trim());
-          }
+        wordsSnapshot.forEach((d) => {
+          const w = d.data()?.word;
+          if (typeof w === 'string' && w.trim().length > 0) words.push(w.trim());
         });
-      } catch (error) {
-        console.error('❌ Error loading words:', error);
-        Alert.alert('שגיאה', 'שגיאה בטעינת מילים. נסה שוב.');
-        return;
-      }
-      
-      if (!words || words.length === 0) {
-        Alert.alert('שגיאה', 'אין מילים במערכת!');
-        return;
-      }
-
-      const randomWord = words[Math.floor(Math.random() * words.length)];
-
-      updatedPlayers = freshPlayers.map((player) => {
-        if (spyIndices.has(player.name)) {
-          return {
-            name: player.name,
-            is_spy: true,
-            location: '',
-            role: '',
-            votes: [] // Array for multiple votes
-          };
-        } else {
-          // All non-spies get the same word, no role
-          return {
-            name: player.name,
-            is_spy: false,
-            location: randomWord, // Reuse location field to store word
-            role: '', // No role in word mode
-            votes: [] // Array for multiple votes
-          };
+        if (words.length === 0) {
+          Alert.alert('שגיאה', 'אין מילים במערכת!');
+          return;
         }
-      });
-
-      chosenWord = randomWord;
-      // In word mode, we don't need all_locations
-      allLocationNames = [];
-    }
-
-    if (!currentRoom || !currentRoom.id) {
-      console.error('❌ Cannot start game: room or room.id is missing');
-      Alert.alert('שגיאה', 'חדר לא נטען כראוי. נסה לרענן את הדף.');
+        randomWord = words[Math.floor(Math.random() * words.length)];
+      }
+    } catch (error) {
+      console.error('❌ Error loading game content:', error);
+      Alert.alert('שגיאה', 'שגיאה בטעינת נתוני המשחק. נסה שוב.');
       return;
     }
 
-    console.log('🔵 Starting Spy game, updating room:', currentRoom.id);
     try {
-      const roomRef = doc(db, 'SpyRoom', currentRoom.id);
-      const updates = {
-        players: updatedPlayers,
-        game_status: 'playing',
-        game_start_time: Date.now(),
-        spy_name: spyNames.length === 1 ? spyNames[0] : '', // For backward compatibility, use first spy if only one
-        spy_names: spyNames, // Array of all spy names
-        chosen_location: currentGameMode === 'locations' ? chosenLocation : chosenWord,
-        all_locations: allLocationNames,
-        eliminated_locations: [],
-        all_votes_submitted: false
-      };
-      await updateDoc(roomRef, updates);
-      console.log('✅ Game started successfully with fresh state');
-      setRoom(prev => ({ ...prev, ...updates }));
-      
-      // Log analytics event
-      const { logGameStart } = await import('../../utils/analytics');
-      logGameStart('spy', currentRoom.id);
+      const roomDocRef = doc(db, 'SpyRoom', currentRoom.id);
+      const outcome = await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomDocRef);
+        if (!snap.exists()) return 'missing';
+        const fresh = snap.data();
+        // Guard against double-start: a second start would deal different
+        // spies/roles and players could end up seeing different games
+        if (fresh.game_status !== 'lobby') return 'not_lobby';
+
+        const allPlayers = (fresh.players || []).filter(p => p && p.name);
+        const active = allPlayers.filter(p => p.active !== false);
+        if (active.length < 3) return 'not_enough';
+
+        // Spies are chosen among active players only; at most half of them
+        const maxSpies = Math.max(1, Math.floor(active.length / 2));
+        const actualNumSpies = Math.min(fresh.number_of_spies || 1, maxSpies);
+        const spyNames = [...active]
+          .sort(() => Math.random() - 0.5)
+          .slice(0, actualNumSpies)
+          .map(p => p.name);
+        const spySet = new Set(spyNames);
+
+        const updatedPlayers = allPlayers.map(player => {
+          if (player.active === false) {
+            return { name: player.name, active: false }; // Sits this game out
+          }
+          if (spySet.has(player.name)) {
+            return { name: player.name, is_spy: true, location: '', role: '', votes: [] };
+          }
+          if (currentGameMode === 'locations') {
+            const roles = randomLocation.roles;
+            return {
+              name: player.name,
+              is_spy: false,
+              location: randomLocation.location,
+              role: roles[Math.floor(Math.random() * roles.length)],
+              votes: []
+            };
+          }
+          // Word mode: all non-spies get the same word (stored in `location`), no role
+          return { name: player.name, is_spy: false, location: randomWord, role: '', votes: [] };
+        });
+
+        transaction.update(roomDocRef, {
+          players: updatedPlayers,
+          game_status: 'playing',
+          game_start_time: Date.now(),
+          spy_name: spyNames.length === 1 ? spyNames[0] : '', // Backward compatibility
+          spy_names: spyNames,
+          chosen_location: currentGameMode === 'locations' ? randomLocation.location : randomWord,
+          all_locations: currentGameMode === 'locations' ? allLocationNames : [],
+          eliminated_locations: [],
+          all_votes_submitted: false,
+          spy_guess: null,
+          spy_guess_correct: null,
+          spy_guess_player: null
+        });
+        return 'ok';
+      });
+
+      if (outcome === 'not_enough') {
+        Alert.alert('שגיאה', 'נדרשים לפחות 3 שחקנים!');
+        return;
+      }
+      if (outcome === 'ok') {
+        console.log('✅ Game started successfully with fresh state');
+        const { logGameStart } = await import('../../utils/analytics');
+        logGameStart('spy', currentRoom.id);
+      }
     } catch (error) {
       console.error('❌ Error starting game:', error);
       Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');
-      return;
     }
   };
 
@@ -614,18 +630,14 @@ export default function SpyRoomScreen({ navigation, route }) {
     if (!room || room.game_status !== 'playing' || !isSpy) return;
 
     const eliminated = room.eliminated_locations || [];
-    let updatedEliminated;
-
-    if (eliminated.includes(locationName)) {
-      updatedEliminated = eliminated.filter(loc => loc !== locationName);
-    } else {
-      updatedEliminated = [...eliminated, locationName];
-    }
-
     try {
-      const roomRef = doc(db, 'SpyRoom', room.id);
-      await updateDoc(roomRef, {
-        eliminated_locations: updatedEliminated
+      const roomDocRef = doc(db, 'SpyRoom', room.id);
+      // arrayUnion/arrayRemove change one element server-side, so two spies
+      // marking locations at the same time don't overwrite each other
+      await updateDoc(roomDocRef, {
+        eliminated_locations: eliminated.includes(locationName)
+          ? arrayRemove(locationName)
+          : arrayUnion(locationName)
       });
     } catch (error) {
       console.error('❌ Error updating eliminated locations:', error);
@@ -633,54 +645,47 @@ export default function SpyRoomScreen({ navigation, route }) {
   };
 
   const voteForPlayer = async (votedPlayerName) => {
-    if (!room || room.game_status !== 'playing' || !currentPlayerName) return;
+    if (!room || !room.id || room.game_status !== 'playing' || !currentPlayerName) return;
+    if (isVotingRef.current) return;
+    isVotingRef.current = true;
 
-    const numSpies = room.number_of_spies || 1;
-    const currentPlayer = room.players.find(p => p && p.name === currentPlayerName);
-    if (!currentPlayer) return;
+    const gameAtVote = { game_start_time: room.game_start_time };
 
-    // Get current votes array or initialize as empty
-    const currentVotes = currentPlayer.votes || [];
-    
-    // If already voted for this player, remove the vote (toggle)
-    // Otherwise, add the vote (up to numSpies votes)
-    let updatedVotes;
-    if (currentVotes.includes(votedPlayerName)) {
-      // Remove vote
-      updatedVotes = currentVotes.filter(v => v !== votedPlayerName);
-    } else {
-      // Add vote if we haven't reached the limit
-      if (currentVotes.length < numSpies) {
-        updatedVotes = [...currentVotes, votedPlayerName];
-      } else {
-        // Already at limit, can't add more votes
-        return;
-      }
-    }
-
-    const updatedPlayers = room.players.map(p => {
-      if (p.name === currentPlayerName) {
-        return { ...p, votes: updatedVotes };
-      }
-      return p;
-    });
-
-    // Check if all players have submitted their votes (each player needs numSpies votes)
-    const allVoted = updatedPlayers.every(p => {
-      const playerVotes = p.votes || [];
-      return playerVotes.length === numSpies;
-    });
-    
     try {
-      const roomRef = doc(db, 'SpyRoom', room.id);
-      await updateDoc(roomRef, {
-        players: updatedPlayers,
-        all_votes_submitted: allVoted && updatedPlayers.length > 0
+      const roomDocRef = doc(db, 'SpyRoom', room.id);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomDocRef);
+        if (!snap.exists()) return;
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing' || !isSameGame(fresh, gameAtVote)) return;
+
+        const players = fresh.players || [];
+        const myIndex = players.findIndex(p => p && p.name === currentPlayerName);
+        if (myIndex === -1) return;
+
+        // Toggle: remove if already voted for them, otherwise add (up to the limit)
+        const currentVotes = players[myIndex].votes || [];
+        let updatedVotes;
+        if (currentVotes.includes(votedPlayerName)) {
+          updatedVotes = currentVotes.filter(v => v !== votedPlayerName);
+        } else if (currentVotes.length < getRequiredVotes(fresh)) {
+          updatedVotes = [...currentVotes, votedPlayerName];
+        } else {
+          return; // Already at limit
+        }
+
+        // Change only *my* votes, on top of the server's latest players array,
+        // so simultaneous votes from other players are never lost
+        const updatedPlayers = players.map((p, i) => (i === myIndex ? { ...p, votes: updatedVotes } : p));
+        transaction.update(roomDocRef, {
+          players: updatedPlayers,
+          all_votes_submitted: allActiveVoted({ ...fresh, players: updatedPlayers })
+        });
       });
-      console.log('✅ Vote submitted. Votes:', updatedVotes, 'All votes submitted:', allVoted);
     } catch (error) {
       console.error('❌ Error submitting vote:', error);
-      return;
+    } finally {
+      isVotingRef.current = false;
     }
   };
 
@@ -697,29 +702,41 @@ export default function SpyRoomScreen({ navigation, route }) {
     }
 
     const trimmedGuess = guess.trim();
+    const isWordMode = room.game_mode === 'word';
+    const gameAtGuess = { game_start_time: room.game_start_time };
     setSpyGuessSubmitted(true);
 
     try {
-      const roomRef = doc(db, 'SpyRoom', room.id);
-      const correctAnswer = room.chosen_location || '';
-      const isCorrect = trimmedGuess.toLowerCase() === correctAnswer.toLowerCase();
-      
-      // Batch both updates into a single write
-      await updateDoc(roomRef, {
-        spy_guess: trimmedGuess,
-        spy_guess_correct: isCorrect,
-        spy_guess_player: currentPlayerName,
-        game_status: 'finished'
+      const roomDocRef = doc(db, 'SpyRoom', room.id);
+      const result = await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomDocRef);
+        if (!snap.exists()) return { outcome: 'missing' };
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing' || !isSameGame(fresh, gameAtGuess)) return { outcome: 'over' };
+        // With several spies, only the first guess counts
+        if (fresh.spy_guess) return { outcome: 'already' };
+
+        const correctAnswer = fresh.chosen_location || '';
+        const isCorrect = trimmedGuess.toLowerCase() === correctAnswer.toLowerCase();
+        transaction.update(roomDocRef, {
+          spy_guess: trimmedGuess,
+          spy_guess_correct: isCorrect,
+          spy_guess_player: currentPlayerName,
+          game_status: 'finished'
+        });
+        return { outcome: isCorrect ? 'correct' : 'wrong', correctAnswer };
       });
 
-      const isWordMode = room.game_mode === 'word';
-      if (isCorrect) {
-        Alert.alert('🎉 ניצחון!', `צדקת! ${isWordMode ? 'המילה הייתה' : 'המיקום היה'}: ${correctAnswer}\nהמשחק הסתיים - המרגל ניצח!`);
-      } else {
-        Alert.alert('❌ טעות', `הניחוש שלך שגוי.\n${isWordMode ? 'המילה הייתה' : 'המיקום היה'}: ${correctAnswer}\nהמשחק הסתיים - המרגל הפסיד!`);
+      const what = isWordMode ? 'המילה הייתה' : 'המיקום היה';
+      if (result.outcome === 'correct') {
+        Alert.alert('🎉 ניצחון!', `צדקת! ${what}: ${result.correctAnswer}\nהמשחק הסתיים - המרגל ניצח!`);
+      } else if (result.outcome === 'wrong') {
+        Alert.alert('❌ טעות', `הניחוש שלך שגוי.\n${what}: ${result.correctAnswer}\nהמשחק הסתיים - המרגל הפסיד!`);
+      } else if (result.outcome === 'already') {
+        Alert.alert('שים לב', 'מרגל אחר כבר שלח ניחוש.');
+      } else if (result.outcome === 'over') {
+        Alert.alert('שים לב', 'המשחק כבר הסתיים - הניחוש לא נשלח.');
       }
-
-      console.log('✅ Spy guess submitted:', trimmedGuess, 'Correct:', isCorrect);
     } catch (error) {
       console.error('❌ Error submitting spy guess:', error);
       setSpyGuessSubmitted(false);
@@ -727,29 +744,44 @@ export default function SpyRoomScreen({ navigation, route }) {
     }
   };
 
-  const endGame = async (roomData = null) => {
-    const roomToUse = roomData || room;
-    if (!roomToUse || !roomToUse.id) return;
+  /**
+   * End the current game.
+   * reason: 'manual' (host button), 'timer' (time is up), 'votes' (everyone voted).
+   * Runs in a transaction keyed on game_start_time, so a stale device can't
+   * end a newer game, and 'votes' is re-verified against the server's votes.
+   */
+  const endGame = async (reason = 'manual') => {
+    const current = latestRoomRef.current;
+    const me = currentPlayerNameRef.current;
+    if (!current || !current.id || current.game_status !== 'playing') return;
 
-    if (!roomData) {
-      if (roomToUse.host_name !== currentPlayerName) {
-        console.log('❌ Only host can end the game manually');
-        return;
-      }
-      console.log('🔵 Host manually ending game for room:', roomToUse.id);
-    } else {
-      console.log('🔵 Auto-ending game for room:', roomToUse.id);
+    if (reason === 'manual' && getActingHostName(current) !== me) {
+      console.log('❌ Only host can end the game manually');
+      return;
     }
+    if (isEndingGameRef.current) return;
+    isEndingGameRef.current = true;
+
+    const gameAtCall = { game_start_time: current.game_start_time };
 
     try {
-      const roomRef = doc(db, 'SpyRoom', roomToUse.id);
-      await updateDoc(roomRef, {
-        game_status: 'finished'
+      const roomDocRef = doc(db, 'SpyRoom', current.id);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomDocRef);
+        if (!snap.exists()) return;
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing' || !isSameGame(fresh, gameAtCall)) return;
+        if (reason === 'votes' && !allActiveVoted(fresh)) return; // Someone changed their vote
+        transaction.update(roomDocRef, { game_status: 'finished' });
       });
-      console.log('✅ Game ended successfully');
+      console.log(`✅ Game ended (${reason})`);
     } catch (error) {
       console.error('❌ Error ending game:', error);
-      Alert.alert('שגיאה', 'שגיאה בסיום המשחק. נסה שוב.');
+      if (reason === 'manual') {
+        Alert.alert('שגיאה', 'שגיאה בסיום המשחק. נסה שוב.');
+      }
+    } finally {
+      isEndingGameRef.current = false;
     }
   };
 
@@ -768,7 +800,8 @@ export default function SpyRoomScreen({ navigation, route }) {
       timerInterval.current = null;
     }
     
-    const resetPlayers = room.players.map(p => ({ name: p.name }));
+    // Keep players who left marked inactive so they don't count in the next game
+    const resetPlayers = room.players.map(p => (p.active === false ? { name: p.name, active: false } : { name: p.name }));
     
     try {
       // Update game state FIRST - this moves all players to lobby screen
@@ -811,6 +844,15 @@ export default function SpyRoomScreen({ navigation, route }) {
   const goBack = async () => {
     // Show interstitial ad before navigating to main menu
     showInterstitialIfAvailable(async () => {
+      // Mark as inactive so voting doesn't wait for us
+      if (room?.id && currentPlayerName) {
+        try {
+          await markPlayerInactive('SpyRoom', room.id, currentPlayerName);
+        } catch (err) {
+          console.error('Error marking player as inactive:', err);
+        }
+      }
+
       // Cleanup all listeners and timers
       if (timerInterval.current) {
         clearInterval(timerInterval.current);
@@ -888,7 +930,10 @@ export default function SpyRoomScreen({ navigation, route }) {
   const currentPlayer = players.find(p => p && p.name === currentPlayerName);
   const isSpy = currentPlayer?.is_spy || false;
   const myVotes = currentPlayer?.votes || []; // Array of votes
-  const numSpies = room?.number_of_spies || 1;
+  const numSpies = getSpyCount(room);
+  const requiredVotes = getRequiredVotes(room);
+  const activePlayers = getActivePlayers(room);
+  const isActingHost = !!currentPlayerName && getActingHostName(room) === currentPlayerName;
 
   return (
     <GradientBackground variant="spy">
@@ -1093,10 +1138,9 @@ export default function SpyRoomScreen({ navigation, route }) {
               </View>
 
               <View style={styles.playersSection}>
-                <Text style={styles.playersTitle}>שחקנים בחדר ({players.length})</Text>
+                <Text style={styles.playersTitle}>שחקנים בחדר ({activePlayers.length})</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.playersList}>
-                  {players
-                    .filter((player) => player != null && player.name != null)
+                  {activePlayers
                     .map((player, idx) => {
                       const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
                       return (
@@ -1118,11 +1162,11 @@ export default function SpyRoomScreen({ navigation, route }) {
                   onPress={startGame}
                   variant="spy"
                   style={styles.startButton}
-                  disabled={players.length < 3}
+                  disabled={activePlayers.length < 3}
                 />
               )}
 
-              {players.length < 3 && (
+              {activePlayers.length < 3 && (
                 <View style={styles.warningCard}>
                   <Text style={styles.warningText}>נדרשים לפחות 3 שחקנים להתחלת המשחק</Text>
                 </View>
@@ -1203,18 +1247,20 @@ export default function SpyRoomScreen({ navigation, route }) {
               <View style={styles.votingCard}>
                 <View style={styles.votingHeader}>
                   <Text style={styles.votingTitle}>
-                    הצבעה - מי המרגל{numSpies > 1 ? `ים? (${myVotes.length}/${numSpies} הצבעות)` : '?'}
+                    הצבעה - מי המרגל{numSpies > 1 ? `ים? (${myVotes.length}/${requiredVotes} הצבעות)` : '?'}
                   </Text>
                   {numSpies > 1 && (
                     <Text style={styles.votingSubtitle}>
-                      יש {numSpies} מרגלים - הצבע {numSpies} הצבעות
+                      יש {numSpies} מרגלים - הצבע {requiredVotes} הצבעות
                     </Text>
                   )}
                 </View>
                 <View style={styles.votingContent}>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.votingPlayersList}>
                     {players
-                      .filter((player) => player != null && player.name != null)
+                      // Everyone who was dealt into this game (a player who left can still be the spy)
+                      .filter((player) => player != null && player.name != null &&
+                        (player.active !== false || typeof player.is_spy === 'boolean'))
                       .map((player, idx) => {
                       const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
                       // Count votes from all players for this player
@@ -1230,12 +1276,12 @@ export default function SpyRoomScreen({ navigation, route }) {
                         <Pressable
                           key={`voting-player-${idx}`}
                           onPress={() => !isMe && voteForPlayer(playerName)}
-                          disabled={isMe || (myVotes.length >= numSpies && !isMyVote)}
+                          disabled={isMe || (myVotes.length >= requiredVotes && !isMyVote)}
                           style={[
                             styles.votingPlayerCard,
                             isMyVote && styles.votingPlayerCardSelected,
                             isMe && styles.votingPlayerCardDisabled,
-                            myVotes.length >= numSpies && !isMyVote && styles.votingPlayerCardDisabled
+                            myVotes.length >= requiredVotes && !isMyVote && styles.votingPlayerCardDisabled
                           ]}
                         >
                           <Text style={styles.votingPlayerName}>{playerName}</Text>
@@ -1266,14 +1312,11 @@ export default function SpyRoomScreen({ navigation, route }) {
                       💡 תוכל לשנות את הצבעתך בכל עת.
                     </Text>
                     <Text style={styles.votingInfoSubtext}>
-                      המשחק יסתיים כשכולם יצביעו {numSpies > 1 ? `(${numSpies} הצבעות לכל שחקן)` : ''}, כשהמארח יסיים את המשחק, או כשהזמן יגמר.
+                      המשחק יסתיים כשכולם יצביעו {requiredVotes > 1 ? `(${requiredVotes} הצבעות לכל שחקן)` : ''}, כשהמארח יסיים את המשחק, או כשהזמן יגמר.
                     </Text>
                     <View style={styles.votingProgress}>
                       <Text style={styles.votingProgressText}>
-                        {players.filter(p => {
-                          const playerVotes = p.votes || [];
-                          return playerVotes.length === numSpies;
-                        }).length} / {players.length}
+                        {activePlayers.filter(p => (p.votes || []).length >= requiredVotes).length} / {activePlayers.length}
                       </Text>
                       <Text style={styles.votingProgressLabel}>שחקנים סיימו להצביע</Text>
                     </View>
@@ -1281,10 +1324,11 @@ export default function SpyRoomScreen({ navigation, route }) {
                 </View>
               </View>
 
-              {isHost && (
+              {/* Acting host (host, or first active player if the host left) can end the game */}
+              {isActingHost && (
                 <GradientButton
                   title="סיים משחק"
-                  onPress={() => endGame()}
+                  onPress={() => endGame('manual')}
                   variant="spy"
                   style={styles.endButton}
                 />

@@ -24,3 +24,11 @@ export const textAlignFor = (align) => {
   if (align === 'end') return web ? 'end' : 'right';
   return web ? 'start' : 'left';
 };
+
+/**
+ * For things that must stay PHYSICALLY ordered left-to-right regardless of
+ * language (e.g. the two ends of a dial whose 0° is on the left): a row that
+ * does not flip in RTL. For absolute positioning over a drawing, draw inside
+ * the SVG instead - SVG coordinates are physical on every platform.
+ */
+export const physicalRow = () => (isRTL() ? 'row-reverse' : 'row');

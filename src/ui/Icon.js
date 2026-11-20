@@ -38,6 +38,10 @@ const ICONS = {
   timer: { glyph: 'timer-outline' },
   join: { glyph: 'door-open' },
   addPlayer: { glyph: 'account-plus' },
+  gesture: { glyph: 'gesture-swipe-horizontal' },
+  hourglass: { glyph: 'timer-sand' },
+  medal: { glyph: 'medal' },
+  podium: { glyph: 'podium' },
 
   // People & status
   player: { glyph: 'account' },

@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, Modal, Switch, TouchableOpacity, Platform } from 'react-native';
+import { View, StyleSheet, Alert, ActivityIndicator, Switch, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import GradientBackground from '../../components/codenames/GradientBackground';
-import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
 import FrequencyGauge from '../../components/frequency/FrequencyGauge';
 import ScoreBoard from '../../components/frequency/ScoreBoard';
@@ -15,6 +13,9 @@ import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
+import { S } from '../../strings';
+import { colors, radii, spacing, useGameTheme } from '../../theme';
+import { AppText, Badge, Button, Card, Dialog, Icon, PlayerChip, Screen, feedback } from '../../ui';
 
 const PLAYER_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#FCD34D", "#3B82F6", "#EC4899", "#F97316", "#14B8A6"];
 const waveIcons = ["📻", "📡", "🎚️", "🎛️"];
@@ -189,8 +190,8 @@ const confirmAction = (title, message, onConfirm) => {
     return;
   }
   Alert.alert(title, message, [
-    { text: 'ביטול', style: 'cancel' },
-    { text: 'אישור', style: 'destructive', onPress: onConfirm }
+    { text: S.common.cancel, style: 'cancel' },
+    { text: S.common.confirm, style: 'destructive', onPress: onConfirm }
   ]);
 };
 
@@ -235,7 +236,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       if (!roomSnap.exists()) {
         console.warn('❌ Room not found with code:', roomCode);
         await clearCurrentRoom();
-        Alert.alert('שגיאה', 'החדר לא נמצא');
+        Alert.alert(S.common.error, S.frequency.room.roomNotFound);
         navigation.goBack();
         return;
       }
@@ -309,14 +310,14 @@ export default function FrequencyRoomScreen({ navigation, route }) {
               return;
             } else {
               console.error('❌ Failed to join Frequency room:', result.error);
-              Alert.alert('שגיאה', 'לא הצלחנו להצטרף לחדר. נסה שוב.');
+              Alert.alert(S.common.error, S.frequency.room.joinFailed);
               navigation.goBack();
               return;
             }
           } else if (roomData.game_status === 'playing' || roomData.game_status === 'finished') {
             // Game in progress - new players cannot join
             console.warn('⚠️ New player tried to join game that is already in progress');
-            Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+            Alert.alert(S.common.error, S.frequency.room.gameStarted);
             navigation.goBack();
             return;
           }
@@ -325,7 +326,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       setRoom(roomData);
     } catch (error) {
       console.error('❌ Error loading room:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לטעון את החדר');
+      Alert.alert(S.common.error, S.frequency.room.loadFailed);
       navigation.goBack();
     } finally {
       setIsLoading(false);
@@ -367,14 +368,14 @@ export default function FrequencyRoomScreen({ navigation, route }) {
             navigation.replace('FrequencyRoom', { roomCode: savedRoom.roomCode });
             return;
           } else {
-            Alert.alert('שגיאה', 'קוד חדר חסר');
+            Alert.alert(S.common.error, S.frequency.room.missingRoomCode);
             await clearCurrentRoom();
             navigation.goBack();
             return;
           }
         } catch (error) {
           console.warn('⚠️ Error restoring room:', error);
-          Alert.alert('שגיאה', 'קוד חדר חסר');
+          Alert.alert(S.common.error, S.frequency.room.missingRoomCode);
           navigation.goBack();
           return;
         }
@@ -567,14 +568,14 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const startGame = async () => {
     if (!room || !room.id || room.host_name !== currentPlayerName) return;
     if (getActivePlayers(room).length < 2) {
-      Alert.alert('שגיאה', 'צריך לפחות 2 שחקנים כדי להתחיל!');
+      Alert.alert(S.common.error, S.frequency.room.needTwoPlayers);
       return;
     }
 
     try {
       const topic = await pickRandomTopic();
       if (!topic) {
-        Alert.alert('שגיאה', 'אין נושאים זמינים במערכת!');
+        Alert.alert(S.common.error, S.frequency.room.noTopics);
         return;
       }
 
@@ -614,7 +615,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       }
     } catch (error) {
       console.error('❌ Error starting game:', error);
-      Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');
+      Alert.alert(S.common.error, S.frequency.room.startFailed);
     }
   };
 
@@ -667,12 +668,12 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       });
 
       if (outcome === 'round_changed') {
-        Alert.alert('שים לב', 'הסבב כבר הסתיים - הניחוש לא נשלח.');
+        Alert.alert(S.frequency.room.heads, S.frequency.room.roundAlreadyOver);
       }
       console.log('🔵 Guess submit outcome:', outcome);
     } catch (error) {
       console.error('❌ Error submitting guess:', error);
-      Alert.alert('שגיאה', 'שגיאה בשליחת הניחוש. נסה שוב.');
+      Alert.alert(S.common.error, S.frequency.room.guessFailed);
     } finally {
       isSubmittingGuess.current = false;
       setPendingGuessAngle(null);
@@ -710,8 +711,8 @@ export default function FrequencyRoomScreen({ navigation, route }) {
 
   const handleForceEndRound = () => {
     confirmAction(
-      'לסיים את הסבב?',
-      'שחקנים שעוד לא ניחשו יקבלו 0 נקודות בסבב הזה.',
+      S.frequency.room.endRoundConfirmTitle,
+      S.frequency.room.endRoundConfirmBody,
       () => finalizeRound({ force: true })
     );
   };
@@ -730,7 +731,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       // Topic list is a query, which can't run inside a transaction - pick it first
       const newTopic = await pickRandomTopic();
       if (!newTopic) {
-        Alert.alert('שגיאה', 'אין נושאים זמינים במערכת!');
+        Alert.alert(S.common.error, S.frequency.room.noTopics);
         return;
       }
 
@@ -811,7 +812,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       });
     } catch (error) {
       console.error('Error in advanceToNextTurn:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו להעביר תור. נסה שוב.');
+      Alert.alert(S.common.error, S.frequency.room.advanceFailed);
     } finally {
       isProcessingReveal.current = false;
     }
@@ -835,6 +836,17 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActingHost, room]);
+
+  const theme = useGameTheme();
+
+  // Haptic cues for the moments that matter (no-op on web)
+  const summaryVisible = room?.last_guess_result?.type === 'round_summary' && !!room?.last_guess_result?.show_popup;
+  useEffect(() => {
+    if (summaryVisible) feedback.reveal();
+  }, [summaryVisible]);
+  useEffect(() => {
+    if (room?.game_status === 'finished') feedback.success();
+  }, [room?.game_status]);
 
   const resetGame = async () => {
     if (!room || !room?.id || !isHost) return;
@@ -938,12 +950,19 @@ export default function FrequencyRoomScreen({ navigation, route }) {
 
   if (error) {
     return (
-      <GradientBackground variant="frequency">
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorTitle}>שגיאה בטעינת החדר</Text>
-          <Text style={styles.errorMessage}>לא הצלחנו לטעון את חדר המשחק</Text>
-          <GradientButton
-            title="חזרה"
+      <Screen contentStyle={styles.centered}>
+        <Card style={styles.stateCard}>
+          <Icon name="alert" size={40} color={colors.danger} />
+          <AppText variant="title" align="center">
+            {S.frequency.room.loadErrorTitle}
+          </AppText>
+          <AppText align="center" color={colors.inkSoft}>
+            {S.frequency.room.loadErrorMessage}
+          </AppText>
+          <Button
+            title={S.common.back}
+            icon="back"
+            fullWidth
             onPress={() => {
               setError(null);
               setIsLoading(true);
@@ -957,22 +976,20 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                 navigation.navigate('Home');
               }
             }}
-            variant="frequency"
-            style={styles.errorButton}
           />
-        </View>
-      </GradientBackground>
+        </Card>
+      </Screen>
     );
   }
 
   if (isLoading || !room) {
     return (
-      <GradientBackground variant="frequency">
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FFFFFF" />
-          <Text style={styles.loadingText}>טוען חדר משחק...</Text>
-        </View>
-      </GradientBackground>
+      <Screen contentStyle={styles.centered}>
+        <ActivityIndicator size="large" color={theme.accent} />
+        <AppText variant="subtitle" align="center" color={colors.inkSoft}>
+          {S.frequency.room.loading}
+        </AppText>
+      </Screen>
     );
   }
 
@@ -982,16 +999,13 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     isGuessingPhase(room) &&
     !hasPlayerSubmittedGuess(room, currentPlayerName) &&
     pendingGuessAngle === null;
+  const summary = room.last_guess_result;
+  const showSummary = summary?.type === 'round_summary' && summary.show_popup;
+  const submittedGuessers = activeGuessers.filter(p => hasPlayerSubmittedGuess(room, p.name));
 
   return (
-    <GradientBackground variant="darkBlue">
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        scrollEnabled={!canGuess}
-        nestedScrollEnabled={true}
-      >
-        {/* Unified Top Bar */}
+    <Screen
+      header={
         <UnifiedTopBar
           roomCode={roomCode}
           variant="frequency"
@@ -999,1074 +1013,527 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           onRulesPress={handleRulesPress}
           drinkingMode={drinkingMode}
         />
+      }
+      footer={<BannerAd />}
+      scrollEnabled={!canGuess}
+    >
+      {drinkingMode && <Badge label={S.common.drinkingMode} icon="drink" tone="gold" />}
 
-        {/* Drinking Mode Badge */}
-        {drinkingMode && (
-          <View style={styles.drinkingBadgeWrapper}>
-            <View style={styles.drinkingBadge}>
-              <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה</Text>
-            </View>
+      <RulesModal
+        visible={showRulesModal}
+        onClose={() => setShowRulesModal(false)}
+        variant="frequency"
+      />
+
+      {/* Lobby State */}
+      {room.game_status === 'lobby' && (
+        <Card style={styles.section}>
+          <View style={styles.titleRow}>
+            <Icon name="players" size={26} color={theme.accentInk} />
+            <AppText variant="title" color={theme.accentInk} accessibilityRole="header" style={styles.flexShrink}>
+              {S.frequency.room.lobbyTitle}
+            </AppText>
           </View>
-        )}
 
-        {/* Rules Modal */}
-        <RulesModal
-          visible={showRulesModal}
-          onClose={() => setShowRulesModal(false)}
-          variant="frequency"
-        />
-
-        {/* Lobby State */}
-        {room.game_status === 'lobby' && (
-          <View style={styles.lobbyCard}>
-            <View style={styles.lobbyHeader}>
-              <Text style={styles.lobbyTitle}>לובי - ממתינים לשחקנים</Text>
-            </View>
-            <View style={styles.lobbyContent}>
-              {isHost ? (
-                <View style={styles.hostCard}>
-                  <View style={styles.hostRow}>
-                    <Text style={styles.crownIcon}>👑</Text>
-                    <Text style={styles.hostText}>אתה המארח</Text>
-                  </View>
-                  <View style={styles.drinkingToggleContainer}>
-                    <Text style={styles.drinkingToggleLabel}>🔞 מצב משחקי שתייה</Text>
-                    <Switch
-                      value={drinkingMode}
-                      onValueChange={async (checked) => {
-                        setDrinkingMode(checked);
-                        try {
-                          // Save to local storage
-                          await storage.setItem('drinkingMode', checked.toString());
-                          
-                          // Save to Firestore room data so all players see it
-                          if (room && room.id) {
-                            const roomRef = doc(db, 'FrequencyRoom', room.id);
-                            await updateDoc(roomRef, {
-                              drinking_mode: checked
-                            });
-                            console.log('✅ Drinking mode updated:', checked);
-                          }
-                        } catch (error) {
-                          console.error('Error saving drinking mode:', error);
-                          setDrinkingMode(!checked); // Revert on error
-                          Alert.alert('שגיאה', 'לא הצלחנו לעדכן את מצב השתייה');
-                        }
-                      }}
-                      trackColor={{ false: '#D1D5DB', true: '#F97316' }}
-                      thumbColor={drinkingMode ? '#FFFFFF' : '#9CA3AF'}
-                    />
-                    <Text style={styles.drinkingToggleLabel}>🍺</Text>
-                  </View>
-                </View>
-              ) : drinkingMode ? (
-                <View style={styles.drinkingBadge}>
-                  <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה פעיל</Text>
-                </View>
-              ) : null}
-
-              <View style={styles.playersSection}>
-                <Text style={styles.playersTitle}>שחקנים בחדר ({room?.players && Array.isArray(room.players) ? room.players.length : 0}):</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.playersList}>
-                  {room.players && Array.isArray(room.players) && room.players
-                    .filter((player) => player != null && player.name != null)
-                    .map((player, idx) => {
-                      const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
-                      return (
-                        <View key={`player-${idx}`} style={styles.playerCard}>
-                          <Text style={styles.playerCardName}>{playerName}</Text>
-                          {playerName === room.host_name && (
-                            <Text style={styles.crownIconSmall}>👑</Text>
-                          )}
-                        </View>
-                      );
-                    })}
-                </ScrollView>
-              </View>
-
-              {isHost && (
-                <GradientButton
-                  title="▶ התחל משחק!"
-                  onPress={startGame}
-                  variant="frequency"
-                  style={styles.startButton}
-                  disabled={room.players.length < 2}
-                />
-              )}
-
-              {!isHost && (
-                <Text style={styles.waitingText}>ממתין למארח להתחיל את המשחק...</Text>
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* Round Summary Modal */}
-        {room.last_guess_result?.type === 'round_summary' && room.last_guess_result.show_popup && (
-          <Modal
-            visible={true}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={() => {}}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <View style={styles.summaryHeader}>
-                  <Text style={styles.summaryIcon}>📊</Text>
-                  <Text style={styles.summaryTitle}>סיכום הסיבוב</Text>
-                  <Text style={styles.summarySubtitle}>
-                    נותן הרמז: {room.last_guess_result.clue_giver || getCurrentPlayerName()}
-                  </Text>
-                </View>
-
-                <ScrollView style={styles.summaryGuesses}>
-                  {/* Clue Giver Points */}
-                  {room.last_guess_result.clue_giver && (
-                    <View style={[styles.guessRow, styles.clueGiverRow]}>
-                      <View style={styles.guessInfo}>
-                        <Text style={styles.guessPlayerName}>
-                          {room.last_guess_result.clue_giver} (נותן הרמז)
-                        </Text>
-                        <Text style={styles.guessAngle}>
-                          קיבל חצי מסך הנקודות שניתנו בסבב
-                        </Text>
-                      </View>
-                      <View style={[styles.pointsBadge, styles.clueGiverPointsBadge, (room.last_guess_result.clue_giver_points || 0) > 0 && styles.pointsBadgeSuccess]}>
-                        <Text style={[styles.pointsText, (room.last_guess_result.clue_giver_points || 0) > 0 && styles.pointsTextSuccess]}>
-                          {(room.last_guess_result.clue_giver_points || 0) > 0 ? `+${(room.last_guess_result.clue_giver_points || 0).toFixed(1)} נק'` : '0 נקודות'}
-                        </Text>
-                      </View>
-                    </View>
-                  )}
-                  
-                  {/* Guessers Points */}
-                  {(room.last_guess_result.guesses || []).map((guess, idx) => (
-                    <View key={`${guess.player_name}-${idx}`} style={styles.guessRow}>
-                      <View style={styles.guessInfo}>
-                        <Text style={styles.guessPlayerName}>{guess.player_name}</Text>
-                        <Text style={styles.guessAngle}>
-                          {guess.guess_angle !== null ? `ניחש ${Math.round(guess.guess_angle)}°` : 'לא הוגש ניחוש'}
-                        </Text>
-                      </View>
-                      <View style={[styles.pointsBadge, guess.points_earned > 0 && styles.pointsBadgeSuccess]}>
-                        <Text style={[styles.pointsText, guess.points_earned > 0 && styles.pointsTextSuccess]}>
-                          {guess.points_earned > 0 ? `+${guess.points_earned} נק'` : '0 נקודות'}
-                        </Text>
-                      </View>
-                    </View>
-                  ))}
-                </ScrollView>
-
-                <View style={styles.summaryGauge}>
-                  <FrequencyGauge
-                    leftLabel={room.current_topic?.left_side || ''}
-                    rightLabel={room.current_topic?.right_side || ''}
-                    targetPosition={room.last_guess_result.target_angle}
-                    showTarget={true}
-                    needlePosition={room.last_guess_result.target_angle}
-                    canMove={false}
-                    showAllNeedles={true}
-                    allNeedles={room.needle_positions}
-                    sectors={room.last_guess_result.sectors || room.current_round_sectors}
-                    players={room.players}
-                    currentPlayerName={currentPlayerName}
-                  />
-                </View>
-
-                {/* Only one player advances the round, so two devices can't each
-                    pick a different topic / add the round's points twice */}
-                {isActingHost ? (
-                  <GradientButton
-                    title={isAdvancingTurn ? 'מעביר תור...' : 'המשך לסיבוב הבא'}
-                    onPress={handleRoundSummaryContinue}
-                    variant="frequency"
-                    style={styles.continueButton}
-                    disabled={isAdvancingTurn}
-                  />
-                ) : (
-                  <Text style={styles.waitingForHostText}>
-                    ממתין ל{getActingHostName(room)} להמשיך לסיבוב הבא...
-                  </Text>
-                )}
-              </View>
-            </View>
-          </Modal>
-        )}
-
-        {/* Drinking Mode Modal */}
-        {room.drinking_players && room.drinking_players.length > 0 && (
-          <Modal
-            visible={true}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={() => {}}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <Text style={styles.drinkingIcon}>🍺</Text>
-                <Text style={styles.drinkingTitle}>זמן שתייה!</Text>
-                <Text style={styles.drinkingMessage}>
-                  {(() => {
-                    const clueGiver = room.players[room.current_turn_index]?.name;
-                    const isClueGiverDrinking = room.drinking_players.includes(clueGiver);
-                    
-                    if (isClueGiverDrinking) {
-                      return 'אף אחד לא ניחש נכון – נותן הרמז חייבת לשתות!';
-                    } else if (room.drinking_players.length === 1) {
-                      return 'פספסת את התדר!';
-                    } else {
-                      return 'פספסתם את התדר!';
-                    }
-                  })()}
-                </Text>
-                <View style={styles.drinkingPlayersList}>
-                  {room.drinking_players.map((name, idx) => (
-                    <View key={idx} style={styles.drinkingPlayerBadge}>
-                      <Text style={styles.drinkingPlayerName}>{name}</Text>
-                    </View>
-                  ))}
-                </View>
-                <Text style={styles.drinkingEmoji}>🍻</Text>
-                <Text style={styles.drinkingAction}>
-                  {room.drinking_players.length === 1 ? 'קח שוט! 🥃' : 'קחו שוט! 🥃'}
-                </Text>
-                <GradientButton
-                  title="המשך"
-                  onPress={async () => {
-                    if (!room?.id) return;
+          {isHost ? (
+            <Card tone="tint" padding="md" style={styles.hostBox}>
+              <Badge label={S.frequency.room.youAreHost} icon="crown" tone="gold" />
+              <View style={styles.toggleRow}>
+                <Icon name="drink" size={22} color={colors.ink} />
+                <AppText variant="bodyStrong" style={styles.flex}>
+                  {S.frequency.room.drinkingToggle}
+                </AppText>
+                <Switch
+                  value={drinkingMode}
+                  accessibilityLabel={S.frequency.room.drinkingToggle}
+                  onValueChange={async (checked) => {
+                    setDrinkingMode(checked);
                     try {
-                      const roomRef = doc(db, 'FrequencyRoom', room.id);
-                      await updateDoc(roomRef, {
-                        drinking_players: null
-                      });
+                      // Save to local storage
+                      await storage.setItem('drinkingMode', checked.toString());
+
+                      // Save to Firestore room data so all players see it
+                      if (room && room.id) {
+                        const roomRef = doc(db, 'FrequencyRoom', room.id);
+                        await updateDoc(roomRef, {
+                          drinking_mode: checked
+                        });
+                        console.log('✅ Drinking mode updated:', checked);
+                      }
                     } catch (error) {
-                      console.error('Error clearing drinking players:', error);
+                      console.error('Error saving drinking mode:', error);
+                      setDrinkingMode(!checked); // Revert on error
+                      Alert.alert(S.common.error, S.frequency.room.drinkingUpdateFailed);
                     }
                   }}
-                  variant="frequency"
-                  style={styles.continueButton}
+                  trackColor={{ false: colors.line, true: theme.accent }}
+                  thumbColor={colors.card}
                 />
               </View>
-            </View>
-          </Modal>
-        )}
+            </Card>
+          ) : drinkingMode ? (
+            <Badge label={S.frequency.room.drinkingActive} icon="drink" tone="gold" />
+          ) : null}
 
-        {/* Playing State */}
-        {room.game_status === 'playing' && (
-          <View style={styles.gameContainer}>
-            <View style={styles.gameMain}>
-              <View style={styles.statusCard}>
-                {isMyTurn() ? (
-                  <>
-                    <View style={styles.turnBadge}>
-                      <Text style={styles.turnBadgeText}>🎮 התור שלך!</Text>
-                    </View>
-                    <Text style={styles.turnMessage}>תן רמז לשחקנים האחרים - השחקנים מנחשים...</Text>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.turnMessage}>התור של {getCurrentPlayerName()}</Text>
-                    {!hasPlayerSubmittedGuess(room, currentPlayerName) && (
-                      <Text style={styles.guessHint}>גע או גרור את המחוגן למיקום הנכון ולחץ שלח ניחוש</Text>
-                    )}
-                    {hasPlayerSubmittedGuess(room, currentPlayerName) && (
-                      <View style={styles.submittedBadge}>
-                        <Text style={styles.submittedText}>✓ ניחשת!</Text>
-                      </View>
-                    )}
-                  </>
-                )}
-              </View>
-
-              <View
-                style={styles.gaugeContainer}
-                onStartShouldSetResponder={() => canGuess}
-                onMoveShouldSetResponder={() => canGuess}
-                onResponderTerminationRequest={() => false}
-                onTouchStart={(e) => {
-                  if (canGuess) {
-                    e.stopPropagation();
-                  }
-                }}
-                onTouchMove={(e) => {
-                  if (canGuess) {
-                    e.stopPropagation();
-                  }
-                }}
-              >
-                <FrequencyGauge
-                  // Remount per round so the needle starts centered every round
-                  key={room.current_round_id || `turn-${room.current_turn_index}`}
-                  leftLabel={room.current_topic?.left_side || ''}
-                  rightLabel={room.current_topic?.right_side || ''}
-                  targetPosition={room.target_position}
-                  showTarget={isMyTurn()}
-                  needlePosition={(() => {
-                    if (pendingGuessAngle !== null) return pendingGuessAngle;
-                    const storedPosition = room.needle_positions?.[currentPlayerName];
-                    if (hasPlayerSubmittedGuess(room, currentPlayerName) && storedPosition !== undefined) {
-                      return storedPosition;
-                    }
-                    return 90;
-                  })()}
-                  canMove={canGuess}
-                  showAllNeedles={isMyTurn() || allPlayersGuessed()}
-                  allNeedles={room.needle_positions}
-                  sectors={room.current_round_sectors}
-                  players={room.players}
-                  currentPlayerName={currentPlayerName}
-                />
-              </View>
-
-              {/* Guess Progress */}
-              {isGuessingPhase(room) && (
-                <View style={styles.progressCard}>
-                  <Text style={styles.progressText}>
-                    {activeGuessers.filter(p => hasPlayerSubmittedGuess(room, p.name)).length} מתוך {activeGuessers.length} שחקנים ניחשו
-                  </Text>
-                  <View style={styles.submittedPlayersList}>
-                    {(() => {
-                      const submittedPlayers = activeGuessers
-                        .filter(p => hasPlayerSubmittedGuess(room, p.name))
-                        .map(p => p.name);
-
-                      if (submittedPlayers.length === 0) {
-                        return <Text style={styles.noGuessesText}>אין שחקנים שניחשו עדיין</Text>;
-                      }
-
-                      return submittedPlayers.map((playerName, idx) => (
-                        <View key={`${playerName}-${idx}`} style={styles.submittedPlayerBadge}>
-                          <Text style={styles.submittedPlayerText}>✓ {playerName}</Text>
-                        </View>
-                      ));
-                    })()}
-                  </View>
-                </View>
-              )}
-
-              {!isMyTurn() && isGuessingPhase(room) && !hasPlayerSubmittedGuess(room, currentPlayerName) && (
-                <GradientButton
-                  title={pendingGuessAngle !== null ? 'שולח...' : 'שלח ניחוש'}
-                  onPress={handleSubmitGuess}
-                  variant="frequency"
-                  style={styles.submitButton}
-                  disabled={pendingGuessAngle !== null}
-                />
-              )}
-
-              {/* Host escape hatch: a player closed the app / lost connection and the round is stuck */}
-              {isActingHost && isGuessingPhase(room) && activeGuessers.some(p => !hasPlayerSubmittedGuess(room, p.name)) && (
-                <TouchableOpacity onPress={handleForceEndRound} style={styles.forceEndButton}>
-                  <Text style={styles.forceEndText}>⏭ מישהו נתקע? סיים את הסבב עכשיו</Text>
-                </TouchableOpacity>
-              )}
-
-              {isMyTurn() && room.turn_phase === 'summary' && (
-                <View style={styles.waitingSummaryCard}>
-                  <Text style={styles.waitingSummaryText}>📊 ממתין לסיכום הסיבוב...</Text>
-                </View>
-              )}
-            </View>
-
-            <View style={styles.scoreboardContainer}>
-              <ScoreBoard players={room.players.filter(p => p && p.name && (p.active !== false))} currentTurnIndex={room.current_turn_index} />
-            </View>
+          <AppText variant="label" color={colors.inkSoft}>
+            {S.frequency.room.playersInRoom(room?.players && Array.isArray(room.players) ? room.players.length : 0)}
+          </AppText>
+          <View style={styles.chips}>
+            {room.players && Array.isArray(room.players) && room.players
+              .filter((player) => player != null && player.name != null)
+              .map((player, idx) => {
+                const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
+                return (
+                  <PlayerChip
+                    key={`player-${idx}`}
+                    name={playerName}
+                    color={player.color}
+                    isHost={playerName === room.host_name}
+                    isMe={playerName === currentPlayerName}
+                    hostLabel={S.common.host}
+                    meLabel={S.common.you}
+                    dimmed={player.active === false}
+                  />
+                );
+              })}
           </View>
-        )}
 
-        {/* Finished State Modal */}
-        {room.game_status === 'finished' && !forceCloseModal && (
-          <Modal
-            visible={true}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={() => {}}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <View style={styles.finishedHeader}>
-                  <Text style={styles.finishedTitle}>🎉 המשחק הסתיים! 🎉</Text>
-                </View>
+          {isHost && (
+            <Button
+              title={S.frequency.room.startGame}
+              icon="play"
+              onPress={startGame}
+              disabled={room.players.length < 2}
+              fullWidth
+            />
+          )}
 
-                {/* Podium */}
-                <View style={styles.podiumContainer}>
-                  {[...room.players]
-                    .sort((a, b) => b.score - a.score)
-                    .slice(0, 3)
-                    .map((player, idx) => {
-                      const position = idx === 0 ? 1 : idx === 1 ? 2 : 3;
-                      const medals = ['🥇', '🥈', '🥉'];
-                      const order = idx === 0 ? 1 : idx === 1 ? 0 : 2;
-                      
-                      return (
-                        <View key={player.name} style={[styles.podiumItem, { order }]}>
-                          <Text style={styles.medal}>{medals[idx]}</Text>
-                          <Text style={styles.podiumName}>{player.name}</Text>
-                          <View style={styles.podiumScore}>
-                            <Text style={styles.podiumScoreText}>{player.score} נקודות</Text>
-                          </View>
-                          <View style={[styles.podiumBase, styles[`podium${position}`]]}>
-                            <Text style={styles.podiumNumber}>{position}</Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                </View>
-
-                {/* All Players Results */}
-                {room.players.length > 3 && (
-                  <View style={styles.otherPlayersSection}>
-                    <Text style={styles.otherPlayersTitle}>שאר השחקנים:</Text>
-                    {[...room.players]
-                      .sort((a, b) => b.score - a.score)
-                      .slice(3)
-                      .map((player, idx) => (
-                        <View key={player.name} style={styles.otherPlayerRow}>
-                          <Text style={styles.otherPlayerRank}>#{idx + 4}</Text>
-                          <Text style={styles.otherPlayerName}>{player.name}</Text>
-                          <Text style={styles.otherPlayerScore}>{player.score} נקודות</Text>
-                        </View>
-                      ))}
-                  </View>
-                )}
-
-                <View style={styles.finishedActions}>
-                  <GradientButton
-                    title="משחק חדש"
-                    onPress={resetGame}
-                    variant="frequency"
-                    style={styles.resetButton}
-                    disabled={!isHost}
-                  />
-                  {!isHost && (
-                    <Text style={styles.hostOnlyText}>רק המארח יכול להתחיל משחק חדש</Text>
-                  )}
-                  <GradientButton
-                    title="חזרה לתפריט הראשי"
-                    onPress={goBack}
-                    variant="outline"
-                    style={styles.backHomeButton}
-                  />
-                </View>
-              </View>
+          {!isHost && (
+            <View style={styles.waitingRow}>
+              <Icon name="hourglass" size={22} color={colors.inkSoft} />
+              <AppText color={colors.inkSoft}>{S.frequency.room.waitingForHostStart}</AppText>
             </View>
-          </Modal>
-        )}
-      </ScrollView>
-      <BannerAd />
-    </GradientBackground>
+          )}
+        </Card>
+      )}
+
+      {/* Round Summary - must be answered (no close) */}
+      <Dialog visible={!!showSummary} icon="target" title={S.frequency.room.summaryTitle}>
+        {showSummary ? (
+          <>
+            <AppText align="center" color={colors.inkSoft}>
+              {S.frequency.room.clueGiverLine(summary.clue_giver || getCurrentPlayerName())}
+            </AppText>
+
+            {summary.clue_giver && (
+              <View style={[styles.resultRow, { backgroundColor: theme.tint, borderColor: theme.accent }]}>
+                <View style={styles.flexShrink}>
+                  <AppText variant="bodyStrong">
+                    {summary.clue_giver} {S.frequency.room.clueGiverTag}
+                  </AppText>
+                  <AppText variant="caption" color={colors.inkSoft}>
+                    {S.frequency.room.clueGiverHalf}
+                  </AppText>
+                </View>
+                <Badge
+                  label={(summary.clue_giver_points || 0) > 0
+                    ? S.frequency.room.pointsPlus((summary.clue_giver_points || 0).toFixed(1))
+                    : S.frequency.room.zeroPoints}
+                  icon={(summary.clue_giver_points || 0) > 0 ? 'plus' : undefined}
+                  tone={(summary.clue_giver_points || 0) > 0 ? 'success' : 'neutral'}
+                />
+              </View>
+            )}
+
+            {(summary.guesses || []).map((guess, idx) => (
+              <View key={`${guess.player_name}-${idx}`} style={styles.resultRow}>
+                <View style={styles.flexShrink}>
+                  <AppText variant="bodyStrong">{guess.player_name}</AppText>
+                  <AppText variant="caption" color={colors.inkSoft}>
+                    {guess.guess_angle !== null
+                      ? S.frequency.room.guessedAngle(Math.round(guess.guess_angle))
+                      : S.frequency.room.noGuess}
+                  </AppText>
+                </View>
+                <Badge
+                  label={guess.points_earned > 0 ? S.frequency.room.pointsPlus(guess.points_earned) : S.frequency.room.zeroPoints}
+                  icon={guess.points_earned > 0 ? 'check' : undefined}
+                  tone={guess.points_earned > 0 ? 'success' : 'neutral'}
+                />
+              </View>
+            ))}
+
+            <View style={styles.summaryGauge}>
+              <FrequencyGauge
+                leftLabel={room.current_topic?.left_side || ''}
+                rightLabel={room.current_topic?.right_side || ''}
+                targetPosition={summary.target_angle}
+                showTarget={true}
+                needlePosition={summary.target_angle}
+                canMove={false}
+                showAllNeedles={true}
+                allNeedles={room.needle_positions}
+                sectors={summary.sectors || room.current_round_sectors}
+                players={room.players}
+                currentPlayerName={currentPlayerName}
+              />
+            </View>
+
+            {/* Only one player advances the round, so two devices can't each
+                pick a different topic / add the round's points twice */}
+            {isActingHost ? (
+              <Button
+                title={isAdvancingTurn ? S.frequency.room.advancing : S.frequency.room.nextRound}
+                icon="forward"
+                iconPosition="end"
+                onPress={handleRoundSummaryContinue}
+                loading={isAdvancingTurn}
+                fullWidth
+              />
+            ) : (
+              <View style={styles.waitingRow}>
+                <Icon name="hourglass" size={22} color={colors.inkSoft} />
+                <AppText color={colors.inkSoft} style={styles.flexShrink}>
+                  {S.frequency.room.waitingForNext(getActingHostName(room))}
+                </AppText>
+              </View>
+            )}
+          </>
+        ) : null}
+      </Dialog>
+
+      {/* Drinking Mode */}
+      <Dialog
+        visible={!!(room.drinking_players && room.drinking_players.length > 0)}
+        icon="drink"
+        title={S.frequency.room.drinkingTitle}
+        actions={
+          <Button
+            title={S.common.continue}
+            fullWidth
+            onPress={async () => {
+              if (!room?.id) return;
+              try {
+                const roomRef = doc(db, 'FrequencyRoom', room.id);
+                await updateDoc(roomRef, {
+                  drinking_players: null
+                });
+              } catch (error) {
+                console.error('Error clearing drinking players:', error);
+              }
+            }}
+          />
+        }
+      >
+        {room.drinking_players && room.drinking_players.length > 0 ? (
+          <>
+            <AppText align="center" variant="bodyStrong">
+              {(() => {
+                const clueGiver = room.players[room.current_turn_index]?.name;
+                const isClueGiverDrinking = room.drinking_players.includes(clueGiver);
+
+                if (isClueGiverDrinking) {
+                  return S.frequency.room.drinkClueGiver;
+                } else if (room.drinking_players.length === 1) {
+                  return S.frequency.room.drinkOne;
+                } else {
+                  return S.frequency.room.drinkMany;
+                }
+              })()}
+            </AppText>
+            <View style={[styles.chips, styles.centerChips]}>
+              {room.drinking_players.map((name, idx) => (
+                <Badge key={idx} label={name} icon="player" tone="gold" />
+              ))}
+            </View>
+            <AppText variant="title" align="center" color={theme.accentInk}>
+              {room.drinking_players.length === 1 ? S.frequency.room.shotOne : S.frequency.room.shotMany}
+            </AppText>
+          </>
+        ) : null}
+      </Dialog>
+
+      {/* Playing State */}
+      {room.game_status === 'playing' && (
+        <>
+          <Card tone={isMyTurn() ? 'tint' : 'paper'} style={styles.section}>
+            {isMyTurn() ? (
+              <>
+                <Badge label={S.frequency.room.yourTurn} icon="clue" tone="accent" />
+                <AppText variant="bodyStrong">{S.frequency.room.giveClue}</AppText>
+              </>
+            ) : (
+              <>
+                <AppText variant="title">{S.frequency.room.turnOf(getCurrentPlayerName())}</AppText>
+                {!hasPlayerSubmittedGuess(room, currentPlayerName) && (
+                  <AppText color={colors.inkSoft}>{S.frequency.room.guessHint}</AppText>
+                )}
+                {hasPlayerSubmittedGuess(room, currentPlayerName) && (
+                  <Badge label={S.frequency.room.youGuessed} icon="check" tone="success" />
+                )}
+              </>
+            )}
+          </Card>
+
+          <Card padding="sm" style={styles.gaugeCard}>
+            <View
+              onStartShouldSetResponder={() => canGuess}
+              onMoveShouldSetResponder={() => canGuess}
+              onResponderTerminationRequest={() => false}
+              onTouchStart={(e) => {
+                if (canGuess) {
+                  e.stopPropagation();
+                }
+              }}
+              onTouchMove={(e) => {
+                if (canGuess) {
+                  e.stopPropagation();
+                }
+              }}
+            >
+              <FrequencyGauge
+                // Remount per round so the needle starts centered every round
+                key={room.current_round_id || `turn-${room.current_turn_index}`}
+                leftLabel={room.current_topic?.left_side || ''}
+                rightLabel={room.current_topic?.right_side || ''}
+                targetPosition={room.target_position}
+                showTarget={isMyTurn()}
+                needlePosition={(() => {
+                  if (pendingGuessAngle !== null) return pendingGuessAngle;
+                  const storedPosition = room.needle_positions?.[currentPlayerName];
+                  if (hasPlayerSubmittedGuess(room, currentPlayerName) && storedPosition !== undefined) {
+                    return storedPosition;
+                  }
+                  return 90;
+                })()}
+                canMove={canGuess}
+                showAllNeedles={isMyTurn() || allPlayersGuessed()}
+                allNeedles={room.needle_positions}
+                sectors={room.current_round_sectors}
+                players={room.players}
+                currentPlayerName={currentPlayerName}
+              />
+            </View>
+          </Card>
+
+          {!isMyTurn() && isGuessingPhase(room) && !hasPlayerSubmittedGuess(room, currentPlayerName) && (
+            <Button
+              title={pendingGuessAngle !== null ? S.frequency.room.sending : S.frequency.room.submitGuess}
+              icon="target"
+              onPress={handleSubmitGuess}
+              loading={pendingGuessAngle !== null}
+              fullWidth
+            />
+          )}
+
+          {/* Guess Progress */}
+          {isGuessingPhase(room) && (
+            <Card style={styles.section}>
+              <AppText variant="bodyStrong">
+                {S.frequency.room.guessedCount(submittedGuessers.length, activeGuessers.length)}
+              </AppText>
+              <View style={styles.chips}>
+                {submittedGuessers.length === 0 ? (
+                  <AppText color={colors.inkSoft}>{S.frequency.room.noGuessesYet}</AppText>
+                ) : (
+                  submittedGuessers.map((p, idx) => (
+                    <Badge key={`${p.name}-${idx}`} label={p.name} icon="check" tone="success" />
+                  ))
+                )}
+              </View>
+            </Card>
+          )}
+
+          {/* Host escape hatch: a player closed the app / lost connection and the round is stuck */}
+          {isActingHost && isGuessingPhase(room) && activeGuessers.some(p => !hasPlayerSubmittedGuess(room, p.name)) && (
+            <Button
+              title={S.frequency.room.forceEnd}
+              icon="skip"
+              variant="ghost"
+              size="sm"
+              onPress={handleForceEndRound}
+            />
+          )}
+
+          {isMyTurn() && room.turn_phase === 'summary' && (
+            <View style={styles.waitingRow}>
+              <Icon name="hourglass" size={22} color={colors.inkSoft} />
+              <AppText color={colors.inkSoft}>{S.frequency.room.waitingSummary}</AppText>
+            </View>
+          )}
+
+          <ScoreBoard players={room.players.filter(p => p && p.name && (p.active !== false))} currentTurnIndex={room.current_turn_index} />
+        </>
+      )}
+
+      {/* Finished */}
+      <Dialog
+        visible={room.game_status === 'finished' && !forceCloseModal}
+        icon="trophy"
+        title={S.frequency.room.gameOver}
+        actions={
+          <>
+            <Button title={S.frequency.room.newGame} icon="dice" onPress={resetGame} disabled={!isHost} fullWidth />
+            {!isHost && (
+              <AppText variant="caption" align="center" color={colors.inkSoft}>
+                {S.frequency.room.hostOnlyNewGame}
+              </AppText>
+            )}
+            <Button title={S.frequency.room.backToMenu} icon="home" variant="secondary" onPress={goBack} fullWidth />
+          </>
+        }
+      >
+        {room.game_status === 'finished' ? (
+          <>
+            {/* Podium: 2nd - 1st - 3rd */}
+            <View style={styles.podium}>
+              {(() => {
+                const top = [...room.players].sort((a, b) => b.score - a.score).slice(0, 3);
+                const order = [top[1], top[0], top[2]].map((p, i) => (p ? { player: p, rank: [2, 1, 3][i] } : null)).filter(Boolean);
+                return order.map(({ player, rank }) => (
+                  <View key={player.name} style={styles.podiumItem} accessible accessibilityLabel={`${rank}. ${player.name}, ${S.frequency.room.pointsN(player.score)}`}>
+                    <View style={[styles.medal, { backgroundColor: MEDAL_COLORS[rank - 1] }]}>
+                      {rank === 1 ? <Icon name="crown" size={18} color={colors.ink} /> : null}
+                      <AppText variant="title" align="center" maxScale={1.2}>
+                        {rank}
+                      </AppText>
+                    </View>
+                    <AppText variant="bodyStrong" align="center" numberOfLines={1}>
+                      {player.name}
+                    </AppText>
+                    <AppText variant="caption" align="center" color={colors.inkSoft}>
+                      {S.frequency.room.pointsN(player.score)}
+                    </AppText>
+                    <View style={[styles.podiumBase, { height: [64, 44, 30][rank - 1], backgroundColor: rank === 1 ? theme.accent : colors.cardboard }]} />
+                  </View>
+                ));
+              })()}
+            </View>
+
+            {room.players.length > 3 && (
+              <View style={styles.section}>
+                <AppText variant="label" color={colors.inkSoft}>
+                  {S.frequency.room.otherPlayers}
+                </AppText>
+                {[...room.players]
+                  .sort((a, b) => b.score - a.score)
+                  .slice(3)
+                  .map((player, idx) => (
+                    <View key={player.name} style={styles.resultRow}>
+                      <AppText variant="bodyStrong" color={colors.inkSoft}>
+                        #{idx + 4}
+                      </AppText>
+                      <AppText variant="bodyStrong" style={styles.flex}>
+                        {player.name}
+                      </AppText>
+                      <AppText color={colors.inkSoft}>{S.frequency.room.pointsN(player.score)}</AppText>
+                    </View>
+                  ))}
+              </View>
+            )}
+          </>
+        ) : null}
+      </Dialog>
+    </Screen>
   );
 }
 
+// Gold / silver / bronze (ink text on all three)
+const MEDAL_COLORS = ['#E0A526', '#C9CED6', '#D49A62'];
+
 const styles = StyleSheet.create({
-  scrollContent: {
-    flexGrow: 1,
-    padding: 10,
-    paddingBottom: 16,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    paddingHorizontal: 4,
-    position: 'relative',
-  },
-  headerCenter: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 1,
-    gap: 4,
-  },
-  backButton: {
-    padding: 8,
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginLeft: 'auto',
-    zIndex: 2,
-  },
-  copyLinkButtonCompact: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  copyLinkIcon: {
-    fontSize: 14,
-  },
-  exitButtonHeader: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    minWidth: 60,
-  },
-  drinkingBadgeWrapper: {
-    alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: 8,
-  },
-  drinkingBadge: {
-    backgroundColor: '#F97316',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  drinkingBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  roomCodeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 8,
-  },
-  whiteCopyLinkButton: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  whiteCopyLinkButtonText: {
-    color: '#7A2FE2',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  roomCodeLabel: {
-    color: '#6B7280',
-    fontSize: 12,
-  },
-  roomCodeText: {
-    color: '#0A1A3A', // Frequency theme color - navy blue
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  copyButton: {
-    padding: 4,
-  },
-  copyIcon: {
-    fontSize: 14,
-  },
-  loadingContainer: {
+  flex: {
     flex: 1,
+  },
+  flexShrink: {
+    flexShrink: 1,
+  },
+  centered: {
     justifyContent: 'center',
     alignItems: 'center',
+    gap: spacing.md,
   },
-  loadingText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    marginTop: 16,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  stateCard: {
+    width: '100%',
     alignItems: 'center',
-    padding: 24,
+    gap: spacing.md,
   },
-  errorTitle: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 8,
+  section: {
+    gap: spacing.md,
   },
-  errorMessage: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    marginBottom: 24,
-    textAlign: 'center',
-  },
-  errorButton: {
-    minWidth: 120,
-  },
-  lobbyCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 24,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  lobbyHeader: {
-    backgroundColor: '#0A1A3A', // Frequency theme color - navy blue
-    padding: 20,
-    alignItems: 'center',
-  },
-  lobbyTitle: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  lobbyContent: {
-    padding: 20,
-    gap: 16,
-  },
-  hostCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#0A1A3A', // Frequency theme color - navy blue
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-  },
-  hostRow: {
+  titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+    gap: spacing.sm,
   },
-  crownIcon: {
-    fontSize: 16,
+  hostBox: {
+    gap: spacing.md,
   },
-  hostText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#1F2937',
-  },
-  drinkingToggleContainer: {
+  toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    gap: spacing.sm,
+    minHeight: 48,
   },
-  drinkingToggleLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  playersSection: {
-    gap: 12,
-  },
-  playersTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  playersList: {
-    gap: 12,
-    paddingVertical: 4,
-  },
-  playerCard: {
-    minWidth: 100,
-    backgroundColor: '#F9FAFB',
-    borderWidth: 2,
-    borderColor: '#0A1A3A', // Frequency theme color - navy blue
-    borderRadius: 16,
-    padding: 12,
-    alignItems: 'center',
-    gap: 4,
-  },
-  playerCardName: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#0A1A3A', // Frequency theme color - כחול כהה
-  },
-  crownIconSmall: {
-    fontSize: 12,
-  },
-  startButton: {
-    marginTop: 8,
-  },
-  waitingText: {
-    textAlign: 'center',
-    color: '#6B7280',
-    fontSize: 14,
-  },
-  gameContainer: {
-    gap: 16,
-  },
-  gameMain: {
-    gap: 16,
-  },
-  statusCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    padding: 16,
-    alignItems: 'center',
-    gap: 8,
-  },
-  turnBadge: {
-    backgroundColor: '#10B981',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  turnBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  turnMessage: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#374151',
-    textAlign: 'center',
-  },
-  guessHint: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#3B82F6',
-    textAlign: 'center',
-  },
-  submittedBadge: {
-    backgroundColor: '#3B82F6',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  submittedText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  gaugeContainer: {
-    alignItems: 'center',
-    // Prevent scroll when interacting with gauge
-    touchAction: 'none',
-    zIndex: 10,
-  },
-  progressCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-  },
-  progressText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-    textAlign: 'center',
-  },
-  submittedPlayersList: {
+  chips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  centerChips: {
     justifyContent: 'center',
-    gap: 8,
   },
-  noGuessesText: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    textAlign: 'center',
-  },
-  submittedPlayerBadge: {
-    backgroundColor: '#10B981',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  submittedPlayerText: {
-    color: '#0A1A3A', // Frequency theme color - כחול כהה
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  submitButton: {
-    marginTop: 8,
-  },
-  waitingSummaryCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#0A1A3A', // Frequency theme color - navy blue
-    borderRadius: 16,
-    padding: 16,
-  },
-  waitingSummaryText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#0A1A3A', // Frequency theme color - navy blue
-    textAlign: 'center',
-  },
-  forceEndButton: {
-    marginTop: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-    alignSelf: 'center',
-  },
-  forceEndText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  waitingForHostText: {
-    marginTop: 16,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#0A1A3A',
-    textAlign: 'center',
-  },
-  scoreboardContainer: {
-    marginTop: 16,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-  },
-  modalContent: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 24,
-    width: '100%',
-    maxWidth: 600,
-    maxHeight: '90%',
-    gap: 16,
-  },
-  summaryHeader: {
-    alignItems: 'center',
-    gap: 8,
-  },
-  summaryIcon: {
-    fontSize: 48,
-  },
-  summaryTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#0A1A3A', // Frequency theme color - navy blue
-  },
-  summarySubtitle: {
-    fontSize: 16,
-    color: '#374151',
-  },
-  summaryGuesses: {
-    maxHeight: 200,
-  },
-  guessRow: {
+  waitingRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
   },
-  clueGiverRow: {
-    backgroundColor: '#EFF6FF',
-    borderColor: '#3B82F6',
-    borderWidth: 2,
-    marginBottom: 12,
-  },
-  clueGiverPointsBadge: {
-    backgroundColor: '#DBEAFE',
-  },
-  guessInfo: {
-    flex: 1,
-  },
-  guessPlayerName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0A1A3A', // Frequency theme color - כחול כהה
-  },
-  guessAngle: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 4,
-  },
-  pointsBadge: {
-    backgroundColor: '#E5E7EB',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  pointsBadgeSuccess: {
-    backgroundColor: '#10B981',
-  },
-  pointsText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  pointsTextSuccess: {
-    color: '#FFFFFF',
+  gaugeCard: {
+    alignItems: 'center',
   },
   summaryGauge: {
     alignItems: 'center',
+    marginVertical: spacing.xs,
   },
-  continueButton: {
-    marginTop: 8,
-  },
-  drinkingIcon: {
-    fontSize: 56,
-    textAlign: 'center',
-  },
-  drinkingTitle: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#F97316',
-    textAlign: 'center',
-  },
-  drinkingMessage: {
-    fontSize: 20,
-    color: '#374151',
-    textAlign: 'center',
-  },
-  drinkingPlayersList: {
+  resultRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-    marginVertical: 16,
-  },
-  drinkingPlayerBadge: {
-    backgroundColor: '#F97316',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
-  },
-  drinkingPlayerName: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  drinkingEmoji: {
-    fontSize: 48,
-    textAlign: 'center',
-  },
-  drinkingAction: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#F97316',
-    textAlign: 'center',
-  },
-  finishedHeader: {
     alignItems: 'center',
-    marginBottom: 24,
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
   },
-  finishedTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  podiumContainer: {
+  podium: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'center',
-    gap: 16,
-    marginBottom: 24,
+    gap: spacing.sm,
   },
   podiumItem: {
+    flex: 1,
     alignItems: 'center',
-    gap: 8,
+    gap: 2,
   },
   medal: {
-    fontSize: 40,
-  },
-  podiumName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  podiumScore: {
-    backgroundColor: '#0A1A3A', // Frequency theme color - navy blue
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  podiumScoreText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  podiumBase: {
-    width: 80,
-    borderRadius: 8,
-    paddingVertical: 16,
+    width: 48,
+    height: 48,
+    borderRadius: radii.pill,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: colors.card,
+    marginBottom: spacing.xs,
   },
-  podium1: {
-    height: 120,
-    backgroundColor: '#FCD34D',
-  },
-  podium2: {
-    height: 100,
-    backgroundColor: '#D1D5DB',
-  },
-  podium3: {
-    height: 80,
-    backgroundColor: '#F59E0B',
-  },
-  podiumNumber: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  otherPlayersSection: {
-    gap: 8,
-    marginBottom: 24,
-  },
-  otherPlayersTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-    textAlign: 'center',
-  },
-  otherPlayerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
-    padding: 12,
-  },
-  otherPlayerRank: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  otherPlayerName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  otherPlayerScore: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  finishedActions: {
-    gap: 12,
+  podiumBase: {
     width: '100%',
-    flexDirection: 'column',
-    alignItems: 'stretch',
-  },
-  resetButton: {
-    width: '100%',
-    minHeight: 48,
-  },
-  hostOnlyText: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  backHomeButton: {
-    marginTop: 8,
+    borderTopLeftRadius: radii.sm,
+    borderTopRightRadius: radii.sm,
+    marginTop: spacing.xs,
   },
 });

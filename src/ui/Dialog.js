@@ -54,7 +54,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.scrim,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.xl,
+    padding: spacing.lg,
   },
   sheet: {
     width: '100%',
@@ -65,7 +65,7 @@ const styles = StyleSheet.create({
     borderWidth: borders.card,
     borderColor: colors.line,
     paddingTop: spacing.xxl,
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
     ...shadows.raised,
   },
@@ -87,6 +87,7 @@ const styles = StyleSheet.create({
   },
   body: {
     flexGrow: 0,
+    flexShrink: 1, // Long content scrolls inside the dialog instead of overflowing
   },
   bodyContent: {
     gap: spacing.md,

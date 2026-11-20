@@ -1,11 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { Dimensions, PanResponder, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Defs, G, Line, LinearGradient, Path, Stop } from 'react-native-svg';
+import { Dimensions, PanResponder, StyleSheet, View } from 'react-native';
+import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
+import { S } from '../../strings';
+import { colors, radii, spacing, useGameTheme } from '../../theme';
+import { AppText, Icon, physicalRow } from '../../ui';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isMobile = SCREEN_WIDTH < 768;
 const GAUGE_WIDTH = isMobile ? 300 : 400;
 const GAUGE_HEIGHT = isMobile ? 150 : 200;
+const ARC_STROKE = isMobile ? 30 : 40;
+// Scoring sectors: deep green (2 points, white number) / light green (1 point, ink number)
+const SECTOR_TOP = '#2E7A43';
+const SECTOR_SIDE = '#9FD1AC';
 
 // Pure mathematical center
 const centerX = GAUGE_WIDTH / 2;
@@ -36,6 +43,7 @@ export default function FrequencyGauge({
   players,
   currentPlayerName
 }) {
+  const theme = useGameTheme();
   const [localNeedle, setLocalNeedle] = useState(needlePosition || 90);
   const isDraggingRef = React.useRef(false);
   const canMoveRef = React.useRef(canMove);
@@ -164,7 +172,7 @@ export default function FrequencyGauge({
     for (let angle = 10; angle <= 170; angle += 10) {
       const outer = angleToPoint(angle);
       const rad = (angle + 180) * Math.PI / 180;
-      const innerRadius = radius - 8;
+      const innerRadius = radius - (angle % 30 === 0 ? 12 : 8);
       const inner = {
         x: centerX + innerRadius * Math.cos(rad),
         y: centerY + innerRadius * Math.sin(rad)
@@ -176,9 +184,10 @@ export default function FrequencyGauge({
           y1={inner.y}
           x2={outer.x}
           y2={outer.y}
-          stroke="white"
-          strokeWidth="2"
-          opacity="0.6"
+          stroke={theme.accent}
+          strokeWidth={angle % 30 === 0 ? 3 : 2}
+          strokeLinecap="round"
+          opacity={0.55}
         />
       );
     }
@@ -189,25 +198,19 @@ export default function FrequencyGauge({
   const renderSectors = () => {
     if (!showTarget || !sectors || sectors.length === 0) return null;
 
-    // Calculate outer radius to match the edge of the arc (arc has strokeWidth 30-40)
-    const arcStrokeWidth = isMobile ? 30 : 40;
-    const outerRadius = radius + (arcStrokeWidth / 2);
+    // Calculate outer radius to match the edge of the arc
+    const outerRadius = radius + (ARC_STROKE / 2);
 
     return sectors.map((sector, i) => {
-      // Clamp sector to visible range (0-180)
-      // Only show the part of the sector that is within the gauge range
+      // Only show the part of the sector that is within the gauge range (0-180)
       const visibleStart = Math.max(0, sector.start);
       const visibleEnd = Math.min(180, sector.end);
-      
-      // Skip if sector is completely outside visible range
       if (visibleStart >= visibleEnd || visibleStart >= 180 || visibleEnd <= 0) {
         return null;
       }
-      
-      // Calculate outer edge points (at the edge of the arc) for visible portion
+
       const startOuterRad = (visibleStart + 180) * Math.PI / 180;
       const endOuterRad = (visibleEnd + 180) * Math.PI / 180;
-      
       const startOuterPt = {
         x: centerX + outerRadius * Math.cos(startOuterRad),
         y: centerY + outerRadius * Math.sin(startOuterRad)
@@ -216,81 +219,88 @@ export default function FrequencyGauge({
         x: centerX + outerRadius * Math.cos(endOuterRad),
         y: centerY + outerRadius * Math.sin(endOuterRad)
       };
-      
-      // Create path that extends to the outer edge of the gauge arc
-      // Only show the visible portion (0-180)
       const path = `M ${centerX} ${centerY} L ${startOuterPt.x} ${startOuterPt.y} A ${outerRadius} ${outerRadius} 0 0 1 ${endOuterPt.x} ${endOuterPt.y} Z`;
-      
-      // 1 point sectors = bright green, 2 points sector = dark green
-      const color = sector.points === 2 
-        ? "rgba(22,163,74,0.8)" // Dark green for 2 points
-        : "rgba(74,222,128,0.8)"; // Bright green for 1 point
-      const stroke = sector.points === 2 
-        ? "rgba(22,163,74,1)" // Dark green stroke
-        : "rgba(74,222,128,1)"; // Bright green stroke
-      
+
+      // 2-point sector: deep green; 1-point sectors: light green. The number on
+      // each sector carries the meaning too, not just the color.
+      const isTop = sector.points === 2;
       return (
-        <Path key={i} d={path} fill={color} stroke={stroke} strokeWidth="2" />
+        <Path
+          key={i}
+          d={path}
+          fill={isTop ? SECTOR_TOP : SECTOR_SIDE}
+          stroke={colors.card}
+          strokeWidth="2"
+          opacity={0.92}
+        />
       );
-    }).filter(Boolean); // Remove null entries
+    }).filter(Boolean);
   };
 
-  // Render sector numbers as overlay
+  // Sector numbers drawn inside the SVG: physical coordinates on every
+  // platform, so they always sit on their sector (the dial never flips in RTL)
   const renderSectorNumbers = () => {
     if (!showTarget || !sectors || sectors.length === 0) return null;
 
     return sectors.map((sector, i) => {
-      const midAngle = (sector.start + sector.end) / 2;
+      const midAngle = (Math.max(0, sector.start) + Math.min(180, sector.end)) / 2;
       const midRad = (midAngle + 180) * Math.PI / 180;
-      const labelX = centerX + (radius * 0.65) * Math.cos(midRad);
-      const labelY = centerY + (radius * 0.65) * Math.sin(midRad);
-      
+      const labelX = centerX + (radius * 0.62) * Math.cos(midRad);
+      const labelY = centerY + (radius * 0.62) * Math.sin(midRad);
+      const isTop = sector.points === 2;
+
       return (
-        <Text
+        <SvgText
           key={`text-${i}`}
-          style={[
-            styles.sectorNumber,
-            {
-              left: labelX - 12,
-              top: labelY - 16,
-            }
-          ]}
+          x={labelX}
+          y={labelY + 7}
+          fontSize={isMobile ? 20 : 24}
+          fontFamily="Rubik-Bold"
+          fontWeight="bold"
+          textAnchor="middle"
+          fill={isTop ? colors.white : colors.ink}
+          stroke={isTop ? SECTOR_TOP : SECTOR_SIDE}
+          strokeWidth={3}
+          paintOrder="stroke"
         >
           {sector.points}
-        </Text>
+        </SvgText>
       );
     });
   };
 
   // Render needle
   const renderNeedle = (angle, color, isMain, strokeWidth) => {
-    const needleLength = radius - 40;
+    const needleLength = radius - 34;
     const rad = (angle + 180) * Math.PI / 180;
     const tipX = centerX + needleLength * Math.cos(rad);
     const tipY = centerY + needleLength * Math.sin(rad);
-    
+
     return (
-      <Line
-        x1={centerX}
-        y1={centerY}
-        x2={tipX}
-        y2={tipY}
-        stroke={color}
-        strokeWidth={strokeWidth || (isMobile ? 3 : 4)}
-        strokeLinecap="round"
-      />
+      <G>
+        <Line
+          x1={centerX}
+          y1={centerY}
+          x2={tipX}
+          y2={tipY}
+          stroke={color}
+          strokeWidth={strokeWidth || (isMobile ? 4 : 5)}
+          strokeLinecap="round"
+        />
+        {isMain ? <Circle cx={tipX} cy={tipY} r={isMobile ? 6 : 7} fill={color} stroke={colors.card} strokeWidth="2" /> : null}
+      </G>
     );
   };
 
   const getPlayerColor = (playerName) => {
-    if (!players || players.length === 0) return "#EF4444";
+    if (!players || players.length === 0) return theme.signal || colors.danger;
     const player = players.find(p => p.name === playerName);
-    return player?.color || "#EF4444";
+    return player?.color || theme.signal || colors.danger;
   };
 
   return (
     <View style={styles.container} collapsable={false}>
-      <View 
+      <View
         style={styles.svgContainer}
         {...panResponder.panHandlers}
         onStartShouldSetResponder={() => canMove}
@@ -308,91 +318,75 @@ export default function FrequencyGauge({
         }}
       >
         <View style={styles.svgWrapper}>
-          <Svg width={GAUGE_WIDTH} height={GAUGE_HEIGHT} viewBox={`0 0 ${GAUGE_WIDTH} ${GAUGE_HEIGHT}`}>
-          <Defs>
-            <LinearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <Stop offset="0%" stopColor="#0A1A3A" stopOpacity="0.3" />
-              <Stop offset="50%" stopColor="#1E3A5F" stopOpacity="0.5" />
-              <Stop offset="100%" stopColor="#0A1A3A" stopOpacity="0.3" />
-            </LinearGradient>
-          </Defs>
+          <Svg width={GAUGE_WIDTH} height={GAUGE_HEIGHT + 4} viewBox={`0 0 ${GAUGE_WIDTH} ${GAUGE_HEIGHT + 4}`}>
+            {/* Dial body: cardboard rim + tinted face */}
+            <Path d={arcPath()} fill="none" stroke={theme.accentDeep} strokeWidth={ARC_STROKE + 8} strokeLinecap="round" opacity={0.18} />
+            <Path d={arcPath()} fill="none" stroke={theme.tint} strokeWidth={ARC_STROKE} strokeLinecap="round" />
 
-          {/* Arc */}
-          <Path
-            d={arcPath()}
-            fill="none"
-            stroke="url(#gaugeGradient)"
-            strokeWidth={isMobile ? 30 : 40}
-            strokeLinecap="round"
-          />
+            {/* Ticks */}
+            {renderTicks()}
 
-          {/* Ticks */}
-          {renderTicks()}
+            {/* Sectors */}
+            {renderSectors()}
+            {renderSectorNumbers()}
 
-          {/* Sectors */}
-          {renderSectors()}
+            {/* All players' needles */}
+            {showAllNeedles && allNeedles && Object.entries(allNeedles).map(([name, angle]) => {
+              const isCurrentPlayer = name === currentPlayerName;
+              const playerColor = getPlayerColor(name);
+              const strokeWidth = isCurrentPlayer ? (isMobile ? 5 : 6) : (isMobile ? 3 : 4);
+              return (
+                <G key={name} opacity={isCurrentPlayer ? 1 : 0.8}>
+                  {renderNeedle(angle, playerColor, isCurrentPlayer, strokeWidth)}
+                </G>
+              );
+            })}
 
-          {/* All players' needles */}
-          {showAllNeedles && allNeedles && Object.entries(allNeedles).map(([name, angle]) => {
-            const isCurrentPlayer = name === currentPlayerName;
-            const playerColor = getPlayerColor(name);
-            const strokeWidth = isCurrentPlayer ? (isMobile ? 4 : 5) : (isMobile ? 3 : 4);
-            return (
-              <G key={name} opacity={isCurrentPlayer ? 1 : 0.7}>
-                {renderNeedle(angle, playerColor, isCurrentPlayer, strokeWidth)}
-              </G>
-            );
-          })}
+            {/* Current player's needle (when not showing all) */}
+            {!showAllNeedles && renderNeedle(localNeedle, getPlayerColor(currentPlayerName), true)}
 
-          {/* Current player's needle (when not showing all) */}
-          {!showAllNeedles && renderNeedle(localNeedle, getPlayerColor(currentPlayerName), true)}
-
-          {/* Center pivot */}
-          <Circle
-            cx={centerX}
-            cy={centerY}
-            r={isMobile ? 7 : 9}
-            fill="#1F2937"
-            stroke="white"
-            strokeWidth="3"
-          />
+            {/* Center pivot - a chunky knob */}
+            <Circle cx={centerX} cy={centerY} r={isMobile ? 11 : 13} fill={theme.accent} stroke={colors.card} strokeWidth="3" />
+            <Circle cx={centerX} cy={centerY} r={isMobile ? 4 : 5} fill={theme.signal || colors.gold} />
           </Svg>
-          {renderSectorNumbers()}
         </View>
       </View>
 
-      {/* Labels */}
-      <View style={styles.labelsContainer}>
-        <View style={styles.labelLeft}>
-          <Text style={styles.labelText}>{leftLabel}</Text>
+      {/* Topic labels, pinned to the physical ends of the dial (0° left, 180° right) */}
+      <View style={[styles.labelsContainer, { flexDirection: physicalRow() }]}>
+        <View style={[styles.labelChip, { borderColor: theme.accent }]}>
+          <AppText variant="bodyStrong" color={theme.accentInk} align="center" maxScale={1.3}>
+            {leftLabel}
+          </AppText>
         </View>
-        <View style={styles.labelRight}>
-          <Text style={styles.labelText}>{rightLabel}</Text>
+        <View style={[styles.labelChip, { borderColor: theme.accent }]}>
+          <AppText variant="bodyStrong" color={theme.accentInk} align="center" maxScale={1.3}>
+            {rightLabel}
+          </AppText>
         </View>
       </View>
 
       {canMove && (
-        <Text style={styles.hintText}>
-          📌 גרור את המחוגן למיקום הרצוי
-        </Text>
+        <View style={styles.hintRow}>
+          <Icon name="gesture" size={20} color={colors.inkSoft} />
+          <AppText variant="caption" color={colors.inkSoft}>
+            {S.frequency.gauge.dragHint}
+          </AppText>
+        </View>
       )}
 
-      {/* Players legend when showing all needles */}
+      {/* Players legend when showing all needles: color dot + name */}
       {showAllNeedles && players && players.length > 0 && (
         <View style={styles.legendContainer}>
           {players.map((player) => {
             const hasGuessed = allNeedles && allNeedles[player.name] !== undefined;
             if (!hasGuessed) return null;
             return (
-              <View
-                key={player.name}
-                style={[
-                  styles.legendItem,
-                  { borderColor: player.color, backgroundColor: `${player.color}15` }
-                ]}
-              >
-                <View style={[styles.legendDot, { backgroundColor: player.color }]} />
-                <Text style={styles.legendText}>{player.name}</Text>
+              <View key={player.name} style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: player.color || theme.signal }]} />
+                <AppText variant="label" maxScale={1.3}>
+                  {player.name}
+                </AppText>
               </View>
             );
           })}
@@ -406,90 +400,63 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 0,
+    paddingVertical: spacing.sm,
   },
   svgContainer: {
     width: GAUGE_WIDTH,
-    height: GAUGE_HEIGHT,
+    height: GAUGE_HEIGHT + 4,
     position: 'relative',
     // Prevent scroll when touching gauge on mobile
     touchAction: 'none',
   },
   svgWrapper: {
     width: GAUGE_WIDTH,
-    height: GAUGE_HEIGHT,
+    height: GAUGE_HEIGHT + 4,
     position: 'relative',
   },
   labelsContainer: {
-    flexDirection: 'row',
     width: GAUGE_WIDTH,
-    marginTop: 16,
-    height: 60,
-    position: 'relative',
+    marginTop: spacing.md,
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: spacing.md,
   },
-  labelLeft: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    width: '40%',
+  labelChip: {
+    flex: 1,
+    maxWidth: '48%',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.md,
+    borderWidth: 2,
+    backgroundColor: colors.card,
+  },
+  hintRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-  },
-  labelRight: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    width: '40%',
-    alignItems: 'center',
-  },
-  labelText: {
-    color: '#0A1A3A',
-    fontWeight: 'bold',
-    fontSize: isMobile ? 12 : 14,
-    textAlign: 'center',
-  },
-  hintText: {
-    textAlign: 'center',
-    marginTop: 8,
-    fontSize: isMobile ? 12 : 14,
-    color: '#E5E7EB',
+    gap: spacing.xs,
+    marginTop: spacing.md,
   },
   legendContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    marginTop: 16,
-    gap: 8,
+    marginTop: spacing.md,
+    gap: spacing.sm,
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 16,
-    borderWidth: 2,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
   },
   legendDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 6,
-  },
-  legendText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#0A1A3A', // Frequency theme color - כחול כהה
-  },
-  sectorNumber: {
-    position: 'absolute',
-    fontSize: isMobile ? 18 : 22,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    width: 24,
-    height: 24,
-    textAlign: 'center',
-    textAlignVertical: 'center',
+    width: 14,
+    height: 14,
+    borderRadius: 7,
   },
 });
-

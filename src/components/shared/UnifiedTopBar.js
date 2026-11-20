@@ -1,29 +1,46 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import GradientButton from '../codenames/GradientButton';
 import { copyRoomCode } from '../../utils/clipboard';
 import { shareGameLink } from '../../utils/shareUtils';
 import storage from '../../utils/storage';
+import { S } from '../../strings';
+import { borders, colors, GameThemeProvider, radii, spacing, touch, useGameTheme } from '../../theme';
+import { AppText, feedback, Icon, IconButton } from '../../ui';
 
-export default function UnifiedTopBar({ 
-  roomCode, 
-  variant = 'draw', 
-  onExit, 
+/**
+ * Top bar shown inside every game room. Same props and behavior as before
+ * (copy code, share link, rules, exit, drinking-mode indicator) with the
+ * new board-game look. Start side: room code + share; end side: drinking
+ * token, rules, exit. All targets >= 48dp, all icon-only buttons labeled.
+ */
+export default function UnifiedTopBar(props) {
+  return (
+    <GameThemeProvider game={props.variant || 'draw'}>
+      <TopBarContent {...props} />
+    </GameThemeProvider>
+  );
+}
+
+function TopBarContent({
+  roomCode,
+  variant = 'draw',
+  onExit,
   onRulesPress,
   showRules = true,
-  drinkingMode: propDrinkingMode = null // Allow override from prop, otherwise check storage
+  drinkingMode: propDrinkingMode = null, // Override from prop, otherwise read storage (unchanged)
 }) {
+  const theme = useGameTheme();
+  const insets = useSafeAreaInsets();
   const [drinkingMode, setDrinkingMode] = useState(false);
   const [playerName, setPlayerName] = useState('');
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const loadDrinkingMode = async () => {
       if (propDrinkingMode !== null) {
-        // Use prop value if provided
         setDrinkingMode(propDrinkingMode);
       } else {
-        // Otherwise check storage
         try {
           const savedMode = await storage.getItem('drinkingMode');
           setDrinkingMode(savedMode === 'true');
@@ -39,9 +56,7 @@ export default function UnifiedTopBar({
     const loadPlayerName = async () => {
       try {
         const savedName = await storage.getItem('playerName');
-        if (savedName) {
-          setPlayerName(savedName);
-        }
+        if (savedName) setPlayerName(savedName);
       } catch (e) {
         console.warn('Could not load player name:', e);
       }
@@ -49,71 +64,62 @@ export default function UnifiedTopBar({
     loadPlayerName();
   }, []);
 
-  const insets = useSafeAreaInsets();
-  const [copied, setCopied] = useState(false);
-
   const handleCopyRoomCode = async () => {
     await copyRoomCode(roomCode);
+    feedback.success();
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   const handleShareRoomLink = async () => {
-    // Use player name as inviter, fallback to "Someone" if not available
     const inviter = playerName || 'Someone';
     await shareGameLink(variant, roomCode, inviter);
   };
 
-  // Theme colors per variant (matching GradientButton colors)
-  const themeColors = {
-    draw: '#C48CFF', // סגול בהיר
-    frequency: '#0A1A3A', // כחול כהה
-    codenames: '#D9C3A5', // חום בהיר
-    alias: '#4FA8FF', // כחול בהיר
-    spy: '#7ED957', // ירוק בהיר
-  };
-
-  const themeColor = themeColors[variant] || themeColors.draw;
-
   return (
-    <View style={[styles.container, { paddingTop: Math.max(insets.top, 8) }]}>
-      {/* Right to Left: Share Link, Room Code, Drinking Mode Badge, Rules, Exit */}
-      <View style={styles.content}>
-        {/* Share Room Link Button */}
-        <Pressable onPress={handleShareRoomLink} style={styles.shareButton}>
-          <Text style={styles.shareIcon}>🔗</Text>
+    <View style={[styles.container, { paddingTop: Math.max(insets.top, spacing.sm) }]}>
+      {/* Start side: room code (tap to copy) + share */}
+      <View style={styles.group}>
+        <Pressable
+          onPress={handleCopyRoomCode}
+          onPressIn={() => feedback.tap()}
+          accessibilityRole="button"
+          accessibilityLabel={`${S.common.roomCode} ${roomCode}`}
+          accessibilityHint={S.topBar.copyCodeHint}
+          style={({ pressed }) => [styles.codeChip, { borderColor: theme.accent }, pressed && styles.pressed]}
+        >
+          <AppText variant="caption" color={colors.inkSoft} maxScale={1.3}>
+            {S.topBar.codeLabel}
+          </AppText>
+          <AppText variant="title" color={theme.accentInk} maxScale={1.3} style={styles.code}>
+            {roomCode}
+          </AppText>
+          <Icon name={copied ? 'check' : 'copy'} size={20} color={copied ? colors.success : theme.accentInk} />
         </Pressable>
+        <IconButton icon="share" label={S.topBar.shareLink} onPress={handleShareRoomLink} size={touch.min - 4} />
+      </View>
 
-        {/* Room Code + Copy */}
-        <Pressable onPress={handleCopyRoomCode} style={[styles.roomCodeContainer, { borderColor: themeColor }]}>
-          <Text style={styles.roomCodeLabel}>קוד:</Text>
-          <Text style={[styles.roomCodeText, { color: themeColor }]}>{roomCode}</Text>
-          <Text style={styles.copyIcon}>{copied ? '✓' : '📋'}</Text>
-        </Pressable>
-
-        {/* Drinking Mode Badge - More visible */}
+      {/* End side: drinking indicator, rules, exit */}
+      <View style={styles.group}>
         {drinkingMode && (
-          <View style={[styles.drinkingBadge, { backgroundColor: themeColor }]}>
-            <Text style={styles.drinkingBadgeText}>🍺</Text>
-            <Text style={styles.drinkingBadgeLabel}>שתייה</Text>
+          <View style={styles.drinkToken} accessible accessibilityLabel={S.topBar.drinkingOn}>
+            <Icon name="drink" size={22} color={colors.ink} />
           </View>
         )}
-
-        {/* Rules Button */}
         {showRules && onRulesPress && (
-          <Pressable onPress={onRulesPress} style={[styles.rulesButton, { backgroundColor: themeColor }]}>
-            <Text style={styles.rulesText}>חוקים</Text>
-          </Pressable>
+          <IconButton icon="rules" label={S.topBar.rules} onPress={onRulesPress} size={touch.min - 4} />
         )}
-
-        {/* Exit Button */}
-        <GradientButton
-          title="יציאה"
-          onPress={onExit}
-          variant={variant}
-          style={styles.exitButton}
-        />
+        <IconButton icon="exit" label={S.topBar.exit} onPress={onExit} variant="accent" size={touch.min - 4} />
       </View>
+
+      {copied ? (
+        <View style={styles.toast} accessibilityLiveRegion="polite" pointerEvents="none">
+          <Icon name="checkCircle" size={18} color={colors.white} />
+          <AppText variant="label" color={colors.white}>
+            {S.topBar.codeCopied}
+          </AppText>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -121,83 +127,58 @@ export default function UnifiedTopBar({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    paddingHorizontal: 8,
-    paddingBottom: 8,
-    backgroundColor: 'transparent',
-  },
-  content: {
+    maxWidth: 560,
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 6,
-    width: '100%',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
   },
-  shareButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
+  group: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  codeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minHeight: touch.min,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.card,
+    borderRadius: radii.pill,
+    borderWidth: borders.thick,
+  },
+  code: {
+    letterSpacing: 2,
+    fontVariant: ['tabular-nums'],
+  },
+  pressed: {
+    transform: [{ scale: 0.97 }],
+  },
+  drinkToken: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    backgroundColor: colors.gold,
+    borderWidth: 2,
+    borderColor: colors.goldDeep,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
   },
-  shareIcon: {
-    fontSize: 14,
-  },
-  roomCodeContainer: {
+  toast: {
+    position: 'absolute',
+    top: '100%',
+    start: spacing.lg,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
-    borderWidth: 1,
-  },
-  roomCodeLabel: {
-    color: '#6B7280',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  roomCodeText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  copyIcon: {
-    fontSize: 12,
-  },
-  rulesButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  rulesText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  exitButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    minWidth: 60,
-  },
-  drinkingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 4,
-  },
-  drinkingBadgeText: {
-    fontSize: 14,
-    color: '#FFFFFF',
-  },
-  drinkingBadgeLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.pill,
+    backgroundColor: colors.success,
+    zIndex: 10,
   },
 });
-

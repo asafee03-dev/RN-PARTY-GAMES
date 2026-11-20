@@ -32,6 +32,22 @@ const he = {
     secondsShort: (n) => `${n} שנ׳`,
   },
 
+  home: {
+    title: 'משחקי הכיף',
+    subtitle: 'בחרו את המשחק שלכם ותתחילו את המסיבה!',
+    play: 'שחק עכשיו',
+    moreComing: 'משחקים נוספים בדרך...',
+    // Texts kept exactly as they were; see the redesign notes about
+    // "אליאב" vs "אליאס" and 45 vs 60 seconds before changing them
+    games: {
+      alias: { name: 'אליאב', description: 'משחק ההסברות המהיר! 45 שניות להסביר כמה שיותר מילים' },
+      codenames: { name: 'שם טוב', description: 'משחק קבוצתי של מילים וקשרים - נחשו את המילים הנכונות' },
+      spy: { name: 'המרגל', description: 'מי המרגל ביניכם? נסו לגלות מי לא באותו מקום' },
+      frequency: { name: 'התדר', description: 'משחק חיבור וסנכרון - כמה אתם על אותו גל?' },
+      draw: { name: 'צייר משהו', description: 'צייר ונחש - משחק יצירתי ומהנה!' },
+    },
+  },
+
   // Temporary dev-only design system preview (removed in cleanup)
   designPreview: {
     title: 'מערכת העיצוב',

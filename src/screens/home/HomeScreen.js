@@ -1,438 +1,188 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
-import { Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import Svg, { Path, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
-// Using emojis instead of lucide icons for React Native compatibility
+import { Image, Pressable, StyleSheet, View } from 'react-native';
+import Animated, { FadeInDown, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
+import { S } from '../../strings';
+import { borders, colors, depth, GameThemeProvider, motion, radii, spacing, useGameTheme } from '../../theme';
+import { AppText, feedback, Icon, Screen } from '../../ui';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-// Custom icon components
-const SpeechBubbleWithQuestion = () => (
-  <View style={customIconStyles.speechBubbleContainer}>
-    <Text style={customIconStyles.speechBubble}>💬</Text>
-  </View>
-);
-
-const FrequencyWaves = () => {
-  const size = 48;
-  const centerY = size / 2;
-  
-  // Blue wave - lower frequency, broader waves (sinusoidal)
-  const blueWavePath = `M 0 ${centerY} 
-    C ${size * 0.1} ${centerY - 10} ${size * 0.2} ${centerY - 10} ${size * 0.3} ${centerY}
-    C ${size * 0.4} ${centerY + 10} ${size * 0.5} ${centerY + 10} ${size * 0.6} ${centerY}
-    C ${size * 0.7} ${centerY - 10} ${size * 0.8} ${centerY - 10} ${size * 0.9} ${centerY}
-    C ${size * 0.95} ${centerY + 5} ${size} ${centerY + 5} ${size} ${centerY}`;
-  
-  // Orange wave - higher frequency, tighter waves (offset for visual interest)
-  const orangeWavePath = `M 0 ${centerY + 2} 
-    C ${size * 0.08} ${centerY - 8} ${size * 0.16} ${centerY - 8} ${size * 0.24} ${centerY + 2}
-    C ${size * 0.32} ${centerY + 12} ${size * 0.4} ${centerY + 12} ${size * 0.48} ${centerY + 2}
-    C ${size * 0.56} ${centerY - 8} ${size * 0.64} ${centerY - 8} ${size * 0.72} ${centerY + 2}
-    C ${size * 0.8} ${centerY + 12} ${size * 0.88} ${centerY + 12} ${size * 0.96} ${centerY + 2}
-    C ${size * 0.98} ${centerY - 3} ${size} ${centerY - 3} ${size} ${centerY + 2}`;
-  
-  return (
-    <View style={customIconStyles.frequencyContainer}>
-      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <Defs>
-          <SvgLinearGradient id="blueWaveGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <Stop offset="0%" stopColor="#3B82F6" stopOpacity="0.85" />
-            <Stop offset="50%" stopColor="#2563EB" stopOpacity="0.75" />
-            <Stop offset="100%" stopColor="#1E40AF" stopOpacity="0.65" />
-          </SvgLinearGradient>
-          <SvgLinearGradient id="orangeWaveGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <Stop offset="0%" stopColor="#F59E0B" stopOpacity="0.85" />
-            <Stop offset="50%" stopColor="#F97316" stopOpacity="0.75" />
-            <Stop offset="100%" stopColor="#EA580C" stopOpacity="0.65" />
-          </SvgLinearGradient>
-        </Defs>
-        
-        {/* Blue wave - broader, lower frequency */}
-        <Path
-          d={blueWavePath}
-          fill="none"
-          stroke="url(#blueWaveGradient)"
-          strokeWidth="3.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          opacity={0.75}
-        />
-        
-        {/* Orange wave - tighter, higher frequency */}
-        <Path
-          d={orangeWavePath}
-          fill="none"
-          stroke="url(#orangeWaveGradient)"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          opacity={0.8}
-        />
-      </Svg>
-    </View>
-  );
-};
-
-const BinaryCode = () => {
-  const binaryRows = [
-    ['0', '1', '0', '1', '1', '0'],
-    ['1', '0', '1', '0', '0', '1'],
-    ['0', '1', '1', '0', '1', '0'],
-    ['1', '1', '0', '1', '0', '1'],
-  ];
-  
-  return (
-    <View style={customIconStyles.binaryContainer}>
-      {binaryRows.map((row, rowIndex) => (
-        <View key={rowIndex} style={customIconStyles.binaryRow}>
-          {row.map((bit, bitIndex) => (
-            <Text 
-              key={`${rowIndex}-${bitIndex}`} 
-              style={[
-                customIconStyles.binaryBit,
-                (rowIndex === 0 && (bitIndex === 0 || bitIndex === 3)) || 
-                (rowIndex === 1 && (bitIndex === 2 || bitIndex === 5)) || 
-                (rowIndex === 2 && bitIndex === 1) || 
-                (rowIndex === 3 && bitIndex === 4) 
-                  ? customIconStyles.binaryBitLarge 
-                  : null
-              ]}
-            >
-              {bit}
-            </Text>
-          ))}
-        </View>
-      ))}
-    </View>
-  );
-};
-
-const customIconStyles = StyleSheet.create({
-  speechBubbleContainer: {
-    width: 48,
-    height: 48,
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  speechBubble: {
-    fontSize: 42, // Reduced from 48 to prevent clipping
-    textAlign: 'center',
-    lineHeight: 48,
-  },
-  frequencyContainer: {
-    width: 48,
-    height: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  binaryContainer: {
-    width: 48,
-    height: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000000',
-    borderRadius: 6,
-    padding: 3,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 255, 255, 0.2)',
-  },
-  binaryRow: {
-    flexDirection: 'row',
-    gap: 2,
-    marginBottom: 1,
-  },
-  binaryBit: {
-    color: '#00FFFF',
-    fontSize: 7,
-    fontWeight: '600',
-    textShadowColor: '#00FFFF',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 4,
-    opacity: 0.7,
-  },
-  binaryBitLarge: {
-    fontSize: 9,
-    fontWeight: '700',
-    opacity: 1,
-  },
-});
-
-const games = [
-  {
-    id: 'alias',
-    name: 'אליאב',
-    description: 'משחק ההסברות המהיר! 45 שניות להסביר כמה שיותר מילים',
-    icon: 'custom-speech-bubble',
-    color: ['#4FA8FF', '#3B82F6', '#2563EB'], // כחול בהיר
-    bgColor: ['#EFF6FF', '#DBEAFE'], // from-blue-50 to-blue-100
-    available: true,
-    page: 'Alias'
-  },
-  {
-    id: 'codenames',
-    name: 'שם טוב',
-    description: 'משחק קבוצתי של מילים וקשרים - נחשו את המילים הנכונות',
-    icon: 'custom-binary',
-    color: ['#D9C3A5', '#C4A574', '#B8956A'], // חום בהיר
-    bgColor: ['#FDF4E8', '#FAF0E6'], // from-beige-50 to-beige-100
-    available: true,
-    page: 'Codenames'
-  },
-  {
-    id: 'spy',
-    name: 'המרגל',
-    description: 'מי המרגל ביניכם? נסו לגלות מי לא באותו מקום',
-    icon: '🕵️',
-    color: ['#7ED957', '#4ADE80', '#22C55E'], // ירוק בהיר
-    bgColor: ['#F0FDF4', '#D1FAE5'], // from-green-50 to-emerald-50
-    available: true,
-    page: 'Spy'
-  },
-  {
-    id: 'frequency',
-    name: 'התדר',
-    description: 'משחק חיבור וסנכרון - כמה אתם על אותו גל?',
-    icon: 'custom-frequency',
-    color: ['#0A1A3A', '#1E3A5F', '#2D4A6B'], // כחול כהה
-    bgColor: ['#E0E7FF', '#C7D2FE'], // from-indigo-50 to-indigo-100
-    available: true,
-    page: 'Frequency'
-  },
-  {
-    id: 'draw',
-    name: 'צייר משהו',
-    description: 'צייר ונחש - משחק יצירתי ומהנה!',
-    icon: '✏️',
-    color: ['#C48CFF', '#A855F7', '#9333EA'], // סגול בהיר
-    bgColor: ['#F3E8FF', '#E9D5FF'], // from-purple-50 to-purple-100
-    available: true,
-    page: 'Draw'
-  },
+// Order and navigation targets are unchanged from the previous home screen
+const GAMES = [
+  { id: 'alias', page: 'Alias' },
+  { id: 'codenames', page: 'Codenames' },
+  { id: 'spy', page: 'Spy' },
+  { id: 'frequency', page: 'Frequency' },
+  { id: 'draw', page: 'Draw' },
 ];
 
+/**
+ * A game shown as a chunky game box: tinted lid with the game's emblem,
+ * sitting on a darker "box side" that compresses when pressed.
+ */
+function GameBox({ game, index, onPress }) {
+  const theme = useGameTheme();
+  const reducedMotion = useReducedMotion();
+  const pressed = useSharedValue(0);
+  const text = S.home.games[game.id];
+
+  const faceStyle = useAnimatedStyle(() => ({ transform: [{ translateY: pressed.value * depth.press }] }));
+  const animateTo = (v) => {
+    pressed.value = reducedMotion ? v : withTiming(v, { duration: motion.press });
+  };
+
+  return (
+    <Animated.View entering={reducedMotion ? undefined : FadeInDown.delay(80 + index * 70).duration(motion.slow)}>
+      <Pressable
+        onPress={onPress}
+        onPressIn={() => {
+          animateTo(1);
+          feedback.tap();
+        }}
+        onPressOut={() => animateTo(0)}
+        accessibilityRole="button"
+        accessibilityLabel={`${text.name}. ${text.description}`}
+        accessibilityHint={S.home.play}
+      >
+        <View style={[styles.boxSide, { backgroundColor: theme.accentDeep }]}>
+          <Animated.View style={[styles.boxLid, { backgroundColor: theme.tint, borderColor: theme.accent }, faceStyle]}>
+            <View style={[styles.emblem, { backgroundColor: theme.accent, borderColor: theme.accentDeep }]}>
+              <Icon name={game.id} size={36} color={theme.onAccent} />
+            </View>
+
+            <View style={styles.boxText}>
+              <AppText variant="title" color={theme.accentInk}>
+                {text.name}
+              </AppText>
+              <AppText variant="body" color={colors.ink}>
+                {text.description}
+              </AppText>
+            </View>
+
+            <View style={[styles.playButton, { backgroundColor: theme.accent }]}>
+              <Icon name="forward" size={26} color={theme.onAccent} />
+            </View>
+          </Animated.View>
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 export default function HomeScreen({ navigation }) {
+  const reducedMotion = useReducedMotion();
+
   const handleGameClick = (game) => {
-    if (game.available) {
-      // Navigate to parent navigator (AppNavigator)
-      const parent = navigation.getParent();
-      if (parent) {
-        parent.navigate(game.page);
-      } else {
-        navigation.navigate(game.page);
-      }
+    // Navigate to parent navigator (AppNavigator) - same as before
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.navigate(game.page);
+    } else {
+      navigation.navigate(game.page);
     }
   };
 
   return (
-    <View
-      style={[styles.container, { backgroundColor: '#FAEFE1' }]}
-    >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>PARTY GAMES</Text>
-          <Text style={styles.subtitle}>בחרו את המשחק שלכם ותתחילו את המסיבה!</Text>
-        </View>
+    <Screen contentStyle={styles.content}>
+      <Animated.View entering={reducedMotion ? undefined : FadeInDown.duration(motion.slow)} style={styles.header}>
+        <Image
+          source={require('../../../assets/images/partygameslogo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+          accessibilityIgnoresInvertColors
+          accessible={false}
+        />
+        <AppText variant="display" align="center" accessibilityRole="header">
+          {S.home.title}
+        </AppText>
+        <AppText variant="subtitle" color={colors.inkSoft} align="center">
+          {S.home.subtitle}
+        </AppText>
+      </Animated.View>
 
-        {/* Games Grid */}
-        <View style={styles.gamesGrid}>
-          {games.map((game, index) => {
-            return (
-              <TouchableOpacity
-                key={game.id}
-                style={styles.gameCard}
-                onPress={() => handleGameClick(game)}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.cardContent, { backgroundColor: game.bgColor[0] }]}>
-                  {/* Card Header with Gradient */}
-                  <LinearGradient
-                    colors={game.color}
-                    style={styles.cardHeader}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  >
-                    <View style={styles.cardIconContainer}>
-                      <View style={styles.cardIconBackground}>
-                        {game.icon === 'custom-speech-bubble' ? (
-                          <SpeechBubbleWithQuestion />
-                        ) : game.icon === 'custom-frequency' ? (
-                          <FrequencyWaves />
-                        ) : game.icon === 'custom-binary' ? (
-                          <BinaryCode />
-                        ) : (
-                          <Text style={styles.cardIcon}>{game.icon}</Text>
-                        )}
-                      </View>
-                    </View>
-                  </LinearGradient>
+      <View style={styles.games}>
+        {GAMES.map((game, index) => (
+          <GameThemeProvider key={game.id} game={game.id}>
+            <GameBox game={game} index={index} onPress={() => handleGameClick(game)} />
+          </GameThemeProvider>
+        ))}
+      </View>
 
-                  {/* Card Body */}
-                  <View style={styles.cardBody}>
-                    <Text style={styles.gameName}>{game.name}</Text>
-                    <Text style={styles.gameDescription}>{game.description}</Text>
-                    {game.available && (
-                      <View style={styles.playNowContainer}>
-                        <Text style={styles.playNowText}>שחק עכשיו</Text>
-                        <Text style={styles.playNowArrow}>→</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <View style={styles.footerContent}>
-            <Text style={styles.footerIcon}>🎮</Text>
-            <Text style={styles.footerText}>משחקים נוספים בדרך...</Text>
-            <Text style={styles.footerIcon}>🎉</Text>
-          </View>
-        </View>
-      </ScrollView>
-    </View>
+      <View style={styles.footer}>
+        <Icon name="dice" size={22} color={colors.inkSoft} />
+        <AppText variant="label" color={colors.inkSoft}>
+          {S.home.moreComing}
+        </AppText>
+        <Icon name="party" size={22} color={colors.inkSoft} />
+      </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingVertical: 20,
-    paddingTop: 52,
+  content: {
+    gap: spacing.xl,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 32,
+    gap: spacing.xs,
+    paddingTop: spacing.md,
   },
-  title: {
-    fontSize: 56,
-    fontWeight: '900',
-    color: '#9333EA',
-    marginBottom: 12,
-    textAlign: 'center',
+  logo: {
+    width: 112,
+    height: 112,
+    marginBottom: spacing.sm,
+    // The PNG has a solid cream background - frame it as rounded box art
+    borderRadius: radii.xl,
+    borderWidth: borders.thick,
+    borderColor: colors.line,
   },
-  cardIcon: {
-    fontSize: 48,
+  games: {
+    gap: spacing.lg,
   },
-  subtitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#374151',
-    textAlign: 'center',
+  boxSide: {
+    borderRadius: radii.lg,
+    paddingBottom: 6, // The darker "side of the box"
   },
-  gamesGrid: {
-    gap: 24,
-    marginBottom: 32,
-  },
-  gameCard: {
-    borderRadius: 24,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  cardContent: {
-    borderRadius: 24,
-    overflow: 'hidden',
-  },
-  cardHeader: {
-    paddingVertical: 24,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardIconContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardIconBackground: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden', // Ensure icons don't overflow the circular container
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  cardBody: {
-    padding: 32,
-    paddingTop: 32,
-    alignItems: 'center',
-  },
-  gameName: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: '#1F2937',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  gameDescription: {
-    fontSize: 18,
-    color: '#4B5563',
-    textAlign: 'center',
-    lineHeight: 26,
-    marginBottom: 24,
-  },
-  playNowContainer: {
+  boxLid: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
+    gap: spacing.md,
+    minHeight: 112,
+    padding: spacing.lg,
+    borderRadius: radii.lg,
+    borderWidth: borders.thick,
   },
-  playNowText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#9333EA',
+  emblem: {
+    width: 68,
+    height: 68,
+    borderRadius: radii.md,
+    borderWidth: 2,
+    borderBottomWidth: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  playNowArrow: {
-    fontSize: 24,
-    color: '#9333EA',
+  boxText: {
+    flex: 1,
+    gap: 2,
+  },
+  playButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   footer: {
-    alignItems: 'center',
-    marginTop: 32,
-    marginBottom: 24,
-  },
-  footerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-    borderRadius: 24,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  footerIcon: {
-    fontSize: 24,
-  },
-  footerText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#374151',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    marginBottom: spacing.md,
+    alignSelf: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radii.pill,
+    borderWidth: borders.card,
+    borderColor: colors.line,
   },
 });

@@ -1,23 +1,22 @@
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, runTransaction } from 'firebase/firestore';
 import { db } from '../firebase';
 
 /**
- * Atomic player join utility
- * Ensures players are added to rooms reliably, even with concurrent joins
- * Uses retry mechanism with verification to handle race conditions
- */
-
-/**
- * Safely add a player to a room's players array
- * Handles race conditions by retrying with verification
- * 
+ * Atomic player join utility.
+ *
+ * Adds (or updates) a player in a room's `players` array inside a Firestore
+ * transaction. The transaction re-reads the room and is retried automatically
+ * by Firestore if another write lands in between, so concurrent joins can no
+ * longer overwrite each other (previously a plain read-then-write could drop
+ * a player who joined at the same moment).
+ *
  * @param {string} collectionName - Firestore collection name
  * @param {string} roomId - Room document ID
  * @param {string} playerName - Player name to add
- * @param {Function} createPlayerObject - Function that creates the player object/entry
- * @param {Function} findPlayerIndex - Function to find player index in array: (players, playerName) => index
- * @param {Function} updatePlayerObject - Function to update existing player: (existingPlayer) => updatedPlayer
- * @param {number} maxRetries - Maximum retry attempts (default: 3)
+ * @param {Function} createPlayerObject - (currentPlayerCount) => new player entry. May be null for rejoin-only calls.
+ * @param {Function} findPlayerIndex - (players, playerName) => index
+ * @param {Function} updatePlayerObject - (existingPlayer) => updatedPlayer, or null/undefined for "no change"
+ * @param {number} maxRetries - Max transaction attempts (Firestore retries on contention)
  * @returns {Promise<{success: boolean, roomData: object|null, error: string|null}>}
  */
 export async function atomicPlayerJoin(
@@ -27,7 +26,7 @@ export async function atomicPlayerJoin(
   createPlayerObject,
   findPlayerIndex,
   updatePlayerObject = null,
-  maxRetries = 2
+  maxRetries = 3
 ) {
   if (!collectionName || !roomId || !playerName || !playerName.trim()) {
     return {
@@ -38,152 +37,46 @@ export async function atomicPlayerJoin(
   }
 
   const trimmedPlayerName = playerName.trim();
+  const roomRef = doc(db, collectionName, roomId);
 
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const roomRef = doc(db, collectionName, roomId);
-      
-      // Step 1: Read current room state
-      const roomSnap = await getDoc(roomRef);
-      
-      if (!roomSnap.exists()) {
-        return {
-          success: false,
-          roomData: null,
-          error: 'Room not found'
-        };
+  try {
+    const roomData = await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(roomRef);
+      if (!snap.exists()) {
+        throw new Error('Room not found');
       }
 
-      const roomData = { id: roomSnap.id, ...roomSnap.data() };
-      const players = roomData.players || [];
-
-      // Step 2: Check if player already exists
+      const data = { id: snap.id, ...snap.data() };
+      const players = Array.isArray(data.players) ? data.players : [];
       const existingIndex = findPlayerIndex(players, trimmedPlayerName);
-      const playerExists = existingIndex !== -1;
 
-      if (playerExists) {
-        // Player already exists - check if we need to update them
-        if (updatePlayerObject) {
-          const existingPlayer = players[existingIndex];
-          const updatedPlayer = updatePlayerObject(existingPlayer);
-          if (updatedPlayer) {
-            const updatedPlayers = [...players];
-            updatedPlayers[existingIndex] = updatedPlayer;
-            
-            // Write update - trust Firestore write, skip verification on first attempt
-            await updateDoc(roomRef, { players: updatedPlayers });
-            
-            // Only verify on retry attempts (not first attempt)
-            if (attempt > 0) {
-              const verifySnap = await getDoc(roomRef);
-              if (verifySnap.exists()) {
-                const verifiedData = { id: verifySnap.id, ...verifySnap.data() };
-                const verifyIndex = findPlayerIndex(verifiedData.players || [], trimmedPlayerName);
-                if (verifyIndex !== -1) {
-                  return {
-                    success: true,
-                    roomData: verifiedData,
-                    error: null
-                  };
-                }
-              }
-            } else {
-              // First attempt - trust the write and return immediately
-              return {
-                success: true,
-                roomData: { ...roomData, players: updatedPlayers },
-                error: null
-              };
-            }
-          } else {
-            // No update needed, player already exists correctly
-            return {
-              success: true,
-              roomData: roomData,
-              error: null
-            };
-          }
-        } else {
-          // Player exists and no update needed
-          return {
-            success: true,
-            roomData: roomData,
-            error: null
-          };
+      if (existingIndex !== -1) {
+        const updatedPlayer = updatePlayerObject ? updatePlayerObject(players[existingIndex]) : null;
+        if (!updatedPlayer) {
+          return data; // Already in the room, nothing to change
         }
-      } else {
-        // Step 3: Add new player
-        const newPlayer = createPlayerObject(players.length);
-        const updatedPlayers = [...players, newPlayer];
-
-        // Step 4: Write update - trust Firestore write, skip verification on first attempt
-        await updateDoc(roomRef, { players: updatedPlayers });
-
-        // Only verify on retry attempts (not first attempt)
-        if (attempt > 0) {
-          const verifySnap = await getDoc(roomRef);
-          if (verifySnap.exists()) {
-            const verifiedData = { id: verifySnap.id, ...verifySnap.data() };
-            const verifyIndex = findPlayerIndex(verifiedData.players || [], trimmedPlayerName);
-            
-            if (verifyIndex !== -1) {
-              // Success - player is confirmed in room
-              return {
-                success: true,
-                roomData: verifiedData,
-                error: null
-              };
-            } else {
-              // Verification failed - another write may have overwritten ours
-              console.warn(`⚠️ Player join verification failed (attempt ${attempt + 1}/${maxRetries}), retrying...`);
-              if (attempt < maxRetries - 1) {
-                // Wait a bit before retry to avoid immediate conflicts
-                await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
-                continue;
-              } else {
-                return {
-                  success: false,
-                  roomData: verifiedData,
-                  error: 'Failed to verify player join after retries'
-                };
-              }
-            }
-          } else {
-            return {
-              success: false,
-              roomData: null,
-              error: 'Room deleted during join'
-            };
-          }
-        } else {
-          // First attempt - trust the write and return immediately
-          return {
-            success: true,
-            roomData: { ...roomData, players: updatedPlayers },
-            error: null
-          };
-        }
+        const updatedPlayers = [...players];
+        updatedPlayers[existingIndex] = updatedPlayer;
+        transaction.update(roomRef, { players: updatedPlayers });
+        return { ...data, players: updatedPlayers };
       }
-    } catch (error) {
-      console.error(`❌ Error in atomicPlayerJoin (attempt ${attempt + 1}/${maxRetries}):`, error);
-      if (attempt < maxRetries - 1) {
-        // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
-        continue;
-      } else {
-        return {
-          success: false,
-          roomData: null,
-          error: error.message || 'Unknown error during player join'
-        };
+
+      if (!createPlayerObject) {
+        throw new Error('Player not found in room');
       }
-    }
+
+      const updatedPlayers = [...players, createPlayerObject(players.length)];
+      transaction.update(roomRef, { players: updatedPlayers });
+      return { ...data, players: updatedPlayers };
+    }, { maxAttempts: Math.max(5, maxRetries) }); // Several friends often join at once
+
+    return { success: true, roomData, error: null };
+  } catch (error) {
+    console.error('❌ Error in atomicPlayerJoin:', error);
+    return {
+      success: false,
+      roomData: null,
+      error: error?.message || 'Unknown error during player join'
+    };
   }
-
-  return {
-    success: false,
-    roomData: null,
-    error: 'Max retries exceeded'
-  };
 }
-

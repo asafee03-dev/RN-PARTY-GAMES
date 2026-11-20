@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { serverNow } from '../../utils/serverClock';
 
 /**
  * Timer component for Alias game
@@ -21,7 +22,7 @@ export default function AliasTimer({
     }
 
     const updateTimer = () => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const elapsed = Math.floor((serverNow() - startTime) / 1000);
       const remaining = Math.max(0, duration - elapsed);
       
       setTimeLeft(remaining);

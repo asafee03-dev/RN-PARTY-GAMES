@@ -14,6 +14,7 @@ import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 import { getActivePlayers, getActingHostName, markPlayerInactive } from '../../utils/gameSync';
+import { serverNow, syncServerClock } from '../../utils/serverClock';
 
 const GAME_SECONDS = 360; // 6 minutes
 // If the acting host's phone is asleep, any player may end an overdue game
@@ -70,6 +71,14 @@ export default function SpyRoomScreen({ navigation, route }) {
   useEffect(() => {
     latestRoomRef.current = room;
   }, [room]);
+
+  // Measure this device's offset from the server clock once, so timers and
+  // time-based points use the same clock on every phone
+  useEffect(() => {
+    if (room?.id) {
+      syncServerClock('SpyRoom', room.id);
+    }
+  }, [room?.id]);
 
   useEffect(() => {
     currentPlayerNameRef.current = currentPlayerName;
@@ -187,7 +196,7 @@ export default function SpyRoomScreen({ navigation, route }) {
       const updateTimer = () => {
         const current = latestRoomRef.current;
         if (!current?.game_start_time) return;
-        const elapsedMs = Date.now() - current.game_start_time;
+        const elapsedMs = serverNow() - current.game_start_time;
         setTimeLeft(Math.max(0, GAME_SECONDS - Math.floor(elapsedMs / 1000)));
 
         // Only the acting host ends the game on time; others take over if the
@@ -597,7 +606,7 @@ export default function SpyRoomScreen({ navigation, route }) {
         transaction.update(roomDocRef, {
           players: updatedPlayers,
           game_status: 'playing',
-          game_start_time: Date.now(),
+          game_start_time: serverNow(),
           spy_name: spyNames.length === 1 ? spyNames[0] : '', // Backward compatibility
           spy_names: spyNames,
           chosen_location: currentGameMode === 'locations' ? randomLocation.location : randomWord,

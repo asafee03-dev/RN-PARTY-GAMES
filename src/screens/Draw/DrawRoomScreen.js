@@ -15,6 +15,7 @@ import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 import storage from '../../utils/storage';
 import { getActingHostName, getFirstActiveIndex, getNextActiveIndex, markPlayerInactive } from '../../utils/gameSync';
+import { serverNow, syncServerClock } from '../../utils/serverClock';
 
 const WINNING_SCORE = 12;
 const TURN_SECONDS = 60;
@@ -173,6 +174,14 @@ export default function DrawRoomScreen({ navigation, route }) {
   useEffect(() => {
     roomRef.current = room;
   }, [room]);
+
+  // Measure this device's offset from the server clock once, so timers and
+  // time-based points use the same clock on every phone
+  useEffect(() => {
+    if (room?.id) {
+      syncServerClock('DrawRoom', room.id);
+    }
+  }, [room?.id]);
 
   useEffect(() => {
     currentPlayerNameRef.current = currentPlayerName;
@@ -460,7 +469,7 @@ export default function DrawRoomScreen({ navigation, route }) {
         return;
       }
 
-      const elapsed = Math.floor((Date.now() - currentRoom.turn_start_time) / 1000);
+      const elapsed = Math.floor((serverNow() - currentRoom.turn_start_time) / 1000);
       const remaining = Math.max(0, 60 - elapsed);
       setTimeRemaining(remaining);
 
@@ -492,7 +501,7 @@ export default function DrawRoomScreen({ navigation, route }) {
     if (isEndingRoundRef.current) return;
 
     const isActingHostNow = getActingHostName(currentRoom) === me;
-    const overdue = Date.now() - currentRoom.turn_start_time >= (TURN_SECONDS + OVERDUE_GRACE_SECONDS) * 1000;
+    const overdue = serverNow() - currentRoom.turn_start_time >= (TURN_SECONDS + OVERDUE_GRACE_SECONDS) * 1000;
     if (!isActingHostNow && !overdue) return;
 
     isEndingRoundRef.current = true;
@@ -676,7 +685,7 @@ export default function DrawRoomScreen({ navigation, route }) {
           players: players.map(p => (p ? { ...p, current_guess: '', has_submitted: false } : p)),
           final_draw_image: null,
           all_guesses: [],
-          turn_start_time: Date.now(),
+          turn_start_time: serverNow(),
           show_round_summary: false,
           round_winner: null,
           drinking_players: null,
@@ -784,7 +793,7 @@ export default function DrawRoomScreen({ navigation, route }) {
 
         const normalizedWord = fresh.current_word?.toLowerCase().trim();
         const isCorrect = !!normalizedWord && guess.toLowerCase() === normalizedWord;
-        const now = Date.now();
+        const now = serverNow();
 
         // Append to the *server's* guesses so simultaneous guesses aren't lost
         const updatedGuesses = [...getAllGuesses(fresh), { playerName: me, guess, timestamp: now, isCorrect }];
@@ -862,7 +871,7 @@ export default function DrawRoomScreen({ navigation, route }) {
           players: players.map(p => (p && p.name ? { ...p, current_guess: '', has_submitted: false } : p)),
           all_guesses: [],
           final_draw_image: null,
-          turn_start_time: Date.now()
+          turn_start_time: serverNow()
         });
       });
     } catch (error) {

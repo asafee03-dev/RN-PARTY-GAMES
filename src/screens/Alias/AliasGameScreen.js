@@ -19,6 +19,7 @@ import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
+import { serverNow, syncServerClock } from '../../utils/serverClock';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899"];
 
@@ -94,6 +95,14 @@ export default function AliasGameScreen({ navigation, route }) {
   useEffect(() => {
     latestRoomRef.current = room;
   }, [room]);
+
+  // Measure this device's offset from the server clock once, so timers and
+  // time-based points use the same clock on every phone
+  useEffect(() => {
+    if (room?.id) {
+      syncServerClock('GameRoom', room.id);
+    }
+  }, [room?.id]);
 
   useEffect(() => {
     playerNameRef.current = playerName;
@@ -484,7 +493,7 @@ export default function AliasGameScreen({ navigation, route }) {
           round_active: true,
           game_status: 'playing',
           current_round_score: 0,
-          round_start_time: Date.now(),
+          round_start_time: serverNow(),
           round_start_position: startPosition,
           // Each team keeps its start position until the full round completes
           // (used for this round's progress and the drinking check)

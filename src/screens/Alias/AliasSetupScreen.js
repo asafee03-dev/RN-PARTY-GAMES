@@ -1,4 +1,4 @@
-import { doc, getDoc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, runTransaction, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import GradientBackground from '../../components/codenames/GradientBackground';
@@ -197,6 +197,31 @@ export default function AliasSetupScreen({ navigation, route }) {
     });
   };
 
+  /**
+   * Apply a change to the teams array inside a transaction, on top of the
+   * server's latest teams. Previously each action wrote back a stale local
+   * copy (or mutated on-screen state), so two players joining teams at the
+   * same moment - or the host adding a team while someone joined - erased
+   * each other's changes. `mutate(teams, fresh)` returns { teams } or { error }.
+   */
+  const updateTeamsTx = async (mutate) => {
+    const roomRef = doc(db, 'GameRoom', roomCode);
+    return runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(roomRef);
+      if (!snap.exists()) return { error: 'missing' };
+      const fresh = snap.data();
+      // Work on copies - never mutate data read from Firestore or React state
+      const teams = (fresh.teams || []).map(t => ({
+        ...t,
+        players: Array.isArray(t.players) ? [...t.players] : []
+      }));
+      const result = mutate(teams, fresh);
+      if (result.error) return result;
+      transaction.update(roomRef, { teams: result.teams, ...(result.extra || {}) });
+      return { ok: true };
+    });
+  };
+
   const handleJoinTeam = async (teamIndex) => {
     if (!room || !playerName.trim()) {
       Alert.alert('שגיאה', 'אנא הכנס שם שחקן');
@@ -206,104 +231,44 @@ export default function AliasSetupScreen({ navigation, route }) {
     if (isJoiningTeam) return;
     setIsJoiningTeam(true);
 
-    // Use retry mechanism with verification for atomic team join
-    const maxRetries = 3;
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        const roomRef = doc(db, 'GameRoom', roomCode);
-        
-        // Read current room state
-        const roomSnap = await getDoc(roomRef);
-        if (!roomSnap.exists()) {
-          Alert.alert('שגיאה', 'החדר נמחק');
-          navigation.goBack();
-          setIsJoiningTeam(false);
-          return;
-        }
-        
-        const currentRoom = { id: roomSnap.id, ...roomSnap.data() };
-        const updatedTeams = [...(currentRoom.teams || [])];
-        const team = updatedTeams[teamIndex];
+    try {
+      const result = await updateTeamsTx((teams) => {
+        const team = teams[teamIndex];
+        if (!team) return { error: 'invalid' };
 
-        if (!team) {
-          Alert.alert('שגיאה', 'קבוצה לא תקינה');
-          setIsJoiningTeam(false);
-          return;
-        }
-
-        // Check if team already has a player (only one player allowed per team)
-        const currentPlayers = team.players && Array.isArray(team.players) ? team.players.filter(p => p && p.trim().length > 0) : [];
+        // Only one player allowed per team
+        const currentPlayers = team.players.filter(p => p && p.trim().length > 0);
         if (currentPlayers.length > 0 && !currentPlayers.includes(playerName)) {
-          Alert.alert('שגיאה', 'הקבוצה כבר מלאה. כל קבוצה יכולה להכיל שחקן אחד בלבד.');
-          setIsJoiningTeam(false);
-          return;
+          return { error: 'full' };
         }
 
-        // Remove player from all teams first
-        updatedTeams.forEach(t => {
-          if (t.players && Array.isArray(t.players)) {
-            t.players = t.players.filter(p => p !== playerName);
-          } else {
-            t.players = [];
-          }
+        // Remove player from all teams, then add to the selected one
+        teams.forEach(t => {
+          t.players = t.players.filter(p => p !== playerName);
         });
-
-        // Add player to selected team
-        if (!team.players) {
-          team.players = [];
-        }
-        if (!team.players.includes(playerName)) {
-          team.players.push(playerName);
-        }
-
-        // Update team name to player's name if team is empty or has one player
+        team.players.push(playerName);
         if (team.players.length === 1) {
           team.name = `הקבוצה של ${playerName}`;
         }
+        return { teams };
+      });
 
-        // Write update
-        await updateDoc(roomRef, {
-          teams: updatedTeams
-        });
-
-        // Verify player was actually added to the team
-        const verifySnap = await getDoc(roomRef);
-        if (verifySnap.exists()) {
-          const verifiedRoom = { id: verifySnap.id, ...verifySnap.data() };
-          const verifiedTeam = verifiedRoom.teams && verifiedRoom.teams[teamIndex];
-          const playerInTeam = verifiedTeam && verifiedTeam.players && verifiedTeam.players.includes(playerName);
-          
-          if (playerInTeam) {
-            // Success - player is confirmed in team
-            console.log('✅ Player joined team:', teamIndex);
-            setRoom(verifiedRoom);
-            setIsJoiningTeam(false);
-            return;
-          } else {
-            // Verification failed - retry
-            console.warn(`⚠️ Team join verification failed (attempt ${attempt + 1}/${maxRetries}), retrying...`);
-            if (attempt < maxRetries - 1) {
-              await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
-              continue;
-            }
-          }
-        }
-      } catch (error) {
-        console.error(`❌ Error joining team (attempt ${attempt + 1}/${maxRetries}):`, error);
-        if (attempt < maxRetries - 1) {
-          await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
-          continue;
-        } else {
-          Alert.alert('שגיאה', 'לא הצלחנו להצטרף לקבוצה. נסה שוב.');
-          setIsJoiningTeam(false);
-          return;
-        }
+      if (result.error === 'missing') {
+        Alert.alert('שגיאה', 'החדר נמחק');
+        navigation.goBack();
+      } else if (result.error === 'invalid') {
+        Alert.alert('שגיאה', 'קבוצה לא תקינה');
+      } else if (result.error === 'full') {
+        Alert.alert('שגיאה', 'הקבוצה כבר מלאה. כל קבוצה יכולה להכיל שחקן אחד בלבד.');
+      } else {
+        console.log('✅ Player joined team:', teamIndex);
       }
+    } catch (error) {
+      console.error('❌ Error joining team:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו להצטרף לקבוצה. נסה שוב.');
+    } finally {
+      setIsJoiningTeam(false);
     }
-    
-    // If we get here, all retries failed
-    Alert.alert('שגיאה', 'לא הצלחנו להצטרף לקבוצה. נסה שוב.');
-    setIsJoiningTeam(false);
   };
 
   const handleLeaveTeam = async () => {
@@ -315,28 +280,17 @@ export default function AliasSetupScreen({ navigation, route }) {
     setIsJoiningTeam(true);
 
     try {
-      const updatedTeams = [...room.teams];
-      
-      // Remove player from all teams
-      updatedTeams.forEach((t, index) => {
-        if (t.players && Array.isArray(t.players)) {
+      await updateTeamsTx((teams) => {
+        teams.forEach((t, index) => {
           const beforeCount = t.players.length;
           t.players = t.players.filter(p => p !== playerName);
-          
           // If team becomes empty and name was personalized, reset to default
           if (t.players.length === 0 && beforeCount > 0 && t.name && t.name.startsWith('הקבוצה של ')) {
             t.name = `קבוצה ${index + 1}`;
           }
-        } else {
-          t.players = [];
-        }
+        });
+        return { teams };
       });
-
-      const roomRef = doc(db, 'GameRoom', roomCode);
-      await updateDoc(roomRef, {
-        teams: updatedTeams
-      });
-
       console.log('✅ Player left team');
     } catch (error) {
       console.error('Error leaving team:', error);
@@ -362,20 +316,20 @@ export default function AliasSetupScreen({ navigation, route }) {
 
   const handleToggleDrinkingMode = async () => {
     if (!isHost || !room) return;
-    
+
     const newValue = !drinkingMode;
     setDrinkingMode(newValue);
-    
+
     try {
       // Save to local storage
       await storage.setItem('drinkingMode', newValue.toString());
-      
+
       // Save to Firestore room data so all players see it
       const roomRef = doc(db, 'GameRoom', roomCode);
       await updateDoc(roomRef, {
         drinking_mode: newValue
       });
-      
+
       console.log('✅ Drinking mode updated:', newValue);
     } catch (error) {
       console.error('Error saving drinking mode:', error);
@@ -388,38 +342,21 @@ export default function AliasSetupScreen({ navigation, route }) {
     if (!isHost || !room) return;
 
     try {
-      const updatedTeams = [...room.teams];
-      const newTeamIndex = updatedTeams.length;
-      
-      // Get all colors currently used by existing teams
-      const usedColors = updatedTeams.map(team => team.color).filter(Boolean);
-      
-      // Find the first available color that's not already used
-      let selectedColor = null;
-      for (const color of TEAM_COLORS) {
-        if (!usedColors.includes(color)) {
-          selectedColor = color;
-          break;
-        }
-      }
-      
-      // Fallback to a color by index if all colors are used (shouldn't happen)
-      if (!selectedColor) {
-        selectedColor = TEAM_COLORS[newTeamIndex % TEAM_COLORS.length];
-      }
-      
-      const newTeam = {
-        name: `קבוצה ${newTeamIndex + 1}`,
-        color: selectedColor,
-        players: [],
-        position: 0, // Initialize position
-        round_start_position: null // Initialize round_start_position
-      };
-      updatedTeams.push(newTeam);
+      await updateTeamsTx((teams) => {
+        const newTeamIndex = teams.length;
+        // First color not used by an existing team (fallback by index)
+        const usedColors = teams.map(team => team.color).filter(Boolean);
+        const selectedColor = TEAM_COLORS.find(color => !usedColors.includes(color)) ||
+          TEAM_COLORS[newTeamIndex % TEAM_COLORS.length];
 
-      const roomRef = doc(db, 'GameRoom', roomCode);
-      await updateDoc(roomRef, {
-        teams: updatedTeams
+        teams.push({
+          name: `קבוצה ${newTeamIndex + 1}`,
+          color: selectedColor,
+          players: [],
+          position: 0,
+          round_start_position: null
+        });
+        return { teams };
       });
     } catch (error) {
       console.error('Error adding team:', error);
@@ -430,23 +367,19 @@ export default function AliasSetupScreen({ navigation, route }) {
   const handleRemoveTeam = async (teamIndex) => {
     if (!isHost || !room) return;
 
-    const team = room.teams[teamIndex];
-    if (team && team.players && team.players.length > 0) {
-      Alert.alert('שגיאה', 'לא ניתן למחוק קבוצה עם שחקנים');
-      return;
-    }
-
-    if (room.teams.length <= 2) {
-      Alert.alert('שגיאה', 'חייבות להיות לפחות 2 קבוצות');
-      return;
-    }
-
     try {
-      const updatedTeams = room.teams.filter((_, index) => index !== teamIndex);
-      const roomRef = doc(db, 'GameRoom', roomCode);
-      await updateDoc(roomRef, {
-        teams: updatedTeams
+      const result = await updateTeamsTx((teams) => {
+        const team = teams[teamIndex];
+        // Re-checked on the server copy: someone may have just joined this team
+        if (team && team.players.length > 0) return { error: 'has_players' };
+        if (teams.length <= 2) return { error: 'min_teams' };
+        return { teams: teams.filter((_, index) => index !== teamIndex) };
       });
+      if (result.error === 'has_players') {
+        Alert.alert('שגיאה', 'לא ניתן למחוק קבוצה עם שחקנים');
+      } else if (result.error === 'min_teams') {
+        Alert.alert('שגיאה', 'חייבות להיות לפחות 2 קבוצות');
+      }
     } catch (error) {
       console.error('Error removing team:', error);
       Alert.alert('שגיאה', 'לא הצלחנו למחוק קבוצה');
@@ -455,55 +388,48 @@ export default function AliasSetupScreen({ navigation, route }) {
 
   const handleStartGame = async () => {
     if (!isHost || !room) return;
-
-    // Validate that all teams have at least one player
-    const teamsWithPlayers = room.teams.filter(t => t.players && t.players.length > 0);
-    if (teamsWithPlayers.length < 2) {
-      Alert.alert('שגיאה', 'נדרשות לפחות 2 קבוצות עם שחקנים');
-      return;
-    }
-
-    // Validate that each team has at least one player
-    for (let i = 0; i < room.teams.length; i++) {
-      const team = room.teams[i];
-      if (!team.players || team.players.length === 0) {
-        Alert.alert('שגיאה', `קבוצה ${i + 1} צריכה לפחות שחקן אחד`);
-        return;
-      }
-    }
-
     if (isStartingGame) return;
     setIsStartingGame(true);
 
+    // Golden squares: 10 random positions 1-58 (avoiding start and end)
+    const squares = [];
+    for (let i = 1; i < 59; i++) squares.push(i);
+    const randomGoldenSquares = squares.sort(() => Math.random() - 0.5).slice(0, 10);
+
     try {
-      // Generate golden squares if golden rounds are enabled
-      let goldenSquares = [];
-      if (room.golden_rounds_enabled) {
-        // Generate 10 random golden squares (positions 1-58, avoiding start and end)
-        const squares = [];
-        for (let i = 1; i < 59; i++) {
-          squares.push(i);
-        }
-        const shuffled = squares.sort(() => Math.random() - 0.5);
-        goldenSquares = shuffled.slice(0, 10);
-      }
+      const result = await updateTeamsTx((teams, fresh) => {
+        // Refuse a second start (double tap)
+        if (fresh.game_status && fresh.game_status !== 'setup') return { error: 'started' };
 
-      // Ensure all teams have position and round_start_position initialized
-      const updatedTeams = room.teams.map(team => ({
-        ...team,
-        position: team.position !== undefined ? team.position : 0,
-        round_start_position: team.round_start_position !== undefined ? team.round_start_position : null
-      }));
+        // Validate on the server copy, so a player who just left is accounted for
+        if (teams.filter(t => t.players.length > 0).length < 2) return { error: 'min_teams' };
+        const emptyIndex = teams.findIndex(t => t.players.length === 0);
+        if (emptyIndex !== -1) return { error: 'empty_team', index: emptyIndex };
 
-      const roomRef = doc(db, 'GameRoom', roomCode);
-      await updateDoc(roomRef, {
-        game_status: 'waiting',
-        golden_squares: goldenSquares,
-        teams: updatedTeams,
-        current_turn: 0,
-        round_active: false
+        return {
+          teams: teams.map(team => ({
+            ...team,
+            position: team.position !== undefined ? team.position : 0,
+            round_start_position: null
+          })),
+          extra: {
+            game_status: 'waiting',
+            golden_squares: fresh.golden_rounds_enabled ? randomGoldenSquares : [],
+            current_turn: 0,
+            round_active: false
+          }
+        };
       });
 
+      if (result.error === 'min_teams') {
+        Alert.alert('שגיאה', 'נדרשות לפחות 2 קבוצות עם שחקנים');
+      } else if (result.error === 'empty_team') {
+        Alert.alert('שגיאה', `קבוצה ${result.index + 1} צריכה לפחות שחקן אחד`);
+      }
+      if (result.error && result.error !== 'started') {
+        setIsStartingGame(false);
+        return;
+      }
       // Navigation will happen automatically via useEffect when game_status changes
       console.log('✅ Game started');
     } catch (error) {

@@ -48,6 +48,41 @@ const he = {
     },
   },
 
+  // Shared create/join ("game entry") screen used by every game
+  entry: {
+    yourName: 'השם שלך',
+    namePlaceholder: 'הכנס שם...',
+    createGame: 'צור משחק חדש',
+    creating: 'יוצר חדר...',
+    joinTitle: 'יש לכם קוד?',
+    roomCode: 'קוד חדר',
+    roomCodePlaceholder: 'הכנס קוד...',
+    joinGame: 'הצטרף למשחק',
+    howToPlay: 'איך משחקים?',
+    errors: {
+      nameRequired: 'אנא הכנס שם שחקן',
+      codeRequired: 'אנא הכנס קוד חדר',
+      uniqueCodeFailed: 'שגיאה ביצירת קוד חדר ייחודי. נסה שוב.',
+      createFailed: 'שגיאה ביצירת החדר. נסה שוב.',
+      rulesBlocked: 'שגיאה: החדר לא נוצר. אנא בדוק את כללי Firestore.',
+      permissionDenied: 'אין הרשאה ליצור חדר. אנא בדוק את כללי Firestore.',
+      unavailable: 'Firestore לא זמין. אנא בדוק את החיבור לאינטרנט.',
+    },
+  },
+
+  frequency: {
+    entry: {
+      title: 'התדר',
+      subtitle: 'משחק הגלים והתדירויות!',
+      steps: [
+        'כולם רואים את המסך עם הנושאים.',
+        'בכל תור יש שחקן שרואה את הסקאלה אליה צריך לדייק והוא נותן הרמז',
+        'שאר השחקנים מנסים לכוון את המחוג שלהם לאותו אזור.',
+        'ככל שהניחוש קרוב יותר — מקבלים יותר נקודות.',
+      ],
+    },
+  },
+
   // Temporary dev-only design system preview (removed in cleanup)
   designPreview: {
     title: 'מערכת העיצוב',

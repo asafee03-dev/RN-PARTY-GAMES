@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIn
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction } from 'firebase/firestore';
 import CodenamesBoard from '../../components/codenames/CodenamesBoard';
 import ClueInput from '../../components/codenames/ClueInput';
 import TeamInfo from '../../components/codenames/TeamInfo';
@@ -16,6 +16,67 @@ import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
+
+// ---------------------------------------------------------------------------
+// Pure helpers used inside transactions, so every decision is made from the
+// server's current state rather than a possibly-stale local copy.
+// ---------------------------------------------------------------------------
+
+const otherTeam = (team) => (team === 'red' ? 'blue' : 'red');
+
+const getRoleIn = (roomData, playerName) => {
+  if (!roomData || !playerName) return null;
+  if (roomData.red_team?.spymaster === playerName) return { team: 'red', role: 'spymaster' };
+  if (roomData.blue_team?.spymaster === playerName) return { team: 'blue', role: 'spymaster' };
+  if (roomData.red_team?.guessers?.includes(playerName)) return { team: 'red', role: 'guesser' };
+  if (roomData.blue_team?.guessers?.includes(playerName)) return { team: 'blue', role: 'guesser' };
+  return null;
+};
+
+/**
+ * Fields to write when the turn passes to the other team - whether because a
+ * guesser pressed "end turn", picked a wrong word, or ran out of guesses.
+ * Also runs the drinking-mode round check when the turn returns to the
+ * starting team (previously this only happened on "end turn").
+ */
+const buildTurnSwitch = (fresh, revealedAfter) => {
+  const nextTeam = otherTeam(fresh.current_turn);
+  const updates = {
+    current_turn: nextTeam,
+    current_clue: null,
+    guesses_remaining: 0
+  };
+
+  // Existing rivals-mode behavior, kept as-is
+  if (fresh.game_mode === 'rivals') {
+    updates.turn_phase = 'clue';
+    updates.turn_start_time = Date.now();
+  }
+
+  // A round is complete when the turn cycles back to the starting team
+  if (fresh.drinking_mode === true && nextTeam === fresh.starting_team) {
+    const red = revealedAfter.red.length;
+    const blue = revealedAfter.blue.length;
+    updates.round_baseline_reveals = { red, blue };
+
+    const oldBaseline = fresh.round_baseline_reveals;
+    if (oldBaseline) {
+      const redInRound = red - oldBaseline.red;
+      const blueInRound = blue - oldBaseline.blue;
+      // The team that revealed fewer words this round drinks (no popup on a tie)
+      const drinkingTeam = redInRound < blueInRound ? 'red' : blueInRound < redInRound ? 'blue' : null;
+      if (drinkingTeam) {
+        const teamData = drinkingTeam === 'red' ? fresh.red_team : fresh.blue_team;
+        updates.drinking_popup = {
+          team: drinkingTeam,
+          team_name: teamData?.spymaster || (drinkingTeam === 'red' ? 'אדומה' : 'כחולה')
+        };
+      }
+    }
+  }
+
+  return updates;
+};
 
 export default function CodenamesGameScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
@@ -31,6 +92,11 @@ export default function CodenamesGameScreen({ navigation, route }) {
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
   const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
+  const currentPlayerNameRef = useRef(''); // Latest name for use inside the long-lived snapshot listener
+
+  useEffect(() => {
+    currentPlayerNameRef.current = currentPlayerName;
+  }, [currentPlayerName]);
 
   useEffect(() => {
     const initializeRoom = async () => {
@@ -133,7 +199,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
         if (updatedRoom.reset_triggered_at && 
             updatedRoom.reset_triggered_at !== lastResetTriggerRef.current &&
             updatedRoom.game_status === 'setup' &&
-            updatedRoom.host_name !== currentPlayerName) {
+            updatedRoom.host_name !== currentPlayerNameRef.current) {
           lastResetTriggerRef.current = updatedRoom.reset_triggered_at;
           // Show ad to non-host players - they're already on setup screen
           showInterstitialIfAvailable(() => {
@@ -157,29 +223,17 @@ export default function CodenamesGameScreen({ navigation, route }) {
           return;
         }
         
-        setRoom(prevRoom => {
-          if (!prevRoom) {
-            return updatedRoom;
-          }
-          
-          // Prevent state updates that could change board/key_map during active game
-          if (prevRoom.game_status === 'playing' && updatedRoom.game_status === 'playing') {
-            const criticalFieldsChanged = 
-              JSON.stringify(prevRoom.board_words) !== JSON.stringify(updatedRoom.board_words) ||
-              JSON.stringify(prevRoom.key_map) !== JSON.stringify(updatedRoom.key_map) ||
-              prevRoom.starting_team !== updatedRoom.starting_team;
-            
-            if (criticalFieldsChanged) {
-              console.warn('⚠️ Blocked critical game state change during active game');
-              return prevRoom;
-            }
-          }
-          
-          if (JSON.stringify(prevRoom) !== JSON.stringify(updatedRoom)) {
-            return updatedRoom;
-          }
-          return prevRoom;
-        });
+        // Keep the drinking badge in sync with the room setting
+        if (updatedRoom.drinking_mode !== undefined) {
+          setDrinkingMode(updatedRoom.drinking_mode === true);
+        }
+
+        // Always apply the server state. (A previous "block board/key_map
+        // changes" check here could leave players on different boards if the
+        // game was started twice.)
+        setRoom(prevRoom => (
+          JSON.stringify(prevRoom) !== JSON.stringify(updatedRoom) ? updatedRoom : prevRoom
+        ));
       }
     });
 
@@ -346,172 +400,118 @@ export default function CodenamesGameScreen({ navigation, route }) {
       console.error('❌ Cannot submit clue: room or room.id is missing');
       return;
     }
-    
+
     console.log('💡 Submitting clue with number:', number);
-
-    const updates = {
-      current_clue: { number },
-      guesses_remaining: number + 1,
-      turn_start_time: Date.now()
-    };
-
-    if (room.game_mode === 'rivals') {
-      updates.turn_phase = 'guess';
-    }
 
     try {
       const roomRef = doc(db, 'CodenamesRoom', room.id);
-      await updateDoc(roomRef, updates);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomRef);
+        if (!snap.exists()) return;
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing') return;
+
+        // Only the current team's spymaster, and only once per turn
+        const myRole = getRoleIn(fresh, currentPlayerName);
+        if (!myRole || myRole.role !== 'spymaster' || myRole.team !== fresh.current_turn) return;
+        if (fresh.current_clue) return;
+
+        const updates = {
+          current_clue: { number },
+          guesses_remaining: number + 1,
+          turn_start_time: Date.now()
+        };
+        // Existing rivals-mode behavior, kept as-is
+        if (fresh.game_mode === 'rivals') {
+          updates.turn_phase = 'guess';
+        }
+        transaction.update(roomRef, updates);
+      });
       console.log('✅ Clue submitted successfully');
-      setRoom(prev => ({ ...prev, ...updates }));
     } catch (error) {
       console.error('❌ Error submitting clue:', error);
-      return;
     }
   };
 
+  /**
+   * Reveal a word. Runs in a transaction so that when several guessers tap at
+   * the same time, each reveal is applied on top of the latest server state:
+   * no reveal is lost, guesses_remaining is decremented exactly once per word,
+   * and a tap that arrives after the turn already switched is ignored.
+   * Only the fields that change are written (e.g. `red_team.revealed_words`),
+   * never the whole team object.
+   */
   const handleWordClick = async (index) => {
-    if (!room) return;
-    
+    if (!room || !room.id) return;
+
     const playerRole = getPlayerRole();
     if (!playerRole || playerRole.role === 'spymaster') return;
     if (!isMyTurn()) return;
-    
+
     console.log('🎯 Word clicked:', index);
 
-    const currentTeam = room.current_turn;
-    const wordColor = room.key_map[index];
-    
-    // Don't add word if already revealed
-    const alreadyRevealed = [...room.red_team.revealed_words, ...room.blue_team.revealed_words].includes(index);
-    if (alreadyRevealed) {
-      console.log('⚠️ Word already revealed, skipping');
-      return;
-    }
-    
-    const updatedRedRevealed = [...room.red_team.revealed_words];
-    const updatedBlueRevealed = [...room.blue_team.revealed_words];
-
-    // Add word to revealed list based on its actual color
-    if (wordColor === 'red') {
-      updatedRedRevealed.push(index);
-    } else if (wordColor === 'blue') {
-      updatedBlueRevealed.push(index);
-    } else if (wordColor === 'neutral') {
-      // Neutral word - add to both teams so everyone sees it
-      updatedRedRevealed.push(index);
-      updatedBlueRevealed.push(index);
-    } else if (wordColor === 'black') {
-      // Black word - add to both teams so everyone sees it
-      updatedRedRevealed.push(index);
-      updatedBlueRevealed.push(index);
-    }
-
-    let gameStatus = room.game_status;
-    let winnerTeam = room.winner_team;
-    let switchTurn = false;
-    let newGuessesRemaining = room.guesses_remaining - 1;
-
-    if (wordColor === 'black') {
-      gameStatus = 'finished';
-      winnerTeam = currentTeam === 'red' ? 'blue' : 'red';
-      console.log('💀 Black word clicked! Winner:', winnerTeam);
-    } else if (wordColor === currentTeam) {
-      // Check if team has finished all their words
-      const currentTeamRevealed = currentTeam === 'red' ? updatedRedRevealed : updatedBlueRevealed;
-      
-      // Count total team words in key map
-      let totalTeamWords = 0;
-      room.key_map.forEach((color) => {
-        if (color === currentTeam) totalTeamWords++;
-      });
-      
-      // Count revealed team words
-      let revealedTeamWords = 0;
-      currentTeamRevealed.forEach((revealedIndex) => {
-        if (room.key_map[revealedIndex] === currentTeam) {
-          revealedTeamWords++;
-        }
-      });
-      
-      // Team wins if they revealed all their words
-      if (revealedTeamWords >= totalTeamWords) {
-        gameStatus = 'finished';
-        winnerTeam = currentTeam;
-        console.log('🏆 Team won! Winner:', winnerTeam, 'Revealed team words:', revealedTeamWords, 'Total team words:', totalTeamWords);
-      }
-    } else if (wordColor !== currentTeam) {
-      switchTurn = true;
-      console.log('❌ Wrong color, switching turn');
-    }
-
-    if (newGuessesRemaining <= 0 || switchTurn) {
-      switchTurn = true;
-    }
-
-    // Check win condition after update
-    const allRevealedAfterUpdate = [...updatedRedRevealed, ...updatedBlueRevealed];
-    
-    // Count words left for each team after update
-    let redWordsLeft = 0;
-    let blueWordsLeft = 0;
-    
-    room.key_map.forEach((color, idx) => {
-      if (color === 'red' && !allRevealedAfterUpdate.includes(idx)) {
-        redWordsLeft++;
-      }
-      if (color === 'blue' && !allRevealedAfterUpdate.includes(idx)) {
-        blueWordsLeft++;
-      }
-    });
-    
-    // If a team reached 0 words, game ends
-    if (redWordsLeft === 0 && gameStatus !== 'finished') {
-      gameStatus = 'finished';
-      winnerTeam = 'red';
-      console.log('🏆 Red team won! All words revealed (0 words left)');
-    } else if (blueWordsLeft === 0 && gameStatus !== 'finished') {
-      gameStatus = 'finished';
-      winnerTeam = 'blue';
-      console.log('🏆 Blue team won! All words revealed (0 words left)');
-    }
-
-    const updates = {
-      red_team: { ...room.red_team, revealed_words: updatedRedRevealed },
-      blue_team: { ...room.blue_team, revealed_words: updatedBlueRevealed },
-      game_status: gameStatus,
-      guesses_remaining: switchTurn || gameStatus === 'finished' ? 0 : newGuessesRemaining
-    };
-
-    if (winnerTeam) {
-      updates.winner_team = winnerTeam;
-    }
-
-    if (switchTurn && gameStatus !== 'finished') {
-      updates.current_turn = currentTeam === 'red' ? 'blue' : 'red';
-      updates.current_clue = null;
-      updates.guesses_remaining = 0;
-      
-      if (room.game_mode === 'rivals') {
-        updates.turn_phase = 'clue';
-        updates.turn_start_time = Date.now();
-      }
-    }
-
-    if (!room || !room.id) {
-      console.error('❌ Cannot process word click: room or room.id is missing');
-      return;
-    }
-    
-    console.log('🔵 Processing word click, updating room:', room.id);
     try {
       const roomRef = doc(db, 'CodenamesRoom', room.id);
-      await updateDoc(roomRef, updates);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomRef);
+        if (!snap.exists()) return;
+        const fresh = snap.data();
+
+        if (fresh.game_status !== 'playing') return;
+        const myRole = getRoleIn(fresh, currentPlayerName);
+        if (!myRole || myRole.role !== 'guesser' || myRole.team !== fresh.current_turn) return; // Turn already switched
+        if (!(fresh.guesses_remaining > 0)) return; // Out of guesses
+
+        const redRevealed = fresh.red_team?.revealed_words || [];
+        const blueRevealed = fresh.blue_team?.revealed_words || [];
+        if (redRevealed.includes(index) || blueRevealed.includes(index)) return; // Someone revealed it already
+
+        const wordColor = fresh.key_map?.[index];
+        if (!wordColor) return;
+        const currentTeam = fresh.current_turn;
+
+        // Neutral and black words go to both lists so everyone sees them
+        const revealsForRed = wordColor === 'red' || wordColor === 'neutral' || wordColor === 'black';
+        const revealsForBlue = wordColor === 'blue' || wordColor === 'neutral' || wordColor === 'black';
+        const newRed = revealsForRed ? [...redRevealed, index] : redRevealed;
+        const newBlue = revealsForBlue ? [...blueRevealed, index] : blueRevealed;
+
+        const updates = {};
+        if (revealsForRed) updates['red_team.revealed_words'] = newRed;
+        if (revealsForBlue) updates['blue_team.revealed_words'] = newBlue;
+
+        // Win / lose
+        let winnerTeam = null;
+        if (wordColor === 'black') {
+          winnerTeam = otherTeam(currentTeam);
+        } else {
+          const revealedSet = new Set([...newRed, ...newBlue]);
+          const wordsLeft = (team) => fresh.key_map.filter((c, i) => c === team && !revealedSet.has(i)).length;
+          if (wordColor === currentTeam && wordsLeft(currentTeam) === 0) {
+            winnerTeam = currentTeam;
+          } else if (wordsLeft('red') === 0) {
+            winnerTeam = 'red';
+          } else if (wordsLeft('blue') === 0) {
+            winnerTeam = 'blue';
+          }
+        }
+
+        if (winnerTeam) {
+          updates.game_status = 'finished';
+          updates.winner_team = winnerTeam;
+          updates.guesses_remaining = 0;
+        } else if (wordColor !== currentTeam || fresh.guesses_remaining - 1 <= 0) {
+          // Wrong color or out of guesses -> turn passes to the other team
+          Object.assign(updates, buildTurnSwitch(fresh, { red: newRed, blue: newBlue }));
+        } else {
+          updates.guesses_remaining = fresh.guesses_remaining - 1;
+        }
+
+        transaction.update(roomRef, updates);
+      });
       console.log('✅ Word click processed successfully');
-      setRoom(prev => ({ ...prev, ...updates }));
     } catch (error) {
       console.error('❌ Error processing word click:', error);
-      return;
     }
   };
 
@@ -520,152 +520,33 @@ export default function CodenamesGameScreen({ navigation, route }) {
       console.error('❌ Cannot end turn: room or room.id is missing');
       return;
     }
-    
+
     const playerRole = getPlayerRole();
     if (!playerRole || playerRole.role === 'spymaster') return;
     if (!isMyTurn()) return;
 
-      // Use current room state from realtime listener (more efficient than re-reading)
-      // Only read if room state is not available
-      let currentRoom = room;
-      if (!currentRoom || !currentRoom.id) {
-        try {
-          const roomRef = doc(db, 'CodenamesRoom', roomCode);
-          let snapshot = await getDoc(roomRef);
-          
-          if (!snapshot.exists()) {
-            const q = query(collection(db, 'CodenamesRoom'), where('room_code', '==', roomCode));
-            const querySnapshot = await getDocs(q);
-            if (!querySnapshot.empty) {
-              const docData = querySnapshot.docs[0];
-              snapshot = { exists: () => true, id: docData.id, data: () => docData.data() };
-            }
-          }
-          
-          if (!snapshot.exists()) {
-            console.error('❌ Error fetching current room state');
-            return;
-          }
-          
-          currentRoom = { id: snapshot.id, ...snapshot.data() };
-        } catch (error) {
-          console.error('❌ Error fetching current room state:', error);
-          return;
-        }
-      }
+    try {
+      const roomRef = doc(db, 'CodenamesRoom', room.id);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomRef);
+        if (!snap.exists()) return;
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing') return;
 
-      // Double-check it's still our turn
-      if (currentRoom.current_turn !== playerRole.team) {
-        console.log('⚠️ Turn changed before end turn could be processed');
-        setRoom(currentRoom);
-        return;
-      }
+        // Still our turn? (Two teammates pressing "end turn" together, or a
+        // word click that already switched the turn, makes this a no-op.)
+        const myRole = getRoleIn(fresh, currentPlayerName);
+        if (!myRole || myRole.role !== 'guesser' || myRole.team !== fresh.current_turn) return;
 
-      const currentTeam = currentRoom.current_turn;
-      if (currentTeam !== 'red' && currentTeam !== 'blue') {
-        console.error('❌ Invalid current team:', currentTeam);
-        return;
-      }
-      
-      const nextTeam = currentTeam === 'red' ? 'blue' : 'red';
-
-      const updates = {
-        current_turn: nextTeam,
-        current_clue: null,
-        guesses_remaining: 0
-      };
-
-      if (currentRoom.game_mode === 'rivals') {
-        updates.turn_phase = 'clue';
-        updates.turn_start_time = Date.now();
-      }
-
-      // Get drinking mode from room data (preferred) or local storage (fallback)
-      const drinkingMode = currentRoom.drinking_mode !== undefined 
-        ? currentRoom.drinking_mode 
-        : (await storage.getItem('drinkingMode') === 'true');
-      const oldBaseline = drinkingMode && currentRoom.round_baseline_reveals 
-        ? { ...currentRoom.round_baseline_reveals } 
-        : null;
-
-      console.log('🔵 Ending turn, switching from', currentTeam, 'to', nextTeam, 'room:', currentRoom.id);
-      
-      try {
-        const roomRef = doc(db, 'CodenamesRoom', currentRoom.id);
-        // Single verification read before update
-        const verifySnapshot = await getDoc(roomRef);
-        if (verifySnapshot.exists()) {
-          const verifyData = verifySnapshot.data();
-          if (verifyData.current_turn !== currentTeam) {
-            console.log('⚠️ Turn changed before update could be processed');
-            setRoom({ id: verifySnapshot.id, ...verifyData });
-            return;
-          }
-        }
-        
-        await updateDoc(roomRef, updates);
-        // Realtime listener will update state, no need to read again
-        console.log('✅ Turn ended successfully, switched to', nextTeam);
-      } catch (error) {
-        console.error('❌ Error ending turn:', error);
-        // Realtime listener will sync state, no need to manually reload
-        return;
-      }
-
-      // Check drinking mode - if both teams finished turn (back to starting team)
-      // A round is complete when we cycle back to the starting team (2 turns total)
-      if (drinkingMode && nextTeam === currentRoom.starting_team) {
-        setTimeout(async () => {
-          try {
-            // Use realtime listener state if available, otherwise read once
-            const roomRef = doc(db, 'CodenamesRoom', currentRoom.id);
-            const snapshot = await getDoc(roomRef);
-            
-            if (!snapshot.exists()) return;
-            
-            const roomForPopup = { id: snapshot.id, ...snapshot.data() };
-            const currentRed = roomForPopup.red_team.revealed_words.length;
-            const currentBlue = roomForPopup.blue_team.revealed_words.length;
-            
-            // Prepare updates object to batch writes
-            const updates = {
-              round_baseline_reveals: {
-                red: currentRed,
-                blue: currentBlue
-              }
-            };
-            
-            // Only calculate drinking popup if we have a baseline to compare
-            if (oldBaseline) {
-              const redRevealedInRound = currentRed - oldBaseline.red;
-              const blueRevealedInRound = currentBlue - oldBaseline.blue;
-              
-              // Only show popup if one team has fewer words (not on tie)
-              let drinkingTeam = null;
-              if (redRevealedInRound < blueRevealedInRound) {
-                drinkingTeam = 'red';
-              } else if (blueRevealedInRound < redRevealedInRound) {
-                drinkingTeam = 'blue';
-              }
-              
-              if (drinkingTeam) {
-                // Get team name/captain name for popup
-                const teamData = drinkingTeam === 'red' ? roomForPopup.red_team : roomForPopup.blue_team;
-                const teamName = teamData.spymaster || (drinkingTeam === 'red' ? 'אדומה' : 'כחולה');
-                updates.drinking_popup = { 
-                  team: drinkingTeam,
-                  team_name: teamName
-                };
-              }
-            }
-            
-            // Batch all updates into a single write
-            await updateDoc(roomRef, updates);
-          } catch (error) {
-            console.error('❌ Error in drinking popup check:', error);
-          }
-        }, 500);
-      }
+        transaction.update(roomRef, buildTurnSwitch(fresh, {
+          red: fresh.red_team?.revealed_words || [],
+          blue: fresh.blue_team?.revealed_words || []
+        }));
+      });
+      console.log('✅ Turn ended successfully');
+    } catch (error) {
+      console.error('❌ Error ending turn:', error);
+    }
   };
 
   const copyRoomCode = () => {
@@ -719,21 +600,14 @@ export default function CodenamesGameScreen({ navigation, route }) {
     // Force a re-render to ensure modal closes
     await new Promise(resolve => setTimeout(resolve, 50));
     
-    const resetRedTeam = {
-      ...room.red_team,
-      revealed_words: []
-    };
-    const resetBlueTeam = {
-      ...room.blue_team,
-      revealed_words: []
-    };
-    
     try {
-      // Update game state FIRST - this moves all players to setup screen
+      // Update game state FIRST - this moves all players to setup screen.
+      // Clear only revealed_words (field paths) so team membership changes
+      // made by other players aren't overwritten with a stale copy.
       const roomRef = doc(db, 'CodenamesRoom', room.id);
       await updateDoc(roomRef, {
-        red_team: resetRedTeam,
-        blue_team: resetBlueTeam,
+        'red_team.revealed_words': [],
+        'blue_team.revealed_words': [],
         game_status: 'setup',
         current_turn: 'red',
         starting_team: 'red',
@@ -845,7 +719,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
         />
 
         {/* Drinking Mode Badge */}
-        {room.drinking_popup !== null && (
+        {drinkingMode && (
           <View style={styles.drinkingBadgeWrapper}>
             <View style={styles.drinkingBadge}>
               <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה</Text>

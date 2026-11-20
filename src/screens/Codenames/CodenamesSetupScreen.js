@@ -7,7 +7,7 @@ import BannerAd from '../../components/shared/BannerAd';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 
@@ -209,6 +209,12 @@ export default function CodenamesSetupScreen({ navigation, route }) {
     return unsubscribeNav;
   }, [navigation]);
 
+  /**
+   * Join a team/role. Runs in a transaction and writes only the team fields
+   * that actually change (e.g. `red_team.guessers`), so players picking teams
+   * at the same moment no longer overwrite each other. (The old version wrote
+   * the whole room document back from an earlier read.)
+   */
   const joinTeam = async (team, role) => {
     if (!currentPlayerName || !room) return;
 
@@ -217,76 +223,61 @@ export default function CodenamesSetupScreen({ navigation, route }) {
       return;
     }
 
-    // Use retry mechanism with verification for atomic team join
-    const maxRetries = 3;
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        const roomRef = doc(db, 'CodenamesRoom', room.id);
-        
-        // Read current room state
-        const roomSnap = await getDoc(roomRef);
-        if (!roomSnap.exists()) {
-          Alert.alert('שגיאה', 'החדר נמחק');
-          navigation.goBack();
-          return;
-        }
-        
-        const currentRoom = { id: roomSnap.id, ...roomSnap.data() };
-        const updatedRoom = { ...currentRoom };
+    try {
+      const roomRef = doc(db, 'CodenamesRoom', room.id);
+      const outcome = await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomRef);
+        if (!snap.exists()) return 'missing';
+        const fresh = snap.data();
+        if (fresh.game_status !== 'setup') return 'not_setup';
 
-        // Remove player from all teams/roles
-        if (updatedRoom.red_team.spymaster === currentPlayerName) {
-          updatedRoom.red_team.spymaster = '';
-        }
-        if (updatedRoom.blue_team.spymaster === currentPlayerName) {
-          updatedRoom.blue_team.spymaster = '';
-        }
-        updatedRoom.red_team.guessers = updatedRoom.red_team.guessers.filter(p => p !== currentPlayerName);
-        updatedRoom.blue_team.guessers = updatedRoom.blue_team.guessers.filter(p => p !== currentPlayerName);
-
-        // Add player to selected team/role
-        if (role === 'spymaster') {
-          updatedRoom[`${team}_team`].spymaster = currentPlayerName;
-        } else {
-          if (!updatedRoom[`${team}_team`].guessers.includes(currentPlayerName)) {
-            updatedRoom[`${team}_team`].guessers.push(currentPlayerName);
-          }
+        const targetKey = `${team}_team`;
+        // Don't silently kick out another player who already holds this spymaster slot
+        if (role === 'spymaster' && fresh[targetKey]?.spymaster && fresh[targetKey].spymaster !== currentPlayerName) {
+          return 'taken';
         }
 
-        // Write update
-        await updateDoc(roomRef, updatedRoom);
-        
-        // Verify player was actually added
-        const verifySnap = await getDoc(roomRef);
-        if (verifySnap.exists()) {
-          const verifiedRoom = { id: verifySnap.id, ...verifySnap.data() };
-          const playerInTeam = role === 'spymaster' 
-            ? verifiedRoom[`${team}_team`].spymaster === currentPlayerName
-            : verifiedRoom[`${team}_team`].guessers.includes(currentPlayerName);
-          
-          if (playerInTeam) {
-            // Success - player is confirmed in team
-            setRoom(verifiedRoom);
-            return;
-          } else {
-            // Verification failed - retry
-            console.warn(`⚠️ Team join verification failed (attempt ${attempt + 1}/${maxRetries}), retrying...`);
-            if (attempt < maxRetries - 1) {
-              await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
-              continue;
+        const updates = {};
+        ['red', 'blue'].forEach((t) => {
+          const key = `${t}_team`;
+          const teamData = fresh[key] || {};
+          const oldSpymaster = teamData.spymaster || '';
+          const oldGuessers = teamData.guessers || [];
+
+          // Remove me from this team, then add me back if this is my new place
+          let spymaster = oldSpymaster === currentPlayerName ? '' : oldSpymaster;
+          let guessers = oldGuessers.filter(p => p !== currentPlayerName);
+          if (t === team) {
+            if (role === 'spymaster') {
+              spymaster = currentPlayerName;
+            } else {
+              guessers = [...guessers, currentPlayerName];
             }
           }
+
+          if (spymaster !== oldSpymaster) {
+            updates[`${key}.spymaster`] = spymaster;
+          }
+          if (JSON.stringify(guessers) !== JSON.stringify(oldGuessers)) {
+            updates[`${key}.guessers`] = guessers;
+          }
+        });
+
+        if (Object.keys(updates).length > 0) {
+          transaction.update(roomRef, updates);
         }
-      } catch (error) {
-        console.error(`❌ Error joining team (attempt ${attempt + 1}/${maxRetries}):`, error);
-        if (attempt < maxRetries - 1) {
-          await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
-          continue;
-        } else {
-          Alert.alert('שגיאה', 'לא הצלחנו להצטרף לקבוצה. נסה שוב.');
-          return;
-        }
+        return 'ok';
+      });
+
+      if (outcome === 'taken') {
+        Alert.alert('התפקיד תפוס', 'שחקן אחר כבר בחר בתפקיד הזה.');
+      } else if (outcome === 'missing') {
+        Alert.alert('שגיאה', 'החדר נמחק');
+        navigation.goBack();
       }
+    } catch (error) {
+      console.error('❌ Error joining team:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו להצטרף לקבוצה. נסה שוב.');
     }
   };
 
@@ -336,120 +327,85 @@ export default function CodenamesSetupScreen({ navigation, route }) {
       return;
     }
 
+    if (!room || !room.id) {
+      console.error('❌ Cannot start game: room or room.id is missing');
+      Alert.alert('שגיאה', 'שגיאה: חדר לא נטען כראוי. נסה לרענן את הדף.');
+      return;
+    }
+
+    // Word list is a query, which can't run inside a transaction - load it first
+    let selectedWords;
     try {
       const wordsSnapshot = await getDocs(collection(db, 'WordCard'));
-      const allWords = [];
-      wordsSnapshot.forEach((doc) => {
-        allWords.push({ id: doc.id, ...doc.data() });
+      const validWords = [];
+      wordsSnapshot.forEach((d) => {
+        const w = d.data()?.word;
+        if (typeof w === 'string' && w.trim().length > 0) validWords.push(w.trim());
       });
-      
-      if (!allWords || allWords.length < 25) {
-        Alert.alert('שגיאה', '❌ אין מספיק מילים במאגר!\n\nנדרשות לפחות 25 מילים.\nאנא פנה למנהל המערכת.');
-        return;
-      }
-
-      const validWords = allWords
-        .filter(card => card.word && typeof card.word === 'string' && card.word.trim().length > 0)
-        .map(card => card.word.trim());
 
       if (validWords.length < 25) {
         Alert.alert('שגיאה', `❌ נמצאו רק ${validWords.length} מילים תקינות במאגר!\n\nנדרשות לפחות 25 מילים.\nאנא פנה למנהל המערכת.`);
         return;
       }
-
-      const shuffled = [...validWords].sort(() => Math.random() - 0.5);
-      const selectedWords = shuffled.slice(0, 25);
-
-      // Get fresh room state
-      let currentRoom = room;
-      try {
-        const roomRef = doc(db, 'CodenamesRoom', room.id);
-        const snapshot = await getDoc(roomRef);
-        if (snapshot.exists()) {
-          currentRoom = { id: snapshot.id, ...snapshot.data() };
-        }
-      } catch (error) {
-        console.error('❌ Error fetching fresh room state:', error);
-      }
-
-      if (currentRoom.game_status !== 'setup') {
-        console.warn('⚠️ Cannot start game - room is not in setup state:', currentRoom.game_status);
-        Alert.alert('שגיאה', 'החדר לא מוכן למשחק חדש. אנא לחץ על \'משחק חדש\' תחילה.');
-        return;
-      }
-
-      const startingTeam = Math.random() > 0.5 ? 'red' : 'blue';
-      const keyMap = [];
-
-      for (let i = 0; i < 9; i++) keyMap.push(startingTeam);
-      for (let i = 0; i < 8; i++) keyMap.push(startingTeam === 'red' ? 'blue' : 'red');
-      for (let i = 0; i < 7; i++) keyMap.push('neutral');
-      keyMap.push('black');
-
-      keyMap.sort(() => Math.random() - 0.5);
-
-      if (!currentRoom || !currentRoom.id) {
-        console.error('❌ Cannot start game: room or room.id is missing');
-        Alert.alert('שגיאה', 'שגיאה: חדר לא נטען כראוי. נסה לרענן את הדף.');
-        return;
-      }
-
-      console.log('🔵 Starting Codenames game, updating room:', currentRoom.id);
-      
-      const drinkingModeEnabled = await storage.getItem('drinkingMode') === 'true';
-      
-      const resetRedTeam = {
-        ...currentRoom.red_team,
-        revealed_words: []
-      };
-      const resetBlueTeam = {
-        ...currentRoom.blue_team,
-        revealed_words: []
-      };
-      
-      const updates = {
-        red_team: resetRedTeam,
-        blue_team: resetBlueTeam,
-        board_words: selectedWords,
-        key_map: keyMap,
-        starting_team: startingTeam,
-        current_turn: startingTeam,
-        game_status: 'playing',
-        turn_start_time: Date.now(),
-        turn_phase: 'clue',
-        current_clue: null,
-        guesses_remaining: 0,
-        winner_team: null,
-        drinking_popup: null
-      };
-      
-      if (drinkingModeEnabled) {
-        updates.round_baseline_reveals = {
-          red: 0,
-          blue: 0
-        };
-      }
-      
-      try {
-        const roomRef = doc(db, 'CodenamesRoom', currentRoom.id);
-        await updateDoc(roomRef, updates);
-        console.log('✅ Game started successfully with fresh state');
-        setRoom(prev => ({ ...prev, ...updates }));
-        
-        // Log analytics event
-        const { logGameStart } = await import('../../utils/analytics');
-        logGameStart('codenames', currentRoom.id);
-        
-        navigation.navigate('CodenamesGame', { roomCode });
-      } catch (error) {
-        console.error('❌ Error starting game:', error);
-        Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');
-        return;
-      }
+      selectedWords = [...validWords].sort(() => Math.random() - 0.5).slice(0, 25);
     } catch (error) {
       console.error('❌ Error loading words:', error);
       Alert.alert('שגיאה', '❌ שגיאה בטעינת המילים. נסה שוב.');
       return;
+    }
+
+    const startingTeam = Math.random() > 0.5 ? 'red' : 'blue';
+    const keyMap = [];
+    for (let i = 0; i < 9; i++) keyMap.push(startingTeam);
+    for (let i = 0; i < 8; i++) keyMap.push(startingTeam === 'red' ? 'blue' : 'red');
+    for (let i = 0; i < 7; i++) keyMap.push('neutral');
+    keyMap.push('black');
+    keyMap.sort(() => Math.random() - 0.5);
+
+    try {
+      const roomRef = doc(db, 'CodenamesRoom', room.id);
+      const outcome = await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomRef);
+        if (!snap.exists()) return 'missing';
+        const fresh = snap.data();
+        // Refuse a second start: it would deal a different board/key map
+        if (fresh.game_status !== 'setup') return 'not_setup';
+
+        transaction.update(roomRef, {
+          // Field paths: clear reveals without overwriting team membership
+          'red_team.revealed_words': [],
+          'blue_team.revealed_words': [],
+          board_words: selectedWords,
+          key_map: keyMap,
+          starting_team: startingTeam,
+          current_turn: startingTeam,
+          game_status: 'playing',
+          turn_start_time: Date.now(),
+          turn_phase: 'clue',
+          current_clue: null,
+          guesses_remaining: 0,
+          winner_team: null,
+          drinking_popup: null,
+          // Use the room's drinking setting (shared by everyone), not this device's storage
+          round_baseline_reveals: fresh.drinking_mode === true ? { red: 0, blue: 0 } : null
+        });
+        return 'ok';
+      });
+
+      if (outcome === 'not_setup') {
+        // Already started (e.g. double tap) - just go to the game
+        navigation.navigate('CodenamesGame', { roomCode });
+        return;
+      }
+      if (outcome !== 'ok') return;
+
+      console.log('✅ Game started successfully with fresh state');
+      const { logGameStart } = await import('../../utils/analytics');
+      logGameStart('codenames', room.id);
+      navigation.navigate('CodenamesGame', { roomCode });
+    } catch (error) {
+      console.error('❌ Error starting game:', error);
+      Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');
     }
   };
 

@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
@@ -14,8 +14,13 @@ import { db, waitForFirestoreReady } from '../../firebase';
 import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 import storage from '../../utils/storage';
+import { getActingHostName, getFirstActiveIndex, getNextActiveIndex, markPlayerInactive } from '../../utils/gameSync';
 
 const WINNING_SCORE = 12;
+const TURN_SECONDS = 60;
+// If the acting host's phone is asleep, any player may end an overdue round
+// after this grace period (the transaction makes duplicate attempts harmless).
+const OVERDUE_GRACE_SECONDS = 5;
 
 const getAllGuesses = (roomData) => {
   if (!roomData) return [];
@@ -24,6 +29,113 @@ const getAllGuesses = (roomData) => {
     return guesses;
   }
   return [];
+};
+
+const parseStrokes = (drawingData) => {
+  if (!drawingData) return [];
+  try {
+    const strokes = typeof drawingData === 'string' ? JSON.parse(drawingData) : drawingData;
+    return Array.isArray(strokes) ? strokes : [];
+  } catch (error) {
+    console.error('Error parsing strokes:', error);
+    return [];
+  }
+};
+
+// 3 points for first 20s, 2 for 21-40s, 1 for 41-60s
+const calculatePointsByTime = (timestamp, turnStartTime) => {
+  if (!timestamp || !turnStartTime) return 1;
+  const elapsed = Math.floor((timestamp - turnStartTime) / 1000);
+  if (elapsed <= 20) return 3;
+  if (elapsed <= 40) return 2;
+  return 1;
+};
+
+// A "turn" is identified by drawer index + start time (a new start time is
+// written for every turn). Used inside transactions to make sure a write is
+// applied to the turn the player was actually looking at.
+const isSameTurn = (a, b) =>
+  a?.current_turn_index === b?.current_turn_index &&
+  (a?.turn_start_time ?? null) === (b?.turn_start_time ?? null);
+
+const getDrawerName = (roomData) => roomData?.players?.[roomData.current_turn_index]?.name || '';
+
+/**
+ * Fields to write when a round ends (correct guess or time up), computed from
+ * the given room data. Single implementation so every path scores identically.
+ */
+const buildRoundEnd = (roomData, guesses) => {
+  const currentDrawer = getDrawerName(roomData);
+  const drinkingModeActive = roomData.drinking_mode === true;
+
+  const correctGuessers = new Map(); // playerName -> points
+  let firstWinner = null;
+  guesses.forEach(g => {
+    if (g.isCorrect && g.timestamp) {
+      const points = calculatePointsByTime(g.timestamp, roomData.turn_start_time);
+      if (!correctGuessers.has(g.playerName) || correctGuessers.get(g.playerName) < points) {
+        correctGuessers.set(g.playerName, points);
+      }
+      if (!firstWinner) {
+        firstWinner = g.playerName;
+      }
+    }
+  });
+  const hasCorrectGuess = correctGuessers.size > 0;
+
+  // Drinking: nobody correct -> drawer drinks; otherwise everyone who missed drinks
+  const drinkingPlayers = [];
+  if (drinkingModeActive) {
+    if (!hasCorrectGuess) {
+      drinkingPlayers.push(currentDrawer);
+    } else {
+      (roomData.players || [])
+        .filter(p => p && p.name && p.name !== currentDrawer && p.active !== false)
+        .forEach(p => {
+          if (!correctGuessers.has(p.name)) drinkingPlayers.push(p.name);
+        });
+    }
+  }
+
+  const players = (roomData.players || []).map(player => {
+    if (!player || player.active === false) return player;
+    if (player.name === currentDrawer) {
+      return { ...player, score: (player.score || 0) + (hasCorrectGuess ? 1 : 0) };
+    }
+    if (correctGuessers.has(player.name)) {
+      return { ...player, score: (player.score || 0) + correctGuessers.get(player.name) };
+    }
+    return player;
+  });
+
+  const update = {
+    players,
+    show_round_summary: true,
+    round_winner: firstWinner,
+    drinking_players: drinkingModeActive && drinkingPlayers.length > 0 ? drinkingPlayers : null,
+    final_draw_image: null
+  };
+
+  const winner = players
+    .filter(p => p && p.name && p.active !== false && p.score >= WINNING_SCORE)
+    .sort((a, b) => b.score - a.score)[0];
+  if (winner) {
+    update.game_status = 'finished';
+    update.winner_name = winner.name;
+  }
+  return update;
+};
+
+const pickRandomWord = async (avoidWord) => {
+  const wordsSnapshot = await getDocs(collection(db, 'DrawWord'));
+  const words = [];
+  wordsSnapshot.forEach((d) => {
+    const w = d.data()?.word;
+    if (w) words.push(w);
+  });
+  if (words.length === 0) return null;
+  const candidates = words.length > 1 ? words.filter(w => w !== avoidWord) : words;
+  return candidates[Math.floor(Math.random() * candidates.length)];
 };
 
 export default function DrawRoomScreen({ navigation, route }) {
@@ -51,6 +163,12 @@ export default function DrawRoomScreen({ navigation, route }) {
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
   const isContinuingRoundRef = useRef(false);
   const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
+  const isEndingRoundRef = useRef(false);
+  const isSubmittingGuessRef = useRef(false);
+  // Drawing writes are serialized so strokes are stored in the order drawn;
+  // strokes still in flight are shown locally on top of the server strokes.
+  const drawQueueRef = useRef(Promise.resolve());
+  const pendingStrokesRef = useRef([]);
 
   useEffect(() => {
     roomRef.current = room;
@@ -68,16 +186,7 @@ export default function DrawRoomScreen({ navigation, route }) {
         if (savedName) {
           setCurrentPlayerName(savedName);
         }
-        // Load drinking mode from room data (preferred) or local storage (fallback)
-        if (roomData.drinking_mode !== undefined) {
-          setDrinkingMode(roomData.drinking_mode);
-          await storage.setItem('drinkingMode', roomData.drinking_mode.toString());
-        } else {
-          const savedMode = await storage.getItem('drinkingMode');
-          if (savedMode) {
-            setDrinkingMode(savedMode === 'true');
-          }
-        }
+        // Drinking mode is synced from the room document by the realtime listener
       } catch (e) {
         console.warn('Could not load player name:', e);
       }
@@ -148,23 +257,9 @@ export default function DrawRoomScreen({ navigation, route }) {
       const currentRoom = roomRef.current;
       const playerName = currentPlayerNameRef.current;
       if (currentRoom && currentRoom.id && playerName) {
-        try {
-          const updatedPlayers = currentRoom.players.map(p => {
-            if (p && p.name === playerName) {
-              return { ...p, active: false };
-            }
-            return p;
-          });
-          const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
-          updateDoc(roomDocRef, {
-            players: updatedPlayers
-          }).catch(error => {
-            console.error('Error marking player as inactive on unmount:', error);
-          });
-          console.log('🔄 Marked player as inactive on unmount:', playerName);
-        } catch (error) {
+        markPlayerInactive('DrawRoom', currentRoom.id, playerName).catch(error => {
           console.error('Error marking player as inactive on unmount:', error);
-        }
+        });
       }
       
       // Cleanup on unmount
@@ -187,16 +282,7 @@ export default function DrawRoomScreen({ navigation, route }) {
       const playerName = currentPlayerNameRef.current;
       if (currentRoom && currentRoom.id && playerName) {
         try {
-          const updatedPlayers = currentRoom.players.map(p => {
-            if (p && p.name === playerName) {
-              return { ...p, active: false };
-            }
-            return p;
-          });
-          const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
-          await updateDoc(roomDocRef, {
-            players: updatedPlayers
-          });
+          await markPlayerInactive('DrawRoom', currentRoom.id, playerName);
           console.log('🔄 Marked player as inactive on navigation:', playerName);
         } catch (error) {
           console.error('Error marking player as inactive on navigation:', error);
@@ -297,20 +383,11 @@ export default function DrawRoomScreen({ navigation, route }) {
           console.log(`🔄 [DRAW] Turn check - Player: ${playerName}, Turn index: ${newRoom.current_turn_index}, Is my turn: ${isMyTurnNow}`);
         }
         
-        // Update local strokes from snapshot (source of truth)
-        if (newRoom.drawing_data) {
-          try {
-            const strokes = typeof newRoom.drawing_data === 'string'
-              ? JSON.parse(newRoom.drawing_data)
-              : newRoom.drawing_data;
-            setLocalStrokes(Array.isArray(strokes) ? strokes : []);
-          } catch (error) {
-            console.error('Error parsing strokes from listener:', error);
-          }
-        } else if (newRoom.game_status === 'playing' && !newRoom.drawing_data) {
-          // Clear strokes when new round starts
-          setLocalStrokes([]);
-        }
+        // Server strokes are the source of truth. The drawer also sees their own
+        // strokes that are still being saved, so the canvas doesn't flicker.
+        const isDrawerNow = newRoom.game_status === 'playing' && getDrawerName(newRoom) === playerName;
+        const pending = isDrawerNow ? pendingStrokesRef.current : [];
+        setLocalStrokes([...parseStrokes(newRoom.drawing_data), ...pending]);
       } else {
         // Room deleted - cleanup everything and redirect
         if (timerCheckInterval.current) {
@@ -353,27 +430,13 @@ export default function DrawRoomScreen({ navigation, route }) {
     });
   };
 
+  // Strokes are synced by the realtime listener (it also merges in-flight local strokes)
   useEffect(() => {
-    // Update local strokes when room data changes - source of truth is room.drawing_data
-    if (room?.drawing_data) {
-      try {
-        const strokes = typeof room.drawing_data === 'string' 
-          ? JSON.parse(room.drawing_data) 
-          : room.drawing_data;
-        setLocalStrokes(Array.isArray(strokes) ? strokes : []);
-      } catch (error) {
-        console.error('Error parsing strokes:', error);
-        setLocalStrokes([]);
-      }
-    } else if (room?.game_status === 'playing' && !room?.drawing_data) {
-      setLocalStrokes([]);
-    }
-    
     // Reset force close modal flag when game status changes back to lobby
     if (room?.game_status === 'lobby' && forceCloseModal) {
       setForceCloseModal(false);
     }
-  }, [room?.drawing_data, room?.game_status, forceCloseModal]);
+  }, [room?.game_status, forceCloseModal]);
 
   // Timer management - with proper cleanup
   useEffect(() => {
@@ -417,108 +480,42 @@ export default function DrawRoomScreen({ navigation, route }) {
     };
   }, [room?.game_status, room?.turn_start_time, room?.show_round_summary, room?.id]);
 
+  // End the round when time is up. Only the acting host does this, so every
+  // device doesn't add the round's points again. If the host's phone is
+  // asleep, any player takes over once the round is overdue; the transaction
+  // re-checks the turn on the server, so a duplicate attempt is a no-op.
   const handleTimerExpiration = async () => {
     const currentRoom = roomRef.current;
-    if (!currentRoom || !currentRoom.id || currentRoom.show_round_summary) return;
+    const me = currentPlayerNameRef.current;
+    if (!currentRoom || !currentRoom.id || currentRoom.game_status !== 'playing') return;
+    if (currentRoom.show_round_summary || !currentRoom.turn_start_time) return;
+    if (isEndingRoundRef.current) return;
 
-    const currentDrawer = currentRoom.players[currentRoom.current_turn_index]?.name;
-    const normalizedWord = currentRoom.current_word?.toLowerCase().trim();
-    const drinkingModeActive = currentRoom.drinking_mode === true;
-    let firstWinner = null;
-    const drinkingPlayersList = [];
+    const isActingHostNow = getActingHostName(currentRoom) === me;
+    const overdue = Date.now() - currentRoom.turn_start_time >= (TURN_SECONDS + OVERDUE_GRACE_SECONDS) * 1000;
+    if (!isActingHostNow && !overdue) return;
 
-    // Calculate points based on time - 3 points for first 20s, 2 for 21-40s, 1 for 41-60s
-    const calculatePointsByTime = (timestamp, turnStartTime) => {
-      if (!timestamp || !turnStartTime) return 1;
-      const elapsed = Math.floor((timestamp - turnStartTime) / 1000);
-      if (elapsed <= 20) return 3;
-      if (elapsed <= 40) return 2;
-      return 1;
+    isEndingRoundRef.current = true;
+    const turnAtCall = {
+      current_turn_index: currentRoom.current_turn_index,
+      turn_start_time: currentRoom.turn_start_time
     };
-
-    const allGuesses = getAllGuesses(currentRoom);
-    
-    const correctGuessers = new Map(); // Map of playerName -> points earned
-    allGuesses.forEach(g => {
-      if (g.isCorrect && g.timestamp) {
-        const points = calculatePointsByTime(g.timestamp, currentRoom.turn_start_time);
-        // If player already guessed correctly, take the highest points
-        if (!correctGuessers.has(g.playerName) || correctGuessers.get(g.playerName) < points) {
-          correctGuessers.set(g.playerName, points);
-        }
-        if (!firstWinner) {
-          firstWinner = g.playerName;
-        }
-      }
-    });
-
-    const hasCorrectGuess = correctGuessers.size > 0;
-
-    // Evaluate drinking based on the 2 cases
-    if (drinkingModeActive) {
-      // Case 1: No correct guesses → drawing player drinks
-      if (!hasCorrectGuess) {
-        drinkingPlayersList.push(currentDrawer);
-      }
-      // Case 2: At least one correct guess → all players who didn't guess correctly drink
-      else {
-        // Get all active guessers (excluding drawer)
-        const activeGuessers = currentRoom.players.filter(p => 
-          p && p.name && p.name !== currentDrawer && (p.active !== false)
-        );
-        
-        activeGuessers.forEach(player => {
-          if (!correctGuessers.has(player.name)) {
-            drinkingPlayersList.push(player.name);
-          }
-        });
-      }
-    }
-
-    const finalPlayersWithScores = currentRoom.players.map(player => {
-      // Skip inactive players in score calculation (but preserve their data)
-      if (player.active === false) {
-        return player;
-      }
-      
-      if (player.name === currentDrawer) {
-        return {
-          ...player,
-          score: player.score + (hasCorrectGuess ? 1 : 0)
-        };
-      }
-
-      if (correctGuessers.has(player.name)) {
-        const pointsEarned = correctGuessers.get(player.name);
-        return { ...player, score: player.score + pointsEarned };
-      }
-
-      return player;
-    });
-
-    // Check for game winner (player with score >= 12)
-    const validPlayers = finalPlayersWithScores.filter(p => p && p.name && (p.active !== false));
-    const winner = validPlayers.find(p => p.score >= WINNING_SCORE && (p.active !== false));
 
     try {
       const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
-      const updateData = {
-        players: finalPlayersWithScores,
-        show_round_summary: true,
-        round_winner: firstWinner,
-        drinking_players: drinkingModeActive && drinkingPlayersList.length > 0 ? drinkingPlayersList : null,
-        final_draw_image: null // Skip image upload for now
-      };
-      
-      // If a player reached 12 points, end the game immediately
-      if (winner) {
-        updateData.game_status = 'finished';
-        updateData.winner_name = winner.name;
-      }
-      
-      await updateDoc(roomDocRef, updateData);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomDocRef);
+        if (!snap.exists()) return;
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing' || fresh.show_round_summary || !isSameTurn(fresh, turnAtCall)) {
+          return; // Round already ended (by a correct guess or another device)
+        }
+        transaction.update(roomDocRef, buildRoundEnd(fresh, getAllGuesses(fresh)));
+      });
     } catch (error) {
       console.error('❌ Error handling timer expiration:', error);
+    } finally {
+      isEndingRoundRef.current = false;
     }
   };
 
@@ -645,470 +642,233 @@ export default function DrawRoomScreen({ navigation, route }) {
   };
 
   const startGame = async () => {
-    // Use roomRef.current for most up-to-date state
     const currentRoom = roomRef.current || room;
-    if (!currentRoom || currentRoom.host_name !== currentPlayerName) return;
-    
-      // Filter to active players only
-      const validPlayers = currentRoom.players ? currentRoom.players.filter(p => p && p.name && (p.active !== false)) : [];
-      if (validPlayers.length < 2) {
-        Alert.alert('שגיאה', 'צריך לפחות 2 שחקנים פעילים כדי להתחיל!');
-        return;
-      }
+    if (!currentRoom || !currentRoom.id || currentRoom.host_name !== currentPlayerName) return;
+
+    const validPlayers = (currentRoom.players || []).filter(p => p && p.name && p.active !== false);
+    if (validPlayers.length < 2) {
+      Alert.alert('שגיאה', 'צריך לפחות 2 שחקנים פעילים כדי להתחיל!');
+      return;
+    }
 
     try {
-      const wordsSnapshot = await getDocs(collection(db, 'DrawWord'));
-      const allWords = [];
-      wordsSnapshot.forEach((doc) => {
-        allWords.push({ id: doc.id, ...doc.data() });
-      });
-      
-      if (!allWords || allWords.length === 0) {
+      const word = await pickRandomWord(null);
+      if (!word) {
         Alert.alert('שגיאה', 'אין מילים זמינות במערכת!');
         return;
       }
 
-      const randomWord = allWords[Math.floor(Math.random() * allWords.length)];
+      const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
+      const started = await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomDocRef);
+        if (!snap.exists()) return false;
+        const fresh = snap.data();
+        // Guard against double-start (double tap / two devices)
+        if (fresh.game_status !== 'lobby') return false;
 
-      const resetPlayers = currentRoom.players.map(p => ({
-        ...p,
-        current_guess: '',
-        has_submitted: false
-      }));
-
-      if (!currentRoom || !currentRoom.id) {
-        console.error('❌ Cannot start game: room or room.id is missing');
-        Alert.alert('שגיאה', 'חדר לא נטען כראוי. נסה לרענן את הדף.');
-        return;
-      }
-
-      // Find first valid player index
-      let firstTurnIndex = 0;
-      for (let i = 0; i < currentRoom.players.length; i++) {
-        if (currentRoom.players[i] && currentRoom.players[i].name) {
-          firstTurnIndex = i;
-          break;
-        }
-      }
-
-      console.log('🔵 Starting Draw game, updating room:', currentRoom.id);
-      try {
-        const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
-        const turnStartTime = Date.now();
-        const updates = {
+        const players = fresh.players || [];
+        const firstActive = getFirstActiveIndex(players);
+        transaction.update(roomDocRef, {
           game_status: 'playing',
-          current_turn_index: firstTurnIndex,
-          current_word: randomWord.word,
+          current_turn_index: firstActive === -1 ? 0 : firstActive,
+          current_word: word,
           drawing_data: null,
-          players: resetPlayers,
+          players: players.map(p => (p ? { ...p, current_guess: '', has_submitted: false } : p)),
           final_draw_image: null,
           all_guesses: [],
-          turn_start_time: turnStartTime,
+          turn_start_time: Date.now(),
           show_round_summary: false,
           round_winner: null,
           drinking_players: null,
-          // Explicitly clear any end-game state from previous game as a safeguard
           winner_name: null
-        };
-        await updateDoc(roomDocRef, updates);
-        const updatedRoom = { ...currentRoom, ...updates };
-        setRoom(updatedRoom);
-        roomRef.current = updatedRoom; // Update ref immediately so isMyTurn() works correctly for first turn
+        });
+        return true;
+      });
+
+      if (started) {
         console.log('✅ Game started successfully');
-        console.log(`🔵 [DRAW] First turn - Player at index ${firstTurnIndex}: ${updatedRoom.players[firstTurnIndex]?.name}, Current player: ${currentPlayerName}`);
-        
-        // Log analytics event
         const { logGameStart } = await import('../../utils/analytics');
         logGameStart('draw', currentRoom.id);
-      } catch (error) {
-        console.error('❌ Error starting game:', error);
-        Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');
-        return;
       }
     } catch (error) {
-      console.error('Error starting game:', error);
+      console.error('❌ Error starting game:', error);
       Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');
     }
   };
 
-  const handleStrokeComplete = async (stroke) => {
-    // Double-check it's my turn using current room state
-    const currentRoom = roomRef.current || room;
-    if (!currentRoom || !currentRoom.id || !currentRoom.players) {
-      console.warn('⚠️ [DRAW] Stroke rejected - no room data');
-      return;
-    }
-    
-    if (currentRoom.current_turn_index === undefined || currentRoom.current_turn_index === null) {
-      console.warn('⚠️ [DRAW] Stroke rejected - no current_turn_index');
-      return;
-    }
-    
-    const playerName = currentPlayerNameRef.current || currentPlayerName;
-    if (!playerName) {
-      console.warn('⚠️ [DRAW] Stroke rejected - no player name');
-      return;
-    }
-    
-    const currentDrawer = currentRoom.players[currentRoom.current_turn_index];
-    if (!currentDrawer || !currentDrawer.name) {
-      console.warn('⚠️ [DRAW] Stroke rejected - no current drawer');
-      return;
-    }
-    
-    const isMyTurnNow = currentDrawer.name === playerName;
-    
-    if (!isMyTurnNow) {
-      console.warn(`⚠️ [DRAW] Stroke rejected - not my turn. Player: ${playerName}, Drawer: ${currentDrawer.name}, Turn index: ${currentRoom.current_turn_index}`);
-      return;
-    }
-    
-    console.log(`✅ [DRAW] Stroke accepted - Player: ${playerName}, Turn index: ${currentRoom.current_turn_index}`);
+  /**
+   * Update the drawing on the server. Runs in a transaction that checks it's
+   * still this player's turn, so a stroke finished right as the round ends
+   * can't leak onto the next drawer's canvas. Writes are queued so strokes are
+   * stored in the order they were drawn.
+   */
+  const queueDrawingWrite = (computeStrokes) => {
+    const currentRoom = roomRef.current;
+    const me = currentPlayerNameRef.current || currentPlayerName;
+    if (!currentRoom?.id || !me) return Promise.resolve();
 
-    try {
-      // Get current strokes from latest snapshot and append
-      let currentStrokes = roomRef.current.drawing_data 
-        ? (typeof roomRef.current.drawing_data === 'string' ? JSON.parse(roomRef.current.drawing_data) : roomRef.current.drawing_data)
-        : [];
-      
-      if (!Array.isArray(currentStrokes)) {
-        console.warn('Current strokes is not an array, resetting');
-        currentStrokes = [];
-      }
+    const turnAtCall = {
+      current_turn_index: currentRoom.current_turn_index,
+      turn_start_time: currentRoom.turn_start_time
+    };
+    const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
 
-      const updatedStrokes = [...currentStrokes, stroke];
-      
-      // Update local state immediately for responsive UI
-      setLocalStrokes(updatedStrokes);
-
-      // Save to Firestore (append full strokes array)
-      const roomDocRef = doc(db, 'DrawRoom', roomRef.current.id);
-      await updateDoc(roomDocRef, {
-        drawing_data: JSON.stringify(updatedStrokes)
+    const run = async () => {
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomDocRef);
+        if (!snap.exists()) return;
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing' || fresh.show_round_summary || !isSameTurn(fresh, turnAtCall)) return;
+        if (getDrawerName(fresh) !== me) return;
+        const next = computeStrokes(parseStrokes(fresh.drawing_data));
+        transaction.update(roomDocRef, { drawing_data: next.length > 0 ? JSON.stringify(next) : null });
       });
-      
-      console.log('✅ Stroke saved successfully, total strokes:', updatedStrokes.length);
-    } catch (error) {
-      console.error('❌ Error saving stroke:', error);
-      // Revert local state on error
-      const currentStrokes = roomRef.current?.drawing_data 
-        ? (typeof roomRef.current.drawing_data === 'string' ? JSON.parse(roomRef.current.drawing_data) : roomRef.current.drawing_data)
-        : [];
-      setLocalStrokes(Array.isArray(currentStrokes) ? currentStrokes : []);
-    }
+    };
+
+    drawQueueRef.current = drawQueueRef.current.then(run).catch(error => {
+      console.error('❌ Error saving drawing:', error);
+    });
+    return drawQueueRef.current;
   };
 
-  const handleUndo = async () => {
+  const handleStrokeComplete = (stroke) => {
+    if (!isMyTurn()) {
+      console.warn('⚠️ [DRAW] Stroke rejected - not my turn');
+      return;
+    }
+
+    // Show immediately; the listener keeps it on screen until it's saved
+    pendingStrokesRef.current = [...pendingStrokesRef.current, stroke];
+    setLocalStrokes(prev => [...prev, stroke]);
+
+    queueDrawingWrite(strokes => [...strokes, stroke]).finally(() => {
+      pendingStrokesRef.current = pendingStrokesRef.current.filter(s => s !== stroke);
+    });
+  };
+
+  const handleUndo = () => {
     if (!isMyTurn() || localStrokes.length === 0) return;
-
-    const updatedStrokes = localStrokes.slice(0, -1);
-    setLocalStrokes(updatedStrokes);
-
-    try {
-      const roomRef = doc(db, 'DrawRoom', room.id);
-      await updateDoc(roomRef, {
-        drawing_data: updatedStrokes.length > 0 ? JSON.stringify(updatedStrokes) : null
-      });
-    } catch (error) {
-      console.error('Error undoing stroke:', error);
-    }
+    setLocalStrokes(prev => prev.slice(0, -1));
+    queueDrawingWrite(strokes => strokes.slice(0, -1));
   };
 
-  const handleClearAll = async () => {
+  const handleClearAll = () => {
     if (!isMyTurn()) return;
-
     setLocalStrokes([]);
-
-    try {
-      const roomRef = doc(db, 'DrawRoom', room.id);
-      await updateDoc(roomRef, {
-        drawing_data: null
-      });
-    } catch (error) {
-      console.error('Error clearing canvas:', error);
-    }
+    queueDrawingWrite(() => []);
   };
 
   const handleGuessSubmit = async () => {
-    if (!guessInput.trim() || isMyTurn() || !room || !room.id || room.show_round_summary) {
-      return;
-    }
+    if (!guessInput.trim() || isMyTurn() || !room || !room.id) return;
+    if (room.game_status !== 'playing' || room.show_round_summary) return;
+    if (isSubmittingGuessRef.current) return;
 
+    isSubmittingGuessRef.current = true;
     const guess = guessInput.trim();
-    const currentDrawer = getCurrentPlayerName();
-    const normalizedWord = room.current_word?.toLowerCase().trim();
-    const normalizedGuess = guess.toLowerCase().trim();
-    const isCorrect = normalizedWord && normalizedGuess === normalizedWord;
-
-    console.log('🔵 Submitting guess, updating room:', room.id);
-    
-    const currentGuesses = getAllGuesses(room);
-    const newGuess = {
-      playerName: currentPlayerName,
-      guess: guess,
-      timestamp: Date.now(),
-      isCorrect: isCorrect
+    const me = currentPlayerNameRef.current || currentPlayerName;
+    const turnAtSubmit = {
+      current_turn_index: room.current_turn_index,
+      turn_start_time: room.turn_start_time
     };
-    const updatedGuesses = [...currentGuesses, newGuess];
-
-    const elapsed = room.turn_start_time ? Math.floor((Date.now() - room.turn_start_time) / 1000) : 0;
-    const timerExpired = elapsed >= 60;
-    const shouldEndRound = timerExpired || isCorrect;
-
-    const updatePayload = {
-      all_guesses: updatedGuesses
-    };
-
-    if (shouldEndRound) {
-      const drinkingModeActive = room.drinking_mode === true;
-      let firstWinner = null;
-      const drinkingPlayersList = [];
-      let hasCorrectGuess = false;
-
-      // Calculate points based on time - 3 points for first 20s, 2 for 21-40s, 1 for 41-60s
-      const calculatePointsByTime = (timestamp, turnStartTime) => {
-        if (!timestamp || !turnStartTime) return 1;
-        const elapsed = Math.floor((timestamp - turnStartTime) / 1000);
-        if (elapsed <= 20) return 3;
-        if (elapsed <= 40) return 2;
-        return 1;
-      };
-
-      const correctGuessers = new Map(); // Map of playerName -> points earned
-      updatedGuesses.forEach(g => {
-        if (g.isCorrect && g.timestamp) {
-          const points = calculatePointsByTime(g.timestamp, room.turn_start_time);
-          // If player already guessed correctly, take the highest points
-          if (!correctGuessers.has(g.playerName) || correctGuessers.get(g.playerName) < points) {
-            correctGuessers.set(g.playerName, points);
-          }
-          if (!firstWinner) {
-            firstWinner = g.playerName;
-          }
-          hasCorrectGuess = true;
-        }
-      });
-
-      // Evaluate drinking based on the 2 cases
-      if (drinkingModeActive) {
-        // Case 1: No correct guesses → drawing player drinks
-        if (!hasCorrectGuess) {
-          drinkingPlayersList.push(currentDrawer);
-        }
-        // Case 2: At least one correct guess → all players who didn't guess correctly drink
-        else {
-          // Get all active guessers (excluding drawer)
-          const activeGuessers = room.players.filter(p => 
-            p && p.name && p.name !== currentDrawer && (p.active !== false)
-          );
-          
-          activeGuessers.forEach(player => {
-            if (!correctGuessers.has(player.name)) {
-              drinkingPlayersList.push(player.name);
-            }
-          });
-        }
-      }
-
-      const playersWithScores = room.players.map(player => {
-        // Skip inactive players in score calculation (but preserve their data)
-        if (player.active === false) {
-          return player;
-        }
-        
-        if (player.name === currentDrawer) {
-          return {
-            ...player,
-            score: player.score + (hasCorrectGuess ? 1 : 0)
-          };
-        }
-
-        if (correctGuessers.has(player.name)) {
-          const pointsEarned = correctGuessers.get(player.name);
-          return { ...player, score: player.score + pointsEarned };
-        }
-
-        return player;
-      });
-
-      // Check for game winner (player with score >= 12)
-      const validPlayers = playersWithScores.filter(p => p && p.name && (p.active !== false));
-      const winner = validPlayers.find(p => p.score >= WINNING_SCORE && (p.active !== false));
-
-      updatePayload.players = playersWithScores;
-      updatePayload.show_round_summary = true;
-      updatePayload.round_winner = firstWinner;
-      updatePayload.drinking_players = drinkingModeActive && drinkingPlayersList.length > 0 ? drinkingPlayersList : null;
-      updatePayload.final_draw_image = null; // Skip image upload for now
-      
-      // If a player reached 12 points, end the game immediately
-      if (winner) {
-        updatePayload.game_status = 'finished';
-        updatePayload.winner_name = winner.name;
-      }
-    }
 
     try {
-      const roomRef = doc(db, 'DrawRoom', room.id);
-      await updateDoc(roomRef, updatePayload);
-      console.log('✅ Guess submitted successfully');
-      setRoom(prev => ({ ...prev, ...updatePayload }));
-      setGuessInput('');
+      const roomDocRef = doc(db, 'DrawRoom', room.id);
+      const outcome = await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomDocRef);
+        if (!snap.exists()) return 'missing';
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing' || fresh.show_round_summary || !isSameTurn(fresh, turnAtSubmit)) {
+          return 'round_changed';
+        }
+        if (getDrawerName(fresh) === me) return 'not_allowed';
+
+        const normalizedWord = fresh.current_word?.toLowerCase().trim();
+        const isCorrect = !!normalizedWord && guess.toLowerCase() === normalizedWord;
+        const now = Date.now();
+
+        // Append to the *server's* guesses so simultaneous guesses aren't lost
+        const updatedGuesses = [...getAllGuesses(fresh), { playerName: me, guess, timestamp: now, isCorrect }];
+        const update = { all_guesses: updatedGuesses };
+
+        const timerExpired = fresh.turn_start_time && now - fresh.turn_start_time >= TURN_SECONDS * 1000;
+        if (isCorrect || timerExpired) {
+          Object.assign(update, buildRoundEnd(fresh, updatedGuesses));
+        }
+
+        transaction.update(roomDocRef, update);
+        return 'ok';
+      });
+
+      if (outcome === 'ok' || outcome === 'round_changed') {
+        setGuessInput('');
+      }
     } catch (error) {
       console.error('❌ Error submitting guess:', error);
       Alert.alert('שגיאה', 'שגיאה בשליחת הניחוש. נסה שוב.');
-      return;
+    } finally {
+      isSubmittingGuessRef.current = false;
     }
   };
 
+  // Move to the next drawer. Only the acting host can do this (button is
+  // hidden for everyone else), and the transaction makes sure the round is
+  // still the one in the summary - so a second press can't swap the word
+  // the new drawer already started drawing.
   const continueToNextRound = async () => {
-    // Prevent multiple simultaneous calls
-    if (isContinuingRoundRef.current) {
-      console.log('⚠️ [DRAW] continueToNextRound - already processing, skipping...');
-      return;
-    }
-    
+    if (isContinuingRoundRef.current) return;
+    const currentRoom = roomRef.current || room;
+    if (!currentRoom?.id || !currentRoom.show_round_summary || currentRoom.game_status !== 'playing') return;
+
     isContinuingRoundRef.current = true;
     setIsContinuingRound(true);
-    
+
+    const turnAtCall = {
+      current_turn_index: currentRoom.current_turn_index,
+      turn_start_time: currentRoom.turn_start_time
+    };
+
     try {
-      // Use roomRef.current for most up-to-date state to prevent race conditions
-      const currentRoom = roomRef.current || room;
-      if (!currentRoom || !currentRoom.id) {
-        console.warn('⚠️ [DRAW] continueToNextRound - no room data');
+      // Word list is a query, which can't run inside a transaction - pick it first
+      const word = await pickRandomWord(currentRoom.current_word);
+      if (!word) {
+        Alert.alert('שגיאה', 'אין מילים זמינות במערכת!');
         return;
       }
 
-      // Validate players array
-      if (!currentRoom.players || !Array.isArray(currentRoom.players) || currentRoom.players.length === 0) {
-        console.warn('⚠️ [DRAW] continueToNextRound - invalid players array');
-        return;
-      }
+      const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomDocRef);
+        if (!snap.exists()) return;
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing' || !fresh.show_round_summary || !isSameTurn(fresh, turnAtCall)) {
+          return; // Already advanced
+        }
 
-      // Check if game is already finished - if so, do nothing (finished modal will show)
-      if (currentRoom.game_status === 'finished') {
-        console.log('✅ [DRAW] continueToNextRound - game already finished, skipping');
-        return;
-      }
-
-      // Filter to active players only (active !== false)
-      const validPlayers = currentRoom.players.filter(p => p && p.name && (p.active !== false));
-      if (validPlayers.length === 0) {
-        console.warn('⚠️ [DRAW] continueToNextRound - no active players');
-        return;
-      }
-
-    // Only check active players for winner
-    const winner = validPlayers.find(p => p.score >= WINNING_SCORE && (p.active !== false));
-    
-    if (winner) {
-      // Game finished
-      try {
-        const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
-        await updateDoc(roomDocRef, {
-          game_status: 'finished',
-          winner_name: winner.name,
-          final_draw_image: null
-        });
-      } catch (error) {
-        console.error('Error finishing game:', error);
-      }
-    } else {
-      // Get next word and move to next player
-      try {
-        const wordsSnapshot = await getDocs(collection(db, 'DrawWord'));
-        const allWords = [];
-        wordsSnapshot.forEach((doc) => {
-          allWords.push({ id: doc.id, ...doc.data() });
-        });
-        
-        if (!allWords || allWords.length === 0) {
-          console.error('Error loading words: no words found');
+        const players = fresh.players || [];
+        // Next active player after the current drawer (indexes into the full array)
+        const nextTurnIndex = getNextActiveIndex(players, fresh.current_turn_index);
+        if (nextTurnIndex === -1) {
+          console.warn('⚠️ [DRAW] continueToNextRound - no active players');
           return;
         }
-        
-        const randomWord = allWords[Math.floor(Math.random() * allWords.length)];
-        
-        // Calculate next turn index using valid players only
-        const currentTurnIndex = currentRoom.current_turn_index ?? 0;
-        const currentPlayerName = validPlayers[currentTurnIndex]?.name;
-        
-        // Find current player index in active players array
-        let currentValidIndex = validPlayers.findIndex(p => p.name === currentPlayerName);
-        if (currentValidIndex === -1) {
-          currentValidIndex = 0; // Fallback to first active player
-        }
-        
-        // Move to next active player
-        let nextValidIndex = (currentValidIndex + 1) % validPlayers.length;
-        
-        // Find the actual index in the full players array
-        const nextPlayerName = validPlayers[nextValidIndex].name;
-        let nextTurnIndex = currentRoom.players.findIndex(p => p && p.name === nextPlayerName);
-        
-        // Fallback: if not found, use first active player
-        if (nextTurnIndex === -1) {
-          nextTurnIndex = currentRoom.players.findIndex(p => p && p.name && (p.active !== false));
-          if (nextTurnIndex === -1) {
-            console.error('❌ [DRAW] continueToNextRound - no active players found');
-            return;
-          }
-        }
 
-        // Ensure nextTurnIndex is within bounds
-        if (nextTurnIndex < 0 || nextTurnIndex >= currentRoom.players.length) {
-          nextTurnIndex = currentRoom.players.findIndex(p => p && p.name && (p.active !== false));
-          if (nextTurnIndex === -1) {
-            console.error('❌ [DRAW] continueToNextRound - no active players found');
-            return;
-          }
-        }
-
-        // Validate that the next player exists and is active
-        if (!currentRoom.players[nextTurnIndex] || !currentRoom.players[nextTurnIndex].name || currentRoom.players[nextTurnIndex].active === false) {
-          console.warn('⚠️ [DRAW] continueToNextRound - next player invalid, using first active player');
-          nextTurnIndex = currentRoom.players.findIndex(p => p && p.name && (p.active !== false));
-          if (nextTurnIndex === -1) {
-            console.error('❌ [DRAW] continueToNextRound - no active players found');
-            return;
-          }
-        }
-
-        const resetPlayers = currentRoom.players.map(p => {
-          if (!p || !p.name) return p; // Keep invalid players as-is
-          return {
-            ...p,
-            current_guess: '',
-            has_submitted: false
-          };
-        });
-
-        const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
-        const turnStartTime = Date.now();
-        
-        // Update atomically: first clear word, then set new word with turn index
-        // This prevents word from being visible before turn is set
-        await updateDoc(roomDocRef, {
+        transaction.update(roomDocRef, {
           current_turn_index: nextTurnIndex,
-          current_word: randomWord.word,
+          current_word: word,
           drawing_data: null,
           show_round_summary: false,
           round_winner: null,
           drinking_players: null,
-          players: resetPlayers,
+          players: players.map(p => (p && p.name ? { ...p, current_guess: '', has_submitted: false } : p)),
           all_guesses: [],
           final_draw_image: null,
-          turn_start_time: turnStartTime
+          turn_start_time: Date.now()
         });
-
-        console.log(`✅ [DRAW] Moved to next round - Turn index: ${nextTurnIndex}, Player: ${currentRoom.players[nextTurnIndex]?.name}, Word: ${randomWord.word}`);
-        setLocalStrokes([]);
-      } catch (error) {
-        console.error('❌ Error moving to next turn:', error);
-      }
-    }
+      });
+    } catch (error) {
+      console.error('❌ Error moving to next turn:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לעבור לסבב הבא. נסה שוב.');
     } finally {
-      // Always clear the flag to allow future calls
       isContinuingRoundRef.current = false;
       setIsContinuingRound(false);
     }
@@ -1184,16 +944,7 @@ export default function DrawRoomScreen({ navigation, route }) {
       // Mark player as inactive instead of removing
       if (room && room.id && currentPlayerName) {
         try {
-          const updatedPlayers = room.players.map(p => {
-            if (p && p.name === currentPlayerName) {
-              return { ...p, active: false };
-            }
-            return p;
-          });
-          const roomRef = doc(db, 'DrawRoom', room.id);
-          await updateDoc(roomRef, {
-            players: updatedPlayers
-          });
+          await markPlayerInactive('DrawRoom', room.id, currentPlayerName);
           console.log('🔄 Marked player as inactive on goBack:', currentPlayerName);
         } catch (error) {
           console.error('Error marking player as inactive:', error);
@@ -1306,14 +1057,7 @@ export default function DrawRoomScreen({ navigation, route }) {
   const currentDrawerName = getCurrentPlayerName();
   const allGuesses = getAllGuesses(room);
   
-  // Calculate points by time for display in summary
-  const calculatePointsByTime = (timestamp, turnStartTime) => {
-    if (!timestamp || !turnStartTime) return 1;
-    const elapsed = Math.floor((timestamp - turnStartTime) / 1000);
-    if (elapsed <= 20) return 3;
-    if (elapsed <= 40) return 2;
-    return 1;
-  };
+  const isActingHost = !!currentPlayerName && getActingHostName(room) === currentPlayerName;
   
   // Create map of correct guessers with their points
   const correctGuessersMap = new Map();
@@ -1935,13 +1679,20 @@ export default function DrawRoomScreen({ navigation, route }) {
 
                 {/* Fixed button at bottom */}
                 <View style={styles.summaryButtonContainer}>
-                  <GradientButton
-                    title="המשך לסבב הבא"
-                    onPress={continueToNextRound}
-                    variant="draw"
-                    style={styles.continueButton}
-                    disabled={isContinuingRound}
-                  />
+                  {/* Only one player advances, so two devices can't each pick a different word */}
+                  {isActingHost ? (
+                    <GradientButton
+                      title={isContinuingRound ? 'עובר לסבב הבא...' : 'המשך לסבב הבא'}
+                      onPress={continueToNextRound}
+                      variant="draw"
+                      style={styles.continueButton}
+                      disabled={isContinuingRound}
+                    />
+                  ) : (
+                    <Text style={styles.waitingForHostText}>
+                      ממתין ל{getActingHostName(room)} להמשיך לסבב הבא...
+                    </Text>
+                  )}
                 </View>
               </View>
             </View>
@@ -2815,6 +2566,13 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',
+  },
+  waitingForHostText: {
+    paddingVertical: 12,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#6B7280',
+    textAlign: 'center',
   },
   drinkingIcon: {
     fontSize: 56,

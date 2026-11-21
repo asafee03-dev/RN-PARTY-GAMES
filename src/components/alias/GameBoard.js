@@ -1,6 +1,9 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import Svg, { Line, Path } from 'react-native-svg';
+import { S } from '../../strings';
+import { colors, radii, spacing, useGameTheme } from '../../theme';
+import { AppText, Card, Icon, physicalLeft, readableOn } from '../../ui';
 
 const TOTAL_SQUARES = 60;
 
@@ -276,276 +279,285 @@ const generateSpiralPathLines = (spiralSquares) => {
   return { lines, backgrounds };
 };
 
+const SQUARE = 30;
+const GAP = 4;
+const GRID_W = 10 * SQUARE + 9 * GAP; // 336
+const GRID_H = 6 * SQUARE + 5 * GAP; // 200
+const FRAME_PAD = 8;
+const FRAME_BORDER = 2;
+const FRAME_W = GRID_W + 2 * (FRAME_PAD + FRAME_BORDER); // 356
+const FRAME_H = GRID_H + 2 * (FRAME_PAD + FRAME_BORDER); // 220
+
 export default function GameBoard({ teams, goldenSquares = [] }) {
+  const theme = useGameTheme();
+  const { width: windowWidth } = useWindowDimensions();
   const spiralSquares = createRectangularSpiral();
+  const { lines, backgrounds } = generateSpiralPathLines(spiralSquares);
+
+  // Shrink on narrow phones (content width = window - 2 * 16 screen padding)
+  const scale = Math.min(1, (windowWidth - 32 - 2 * (spacing.md + 1.5)) / FRAME_W);
 
   const getTeamsOnSquare = (position) => {
     if (!teams || !Array.isArray(teams)) return [];
     // Ensure all teams have position property (default to 0 if missing)
-    return teams.filter(team => {
-      if (!team) return false;
-      const teamPosition = team.position !== undefined ? team.position : 0;
-      return teamPosition === position;
-    });
+    return teams
+      .map((team, index) => ({ team, index }))
+      .filter(({ team }) => {
+        if (!team) return false;
+        const teamPosition = team.position !== undefined ? team.position : 0;
+        return teamPosition === position;
+      });
   };
 
   return (
-    <View style={styles.container}>
+    <Card padding="md" style={styles.card}>
       <View style={styles.header}>
-        <Text style={styles.title}>🏆 לוח המשחק</Text>
+        <Icon name="pawn" size={22} color={theme.accentInk} />
+        <AppText variant="subtitle" color={theme.accentInk} accessibilityRole="header">
+          {S.alias.board.title}
+        </AppText>
       </View>
-      
-      {/* Grid 10x6 */}
-      <View style={styles.gridContainer}>
-        <View style={styles.grid}>
-          {/* Game squares (circles) */}
-          {spiralSquares.map((square) => {
-            const teamsHere = getTeamsOnSquare(square.position);
-            const isStart = square.position === 0;
-            const isFinish = square.position === TOTAL_SQUARES - 1;
-            const isGoldenSquare = goldenSquares.includes(square.position);
-            
-            // Calculate absolute position based on row and col
-            const left = square.col * (30 + 4); // square width + gap
-            const top = square.row * (30 + 4); // square height + gap
-            
-            return (
-              <View
-                key={square.position}
-                style={[
-                  styles.square,
-                  {
-                    position: 'absolute',
-                    left: left,
-                    top: top,
-                  },
-                  isStart && styles.startSquare,
-                  isFinish && styles.finishSquare,
-                  isGoldenSquare && styles.goldenSquare,
-                  teamsHere.length > 0 && styles.squareWithTeam
-                ]}
-              >
-                {isStart ? (
-                  <Text style={styles.squareEmoji}>🏁</Text>
-                ) : isFinish ? (
-                  <Text style={styles.squareEmoji}>🏆</Text>
-                ) : isGoldenSquare ? (
-                  <Text style={styles.goldenEmoji}>⭐</Text>
-                ) : (
-                  <Text style={styles.squareNumber}>{square.position + 1}</Text>
-                )}
-                
-                {/* Team indicators */}
-                {teamsHere.length > 0 && (
-                  <View style={styles.teamIndicators}>
-                    {teamsHere.map((team, idx) => {
-                      const teamColor = team.color || '#CCCCCC';
-                      // Offset multiple pawns on the same square
-                      const offsetX = teamsHere.length > 1 ? (idx - (teamsHere.length - 1) / 2) * 3 : 0;
-                      return (
-                        <View
-                          key={idx}
-                          style={[
-                            styles.teamDot, 
-                            { 
-                              backgroundColor: teamColor,
-                              marginLeft: offsetX
-                            }
-                          ]}
-                        />
-                      );
-                    })}
-                  </View>
-                )}
-              </View>
-            );
-          })}
-          
-          {/* Spiral path connecting lines - rendered on top of circles */}
-          <Svg
-            style={styles.pathSvg}
-            width={336}
-            height={200}
-          >
-            {(() => {
-              const { lines, backgrounds } = generateSpiralPathLines(spiralSquares);
+
+      <View style={[styles.scaleBox, { width: FRAME_W * scale, height: FRAME_H * scale }]}>
+        <View
+          style={[
+            styles.frame,
+            physicalLeft(0),
+            scale < 1 && {
+              transform: [
+                { translateX: -(FRAME_W - FRAME_W * scale) / 2 },
+                { translateY: -(FRAME_H - FRAME_H * scale) / 2 },
+                { scale },
+              ],
+            },
+          ]}
+        >
+          <View style={styles.grid}>
+            {/* Track (under the squares) */}
+            <Svg style={[styles.pathSvg, physicalLeft(0)]} width={GRID_W} height={GRID_H}>
+              {backgrounds.map((bg) => (
+                <Path key={bg.id} d={bg.d} fill={theme.accent} opacity={0.14} />
+              ))}
+              {lines.map((line) => (
+                <Line
+                  key={line.id}
+                  x1={line.x1}
+                  y1={line.y1}
+                  x2={line.x2}
+                  y2={line.y2}
+                  stroke={theme.accent}
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  opacity={0.55}
+                />
+              ))}
+            </Svg>
+
+            {/* Squares */}
+            {spiralSquares.map((square) => {
+              const teamsHere = getTeamsOnSquare(square.position);
+              const isStart = square.position === 0;
+              const isFinish = square.position === TOTAL_SQUARES - 1;
+              const isGoldenSquare = goldenSquares.includes(square.position);
+              const label = isStart
+                ? S.alias.board.start
+                : isFinish
+                  ? S.alias.board.finish
+                  : isGoldenSquare
+                    ? `${S.alias.board.square(square.position + 1)}, ${S.alias.board.goldenSquare}`
+                    : S.alias.board.square(square.position + 1);
+
               return (
-                <>
-                  {/* Background paths between the lines */}
-                  {backgrounds.map((bg) => (
-                    <Path
-                      key={bg.id}
-                      d={bg.d}
-                      fill="#1E40AF"
-                      opacity={0.3}
-                    />
-                  ))}
-                  {/* Two parallel lines */}
-                  {lines.map((line) => (
-                    <Line
-                      key={line.id}
-                      x1={line.x1}
-                      y1={line.y1}
-                      x2={line.x2}
-                      y2={line.y2}
-                      stroke="#1E40AF"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    />
-                  ))}
-                </>
+                <View
+                  key={square.position}
+                  accessible
+                  accessibilityLabel={label}
+                  style={[
+                    styles.square,
+                    physicalLeft(square.col * (SQUARE + GAP)),
+                    { top: square.row * (SQUARE + GAP) },
+                    isStart && styles.startSquare,
+                    isFinish && styles.finishSquare,
+                    isGoldenSquare && styles.goldenSquare,
+                    teamsHere.length > 0 && styles.squareWithTeam,
+                  ]}
+                >
+                  {isStart ? (
+                    <Icon name="play" size={16} color={colors.white} />
+                  ) : isFinish ? (
+                    <Icon name="trophy" size={16} color={colors.ink} />
+                  ) : isGoldenSquare ? (
+                    <Icon name="golden" size={16} color={colors.goldDeep} />
+                  ) : (
+                    <AppText variant="caption" maxScale={1} style={styles.squareNumber}>
+                      {square.position + 1}
+                    </AppText>
+                  )}
+
+                  {/* Team pawns: color + the team's number */}
+                  {teamsHere.length > 0 && (
+                    <View style={styles.pawns}>
+                      {teamsHere.map(({ team, index }) => {
+                        const teamColor = team.color || '#CCCCCC';
+                        return (
+                          <View key={index} style={[styles.pawn, { backgroundColor: teamColor }]}>
+                            <AppText variant="caption" maxScale={1} color={readableOn(teamColor)} style={styles.pawnText}>
+                              {index + 1}
+                            </AppText>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
               );
-            })()}
-          </Svg>
+            })}
+          </View>
         </View>
       </View>
 
-      {/* Legend */}
+      {/* Legend: pawn + name + position */}
       <View style={styles.legend}>
         {teams && Array.isArray(teams) && teams.map((team, idx) => {
           if (!team) return null;
-          // Ensure position is defined (default to 0)
           const teamPosition = team.position !== undefined ? team.position : 0;
           const teamColor = team.color || '#CCCCCC';
-          const teamName = team.name || `קבוצה ${idx + 1}`;
-          
+          const teamName = team.name || S.alias.board.teamFallback(idx + 1);
+
           return (
-            <View key={idx} style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: teamColor }]} />
-              <Text style={styles.legendText}>{teamName}</Text>
-              <Text style={styles.legendPosition}>{teamPosition + 1}/60</Text>
+            <View key={idx} style={styles.legendItem} accessible accessibilityLabel={`${idx + 1}. ${teamName}, ${S.alias.board.position(teamPosition + 1)}`}>
+              <View style={[styles.legendPawn, { backgroundColor: teamColor }]}>
+                <AppText variant="caption" maxScale={1.2} color={readableOn(teamColor)} style={styles.pawnText}>
+                  {idx + 1}
+                </AppText>
+              </View>
+              <AppText variant="label" maxScale={1.3}>
+                {teamName}
+              </AppText>
+              <AppText variant="caption" color={colors.inkSoft} maxScale={1.3}>
+                {S.alias.board.position(teamPosition + 1)}
+              </AppText>
             </View>
           );
         })}
       </View>
-    </View>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-  },
-  header: {
-    backgroundColor: '#3B82F6',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
+  card: {
+    gap: spacing.md,
     alignItems: 'center',
   },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    alignSelf: 'flex-start',
   },
-  gridContainer: {
-    backgroundColor: '#E0F2FE',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 3,
-    borderColor: '#3B82F6',
-    width: 360, // Fixed width: 10 columns * 30px + 9 gaps * 4px + padding 24px
-    height: 224, // Fixed height: 6 rows * 30px + 5 gaps * 4px + padding 24px
+  scaleBox: {
     alignSelf: 'center',
   },
+  frame: {
+    position: 'absolute',
+    top: 0,
+    width: FRAME_W,
+    height: FRAME_H,
+    padding: FRAME_PAD,
+    borderRadius: radii.md,
+    borderWidth: FRAME_BORDER,
+    borderColor: colors.cardboardDeep,
+    backgroundColor: colors.cardboard,
+  },
   grid: {
-    width: 336, // 10 columns * 30px + 9 gaps * 4px = 300 + 36
-    height: 200, // 6 rows * 30px + 5 gaps * 4px = 180 + 20
+    width: GRID_W,
+    height: GRID_H,
     position: 'relative',
   },
   pathSvg: {
     position: 'absolute',
     top: 0,
-    left: 0,
     zIndex: 1, // Lines pass through circles, but circles render on top
   },
   square: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#FFFFFF',
+    position: 'absolute',
+    width: SQUARE,
+    height: SQUARE,
+    borderRadius: SQUARE / 2,
+    backgroundColor: colors.card,
     borderWidth: 2,
-    borderColor: '#3B82F6',
+    borderColor: colors.line,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'absolute',
-    zIndex: 2, // Above the path lines
+    zIndex: 2, // Above the track lines
   },
   startSquare: {
-    backgroundColor: '#10B981',
-    borderColor: '#059669',
+    backgroundColor: colors.success,
+    borderColor: colors.successDeep,
   },
   finishSquare: {
-    backgroundColor: '#F59E0B',
-    borderColor: '#D97706',
+    backgroundColor: colors.gold,
+    borderColor: colors.goldDeep,
   },
   goldenSquare: {
-    backgroundColor: '#FEF3C7',
-    borderColor: '#F59E0B',
+    backgroundColor: colors.goldTint,
+    borderColor: colors.gold,
   },
   squareWithTeam: {
-    borderWidth: 4,
-    borderColor: '#8B5CF6',
+    borderWidth: 3,
+    borderColor: colors.ink,
   },
   squareNumber: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#1E40AF',
+    fontSize: 11,
+    lineHeight: 14,
+    color: colors.inkSoft,
   },
-  squareEmoji: {
-    fontSize: 16,
-  },
-  goldenEmoji: {
-    fontSize: 12,
-  },
-  teamIndicators: {
+  pawns: {
     position: 'absolute',
-    bottom: -5,
+    bottom: -9,
     flexDirection: 'row',
-    gap: 3,
+    gap: -5,
+    zIndex: 3,
   },
-  teamDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#FFFFFF',
+  pawn: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    borderColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pawnText: {
+    fontSize: 11,
+    lineHeight: 14,
   },
   legend: {
-    marginTop: 16,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: spacing.sm,
     justifyContent: 'center',
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F3F4F6',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    minHeight: 40,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
   },
-  legendDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#FFFFFF',
-  },
-  legendText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
-  legendPosition: {
-    fontSize: 10,
-    color: '#3B82F6',
-    fontWeight: '600',
+  legendPawn: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
-

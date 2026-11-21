@@ -1,19 +1,20 @@
 import { doc, getDoc, onSnapshot, runTransaction, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import GradientBackground from '../../components/codenames/GradientBackground';
-import GradientButton from '../../components/codenames/GradientButton';
+import { ActivityIndicator, Alert, StyleSheet, Switch, View } from 'react-native';
 import BannerAd from '../../components/shared/BannerAd';
-import PlayerCard from '../../components/shared/PlayerCard';
 import RulesModal from '../../components/shared/RulesModal';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import { db } from '../../firebase';
 import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
 import storage from '../../utils/storage';
+import { S } from '../../strings';
+import { colors, radii, spacing, touch, useGameTheme } from '../../theme';
+import { AppText, Button, Card, Icon, IconButton, PlayerChip, Screen, readableOn } from '../../ui';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
 
 export default function AliasSetupScreen({ navigation, route }) {
+  const theme = useGameTheme();
   const roomCode = route?.params?.roomCode || '';
   const [room, setRoom] = useState(null);
   const [playerName, setPlayerName] = useState('');
@@ -61,14 +62,14 @@ export default function AliasSetupScreen({ navigation, route }) {
             return;
           } else {
             await clearCurrentRoom();
-            Alert.alert('שגיאה', 'קוד חדר חסר');
+            Alert.alert(S.alias.setup.error, S.alias.setup.missingRoomCode);
             navigation.goBack();
             return;
           }
         } catch (error) {
           console.warn('⚠️ Error restoring room:', error);
           await clearCurrentRoom();
-          Alert.alert('שגיאה', 'קוד חדר חסר');
+          Alert.alert(S.alias.setup.error, S.alias.setup.missingRoomCode);
           navigation.goBack();
           return;
         }
@@ -129,7 +130,7 @@ export default function AliasSetupScreen({ navigation, route }) {
 
       if (!roomSnap.exists()) {
         await clearCurrentRoom();
-        Alert.alert('שגיאה', 'החדר לא נמצא');
+        Alert.alert(S.alias.setup.error, S.alias.setup.roomNotFound);
         navigation.goBack();
         return;
       }
@@ -155,7 +156,7 @@ export default function AliasSetupScreen({ navigation, route }) {
       }
     } catch (error) {
       console.error('Error loading room:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לטעון את החדר');
+      Alert.alert(S.alias.setup.error, S.alias.setup.loadFailed);
       navigation.goBack();
     } finally {
       setIsLoading(false);
@@ -189,7 +190,7 @@ export default function AliasSetupScreen({ navigation, route }) {
           setIsHost(roomData.host_name === currentPlayerName);
         });
       } else {
-        Alert.alert('שגיאה', 'החדר נמחק');
+        Alert.alert(S.alias.setup.error, S.alias.setup.roomDeleted);
         navigation.goBack();
       }
     }, (error) => {
@@ -224,7 +225,7 @@ export default function AliasSetupScreen({ navigation, route }) {
 
   const handleJoinTeam = async (teamIndex) => {
     if (!room || !playerName.trim()) {
-      Alert.alert('שגיאה', 'אנא הכנס שם שחקן');
+      Alert.alert(S.alias.setup.error, S.alias.setup.nameRequired);
       return;
     }
 
@@ -254,18 +255,18 @@ export default function AliasSetupScreen({ navigation, route }) {
       });
 
       if (result.error === 'missing') {
-        Alert.alert('שגיאה', 'החדר נמחק');
+        Alert.alert(S.alias.setup.error, S.alias.setup.roomDeleted);
         navigation.goBack();
       } else if (result.error === 'invalid') {
-        Alert.alert('שגיאה', 'קבוצה לא תקינה');
+        Alert.alert(S.alias.setup.error, S.alias.setup.invalidTeam);
       } else if (result.error === 'full') {
-        Alert.alert('שגיאה', 'הקבוצה כבר מלאה. כל קבוצה יכולה להכיל שחקן אחד בלבד.');
+        Alert.alert(S.alias.setup.error, S.alias.setup.teamFullAlert);
       } else {
         console.log('✅ Player joined team:', teamIndex);
       }
     } catch (error) {
       console.error('❌ Error joining team:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו להצטרף לקבוצה. נסה שוב.');
+      Alert.alert(S.alias.setup.error, S.alias.setup.joinFailed);
     } finally {
       setIsJoiningTeam(false);
     }
@@ -294,7 +295,7 @@ export default function AliasSetupScreen({ navigation, route }) {
       console.log('✅ Player left team');
     } catch (error) {
       console.error('Error leaving team:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לעזוב את הקבוצה');
+      Alert.alert(S.alias.setup.error, S.alias.setup.leaveFailed);
     } finally {
       setIsJoiningTeam(false);
     }
@@ -310,7 +311,7 @@ export default function AliasSetupScreen({ navigation, route }) {
       });
     } catch (error) {
       console.error('Error toggling golden rounds:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לעדכן את ההגדרות');
+      Alert.alert(S.alias.setup.error, S.alias.setup.settingsFailed);
     }
   };
 
@@ -334,7 +335,7 @@ export default function AliasSetupScreen({ navigation, route }) {
     } catch (error) {
       console.error('Error saving drinking mode:', error);
       setDrinkingMode(!newValue); // Revert on error
-      Alert.alert('שגיאה', 'לא הצלחנו לעדכן את מצב השתייה');
+      Alert.alert(S.alias.setup.error, S.alias.setup.drinkingFailed);
     }
   };
 
@@ -360,7 +361,7 @@ export default function AliasSetupScreen({ navigation, route }) {
       });
     } catch (error) {
       console.error('Error adding team:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו להוסיף קבוצה');
+      Alert.alert(S.alias.setup.error, S.alias.setup.addTeamFailed);
     }
   };
 
@@ -376,13 +377,13 @@ export default function AliasSetupScreen({ navigation, route }) {
         return { teams: teams.filter((_, index) => index !== teamIndex) };
       });
       if (result.error === 'has_players') {
-        Alert.alert('שגיאה', 'לא ניתן למחוק קבוצה עם שחקנים');
+        Alert.alert(S.alias.setup.error, S.alias.setup.removeHasPlayers);
       } else if (result.error === 'min_teams') {
-        Alert.alert('שגיאה', 'חייבות להיות לפחות 2 קבוצות');
+        Alert.alert(S.alias.setup.error, S.alias.setup.minTeams);
       }
     } catch (error) {
       console.error('Error removing team:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו למחוק קבוצה');
+      Alert.alert(S.alias.setup.error, S.alias.setup.removeFailed);
     }
   };
 
@@ -422,9 +423,9 @@ export default function AliasSetupScreen({ navigation, route }) {
       });
 
       if (result.error === 'min_teams') {
-        Alert.alert('שגיאה', 'נדרשות לפחות 2 קבוצות עם שחקנים');
+        Alert.alert(S.alias.setup.error, S.alias.setup.needTwoTeams);
       } else if (result.error === 'empty_team') {
-        Alert.alert('שגיאה', `קבוצה ${result.index + 1} צריכה לפחות שחקן אחד`);
+        Alert.alert(S.alias.setup.error, S.alias.setup.emptyTeam(result.index + 1));
       }
       if (result.error && result.error !== 'started') {
         setIsStartingGame(false);
@@ -434,7 +435,7 @@ export default function AliasSetupScreen({ navigation, route }) {
       console.log('✅ Game started');
     } catch (error) {
       console.error('Error starting game:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו להתחיל את המשחק');
+      Alert.alert(S.alias.setup.error, S.alias.setup.startFailed);
       setIsStartingGame(false);
     }
   };
@@ -461,22 +462,18 @@ export default function AliasSetupScreen({ navigation, route }) {
 
   if (isLoading || !room) {
     return (
-      <GradientBackground variant="brightBlue">
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FFFFFF" />
-          <Text style={styles.loadingText}>טוען חדר...</Text>
-        </View>
-      </GradientBackground>
+      <Screen contentStyle={styles.centered}>
+        <ActivityIndicator size="large" color={theme.accent} />
+        <AppText variant="subtitle" align="center" color={colors.inkSoft}>
+          {S.alias.setup.loading}
+        </AppText>
+      </Screen>
     );
   }
 
   return (
-    <GradientBackground variant="brightBlue">
-      <ScrollView
-        contentContainerStyle={styles.container}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Unified Top Bar */}
+    <Screen
+      header={
         <UnifiedTopBar
           roomCode={roomCode}
           variant="alias"
@@ -494,427 +491,237 @@ export default function AliasSetupScreen({ navigation, route }) {
           onRulesPress={() => setShowRulesModal(true)}
           drinkingMode={drinkingMode}
         />
+      }
+      footer={<BannerAd />}
+    >
+      <RulesModal
+        visible={showRulesModal}
+        onClose={() => setShowRulesModal(false)}
+        variant="alias"
+      />
 
-        {/* Rules Modal */}
-        <RulesModal
-          visible={showRulesModal}
-          onClose={() => setShowRulesModal(false)}
-          variant="alias"
-        />
-
-        {/* Compact Toggles Row */}
-        <View style={styles.togglesRow}>
-          {/* Drinking Mode Toggle */}
-          <View style={styles.toggleItem}>
-            <Text style={styles.toggleLabel}>🔞 שתייה</Text>
-            <Switch
-              value={drinkingMode}
-              onValueChange={handleToggleDrinkingMode}
-              trackColor={{ false: '#D1D5DB', true: '#F97316' }}
-              thumbColor={drinkingMode ? '#FFFFFF' : '#9CA3AF'}
-              style={styles.compactSwitch}
-            />
-          </View>
-
-          {/* Golden Rounds Toggle (Host Only) */}
-          {isHost && (
-            <View style={styles.toggleItem}>
-              <Text style={styles.toggleLabel}>⭐ סבבי זהב</Text>
-              <Switch
-                value={room.golden_rounds_enabled || false}
-                onValueChange={handleToggleGoldenRounds}
-                trackColor={{ false: '#D1D5DB', true: '#FFD700' }}
-                thumbColor={room.golden_rounds_enabled ? '#FFFFFF' : '#9CA3AF'}
-                style={styles.compactSwitch}
-              />
-            </View>
-          )}
+      {/* Settings */}
+      <Card padding="md" style={styles.section}>
+        <View style={styles.toggleRow}>
+          <Icon name="drink" size={22} color={colors.ink} />
+          <AppText variant="bodyStrong" style={styles.flex}>
+            {S.alias.setup.drinking}
+          </AppText>
+          <Switch
+            value={drinkingMode}
+            onValueChange={handleToggleDrinkingMode}
+            disabled={!isHost}
+            accessibilityLabel={S.alias.setup.drinking}
+            trackColor={{ false: colors.line, true: theme.accent }}
+            thumbColor={colors.card}
+          />
         </View>
 
-        {/* Teams Section */}
-        <View style={styles.teamsSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>קבוצות</Text>
-            {isHost && (
-              <Pressable
-                onPress={handleAddTeam}
-                style={styles.whiteAddTeamButton}
-              >
-                <Text style={styles.whiteAddTeamButtonText}>+ הוסף קבוצה</Text>
-              </Pressable>
-            )}
+        {/* Golden Rounds Toggle (Host Only) */}
+        {isHost && (
+          <View style={styles.toggleRow}>
+            <Icon name="golden" size={22} color={colors.goldDeep} />
+            <AppText variant="bodyStrong" style={styles.flex}>
+              {S.alias.setup.goldenRounds}
+            </AppText>
+            <Switch
+              value={room.golden_rounds_enabled || false}
+              onValueChange={handleToggleGoldenRounds}
+              accessibilityLabel={S.alias.setup.goldenRounds}
+              trackColor={{ false: colors.line, true: colors.gold }}
+              thumbColor={colors.card}
+            />
           </View>
-          {room.teams && Array.isArray(room.teams) && room.teams
-            .filter((team) => team != null && typeof team === 'object')
-            .map((team, index) => {
-            if (!team || typeof team !== 'object') {
-              return null;
-            }
-            const isPlayerInTeam = team.players && Array.isArray(team.players) && team.players.includes(playerName);
-            const teamColor = (team.color && typeof team.color === 'string') ? team.color : TEAM_COLORS[index % TEAM_COLORS.length];
-            const teamName = (team.name && typeof team.name === 'string') ? team.name : `קבוצה ${index + 1}`;
-            const playerCount = (team.players && Array.isArray(team.players)) ? team.players.filter(p => p && p.trim().length > 0).length : 0;
-            const isTeamFull = playerCount >= 1; // Only one player allowed per team
+        )}
+      </Card>
 
-            return (
-              <View key={`team-${index}`} style={[styles.teamCard, { borderColor: teamColor }]}>
-                <View style={[styles.teamHeader, { backgroundColor: teamColor }]}>
-                  <View style={styles.teamHeaderLeft}>
-                    <Text style={styles.teamName}>{teamName}</Text>
-                    <Text style={styles.teamPlayerCount}>
-                      {playerCount} שחקנים
-                    </Text>
-                  </View>
-                  {isHost && playerCount === 0 && (
-                    <Pressable
-                      onPress={() => handleRemoveTeam(index)}
-                      style={styles.removeTeamButton}
-                    >
-                      <Text style={styles.removeTeamIcon}>🗑️</Text>
-                    </Pressable>
-                  )}
+      {/* Teams */}
+      <View style={styles.sectionHeader}>
+        <AppText variant="title" accessibilityRole="header">
+          {S.alias.setup.teams}
+        </AppText>
+        {isHost && (
+          <Button title={S.alias.setup.addTeam} icon="plus" size="sm" variant="secondary" onPress={handleAddTeam} />
+        )}
+      </View>
+
+      {room.teams && Array.isArray(room.teams) && room.teams
+        .filter((team) => team != null && typeof team === 'object')
+        .map((team, index) => {
+          if (!team || typeof team !== 'object') {
+            return null;
+          }
+          const isPlayerInTeam = team.players && Array.isArray(team.players) && team.players.includes(playerName);
+          const teamColor = (team.color && typeof team.color === 'string') ? team.color : TEAM_COLORS[index % TEAM_COLORS.length];
+          const teamName = (team.name && typeof team.name === 'string') ? team.name : S.alias.board.teamFallback(index + 1);
+          const playerCount = (team.players && Array.isArray(team.players)) ? team.players.filter(p => p && p.trim().length > 0).length : 0;
+          const isTeamFull = playerCount >= 1; // Only one player allowed per team
+          const fg = readableOn(teamColor);
+
+          return (
+            <View key={`team-${index}`} style={[styles.teamCard, { borderColor: teamColor }]}>
+              <View style={[styles.teamHeader, { backgroundColor: teamColor }]}>
+                <View style={styles.teamNumber}>
+                  <AppText variant="label" color={colors.ink} align="center" maxScale={1.3}>
+                    {index + 1}
+                  </AppText>
                 </View>
-
-                <View style={styles.playersContainer}>
-                  {team.players && Array.isArray(team.players) && team.players.length > 0 ? (
-                    team.players.map((player, playerIndex) => {
-                      const playerNameStr = typeof player === 'string' ? player : String(player || '');
-                      return (
-                        <PlayerCard
-                          key={playerIndex}
-                          playerName={playerNameStr}
-                          isHost={playerNameStr === room.host_name}
-                        />
-                      );
-                    })
-                  ) : (
-                    <Text style={styles.emptyTeamText}>אין שחקנים בקבוצה</Text>
-                  )}
+                <View style={styles.flex}>
+                  <AppText variant="bodyStrong" color={fg} numberOfLines={1}>
+                    {teamName}
+                  </AppText>
+                  <AppText variant="caption" color={fg}>
+                    {S.alias.setup.playerCount(playerCount)}
+                  </AppText>
                 </View>
-
-                {playerName && (
-                  <View style={styles.teamActions}>
-                    {isPlayerInTeam ? (
-                      <GradientButton
-                        title="עזוב קבוצה"
-                        onPress={handleLeaveTeam}
-                        variant="alias"
-                        style={styles.teamButton}
-                        disabled={isJoiningTeam}
-                      />
-                    ) : isTeamFull ? (
-                      <View style={styles.teamFullContainer}>
-                        <Text style={styles.teamFullText}>הקבוצה מלאה</Text>
-                      </View>
-                    ) : (
-                      <Pressable
-                        onPress={() => handleJoinTeam(index)}
-                        style={[styles.whiteTeamButton, isJoiningTeam && styles.whiteTeamButtonDisabled]}
-                        disabled={isJoiningTeam}
-                      >
-                        <Text style={styles.whiteTeamButtonText}>הצטרף לקבוצה</Text>
-                      </Pressable>
-                    )}
-                  </View>
+                {isHost && playerCount === 0 && (
+                  <IconButton icon="trash" label={S.alias.setup.removeTeam} onPress={() => handleRemoveTeam(index)} size={touch.min - 4} />
                 )}
               </View>
-            );
-          })}
-        </View>
 
+              <View style={styles.teamBody}>
+                {team.players && Array.isArray(team.players) && team.players.length > 0 ? (
+                  <View style={styles.chips}>
+                    {team.players.map((player, playerIndex) => {
+                      const playerNameStr = typeof player === 'string' ? player : String(player || '');
+                      return (
+                        <PlayerChip
+                          key={playerIndex}
+                          name={playerNameStr}
+                          color={teamColor}
+                          isHost={playerNameStr === room.host_name}
+                          isMe={playerNameStr === playerName}
+                          hostLabel={S.common.host}
+                          meLabel={S.common.you}
+                        />
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <AppText color={colors.inkSoft}>{S.alias.setup.noPlayers}</AppText>
+                )}
 
-        {/* Start Game Button (Host Only) */}
-        {isHost && (
-          <View style={styles.startGameContainer}>
-            <GradientButton
-              title={isStartingGame ? 'מתחיל משחק...' : 'התחל משחק'}
-              onPress={handleStartGame}
-              variant="alias"
-              style={styles.startButton}
-              disabled={isStartingGame || room.game_status !== 'setup'}
-            />
-            {isStartingGame && (
-              <View style={styles.loadingIndicatorContainer}>
-                <ActivityIndicator color="#FFFFFF" size="small" />
+                {playerName && (
+                  isPlayerInTeam ? (
+                    <Button
+                      title={S.alias.setup.leaveTeam}
+                      icon="exit"
+                      variant="secondary"
+                      size="sm"
+                      onPress={handleLeaveTeam}
+                      disabled={isJoiningTeam}
+                      fullWidth
+                    />
+                  ) : isTeamFull ? (
+                    <View style={styles.fullRow}>
+                      <Icon name="player" size={20} color={colors.inkSoft} />
+                      <AppText color={colors.inkSoft}>{S.alias.setup.teamFull}</AppText>
+                    </View>
+                  ) : (
+                    <Button
+                      title={S.alias.setup.joinTeam}
+                      icon="addPlayer"
+                      size="sm"
+                      onPress={() => handleJoinTeam(index)}
+                      disabled={isJoiningTeam}
+                      fullWidth
+                    />
+                  )
+                )}
               </View>
-            )}
-          </View>
-        )}
+            </View>
+          );
+        })}
 
-        {/* Waiting for Host Message */}
-        {!isHost && room.game_status === 'setup' && (
-          <View style={styles.waitingContainer}>
-            <Text style={styles.waitingText}>
-              ממתינים למארח להתחיל את המשחק...
-            </Text>
-          </View>
-        )}
-      </ScrollView>
-      <BannerAd />
-    </GradientBackground>
+      {/* Start Game Button (Host Only) */}
+      {isHost && (
+        <Button
+          title={isStartingGame ? S.alias.setup.starting : S.alias.setup.startGame}
+          icon="play"
+          onPress={handleStartGame}
+          loading={isStartingGame}
+          disabled={isStartingGame || room.game_status !== 'setup'}
+          fullWidth
+        />
+      )}
+
+      {/* Waiting for host */}
+      {!isHost && room.game_status === 'setup' && (
+        <View style={styles.waitingRow}>
+          <Icon name="hourglass" size={22} color={colors.inkSoft} />
+          <AppText color={colors.inkSoft}>{S.alias.setup.waitingHost}</AppText>
+        </View>
+      )}
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: 16,
-    paddingTop: 50,
-    paddingBottom: 20,
-  },
-  loadingContainer: {
+  flex: {
     flex: 1,
+  },
+  centered: {
     justifyContent: 'center',
     alignItems: 'center',
+    gap: spacing.md,
   },
-  loadingText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    marginTop: 16,
+  section: {
+    gap: spacing.sm,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  togglesRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-    alignItems: 'center',
-  },
-  toggleItem: {
-    flex: 1,
-    backgroundColor: '#4FA8FF', // Alias theme color - כחול בהיר
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#4FA8FF', // Alias theme color border
-    padding: 8,
+  toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 36,
-  },
-  toggleLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF', // White text for good contrast on blue background
-    marginRight: 8,
-  },
-  compactSwitch: {
-    transform: [{ scaleX: 0.6 }, { scaleY: 0.6 }],
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-    marginBottom: 8,
-  },
-  roomCodeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  roomCodePressable: {
-    backgroundColor: 'rgba(79, 168, 255, 0.15)', // Alias theme color with transparency - כחול בהיר
-    borderRadius: 16,
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#4FA8FF',
-  },
-  copyLinkButton: {
-    paddingHorizontal: 12,
-  },
-  whiteCopyLinkButton: {
-    backgroundColor: '#4FA8FF', // Alias theme color - כחול בהיר
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  whiteCopyLinkButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  roomCodeLabel: {
-    color: '#4FA8FF', // Alias theme color - כחול בהיר
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  roomCode: {
-    color: '#4FA8FF', // Alias theme color - כחול בהיר
-    fontSize: 18,
-    fontWeight: 'bold',
-    fontFamily: 'monospace',
-  },
-  playerNameContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#2C3E50',
-    marginBottom: 8,
-    textAlign: 'right',
-  },
-  input: {
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
-    textAlign: 'right',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
-  saveNameButton: {
-    width: '100%',
-  },
-  teamsSection: {
-    marginBottom: 20,
+    gap: spacing.sm,
+    minHeight: 48,
   },
   sectionHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#4FA8FF', // Alias theme color - כחול בהיר
-    textAlign: 'right',
-  },
-  addTeamButton: {
-    paddingHorizontal: 12,
-  },
-  whiteAddTeamButton: {
-    backgroundColor: '#4FA8FF', // Alias theme color - כחול בהיר
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  whiteAddTeamButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
+    justifyContent: 'space-between',
+    gap: spacing.md,
   },
   teamCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    marginBottom: 16,
-    overflow: 'hidden',
+    borderRadius: radii.lg,
     borderWidth: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
+    borderBottomWidth: 6,
+    backgroundColor: colors.card,
+    overflow: 'hidden',
   },
   teamHeader: {
-    padding: 16,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
   },
-  teamHeaderLeft: {
-    flex: 1,
+  teamNumber: {
+    width: 34,
+    height: 34,
+    borderRadius: radii.pill,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  removeTeamButton: {
-    padding: 8,
-    marginLeft: 8,
+  teamBody: {
+    gap: spacing.md,
+    padding: spacing.md,
   },
-  removeTeamIcon: {
-    fontSize: 20,
-  },
-  teamName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  teamPlayerCount: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    opacity: 0.9,
-  },
-  playersContainer: {
-    padding: 16,
+  chips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: spacing.sm,
   },
-  emptyTeamText: {
-    fontSize: 14,
-    color: '#999',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    width: '100%',
-    padding: 16,
-  },
-  teamActions: {
-    padding: 16,
-    paddingTop: 0,
-  },
-  teamButton: {
-    width: '100%',
-  },
-  whiteTeamButton: {
-    width: '100%',
-    backgroundColor: '#4FA8FF', // Alias theme color - כחול בהיר
-    borderRadius: 12,
-    padding: 14,
+  fullRow: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    opacity: 1,
+    gap: spacing.xs,
+    minHeight: 40,
   },
-  whiteTeamButtonDisabled: {
-    opacity: 0.5,
-    backgroundColor: '#4FA8FF',
-  },
-  whiteTeamButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  teamFullContainer: {
-    width: '100%',
-    backgroundColor: '#E0E0E0',
-    borderRadius: 12,
-    padding: 14,
+  waitingRow: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  teamFullText: {
-    color: '#666',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  startGameContainer: {
-    marginBottom: 24,
-  },
-  startButton: {
-    width: '100%',
-  },
-  loadingIndicatorContainer: {
-    marginTop: 8,
-    alignItems: 'center',
-  },
-  waitingContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
-  },
-  waitingText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
   },
 });

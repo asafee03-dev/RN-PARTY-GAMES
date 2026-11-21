@@ -32,3 +32,10 @@ export const textAlignFor = (align) => {
  * the SVG instead - SVG coordinates are physical on every platform.
  */
 export const physicalRow = () => (isRTL() ? 'row-reverse' : 'row');
+
+/**
+ * Physical "distance from the left edge" for drawings that must not mirror
+ * with the language (board games, dials). Native RN swaps left/right in RTL
+ * (so ask for `right`), react-native-web keeps `left` physical.
+ */
+export const physicalLeft = (x) => (Platform.OS !== 'web' && I18nManager.isRTL ? { right: x } : { left: x });

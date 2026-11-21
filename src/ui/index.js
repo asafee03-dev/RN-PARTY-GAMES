@@ -13,4 +13,6 @@ export { default as Screen } from './Screen';
 export { default as TextField } from './TextField';
 export { default as TimerDisplay } from './TimerDisplay';
 export { feedback } from './feedback';
-export { isRTL, physicalRow, textAlignFor } from './direction';
+export { isRTL, physicalLeft, physicalRow, textAlignFor } from './direction';
+export { default as TeamPickButton } from './TeamPickButton';
+export { readableOn } from './readableOn';

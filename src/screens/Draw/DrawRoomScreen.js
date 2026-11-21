@@ -342,9 +342,10 @@ export default function DrawRoomScreen({ navigation, route }) {
       return;
     }
 
-    const roomRef = doc(db, 'DrawRoom', roomId);
-    
-    unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
+    // Named roomDocRef so it doesn't shadow the roomRef (latest room) ref below
+    const roomDocRef = doc(db, 'DrawRoom', roomId);
+
+    unsubscribeRef.current = onSnapshot(roomDocRef, (snapshot) => {
       if (snapshot.exists()) {
         const newRoom = { id: snapshot.id, ...snapshot.data() };
         
@@ -374,18 +375,13 @@ export default function DrawRoomScreen({ navigation, route }) {
         const isPlayerInRoom = newRoom.players && Array.isArray(newRoom.players) && 
           newRoom.players.some(p => p && p.name === playerName);
         
-        // If player left the room, don't process updates or show popups
+        // Skip snapshots that don't include this player, but keep listening.
+        // Right after joining, the first snapshot(s) can still show the room
+        // from before the join (the join is a transaction, which doesn't update
+        // the local cache), so they don't list the player yet. Detaching here
+        // used to leave every joiner stuck in the lobby when the host started.
         if (!isPlayerInRoom && playerName) {
-          console.log('⚠️ Player left room, ignoring updates');
-          // Cleanup and navigate away
-          if (timerCheckInterval.current) {
-            clearInterval(timerCheckInterval.current);
-            timerCheckInterval.current = null;
-          }
-          if (unsubscribeRef.current) {
-            unsubscribeRef.current();
-            unsubscribeRef.current = null;
-          }
+          console.log(`⚠️ [DRAW] Snapshot without this player (fromCache=${snapshot.metadata.fromCache}), skipping`);
           return;
         }
         

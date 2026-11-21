@@ -9,7 +9,7 @@ import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/
 import storage from '../../utils/storage';
 import { S } from '../../strings';
 import { colors, radii, spacing, touch, useGameTheme } from '../../theme';
-import { AppText, Button, Card, Icon, IconButton, PlayerChip, Screen, readableOn } from '../../ui';
+import { AppText, Button, Card, Icon, IconButton, PlayerChip, Screen, accessibleSurface, readableOn } from '../../ui';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
 
@@ -552,7 +552,7 @@ export default function AliasSetupScreen({ navigation, route }) {
             return null;
           }
           const isPlayerInTeam = team.players && Array.isArray(team.players) && team.players.includes(playerName);
-          const teamColor = (team.color && typeof team.color === 'string') ? team.color : TEAM_COLORS[index % TEAM_COLORS.length];
+          const teamColor = accessibleSurface((team.color && typeof team.color === 'string') ? team.color : TEAM_COLORS[index % TEAM_COLORS.length]);
           const teamName = (team.name && typeof team.name === 'string') ? team.name : S.alias.board.teamFallback(index + 1);
           const playerCount = (team.players && Array.isArray(team.players)) ? team.players.filter(p => p && p.trim().length > 0).length : 0;
           const isTeamFull = playerCount >= 1; // Only one player allowed per team

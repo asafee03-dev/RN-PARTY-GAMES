@@ -15,4 +15,4 @@ export { default as TimerDisplay } from './TimerDisplay';
 export { feedback } from './feedback';
 export { isRTL, physicalLeft, physicalRow, textAlignFor } from './direction';
 export { default as TeamPickButton } from './TeamPickButton';
-export { readableOn } from './readableOn';
+export { readableOn, accessibleSurface } from './readableOn';

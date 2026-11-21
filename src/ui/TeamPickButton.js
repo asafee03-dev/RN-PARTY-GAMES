@@ -4,7 +4,7 @@ import { borders, colors, radii, spacing, touch } from '../theme';
 import AppText from './AppText';
 import Icon from './Icon';
 import { feedback } from './feedback';
-import { readableOn } from './readableOn';
+import { accessibleSurface, readableOn } from './readableOn';
 
 /**
  * A team as a pressable choice. The team color is never the only cue:
@@ -12,7 +12,8 @@ import { readableOn } from './readableOn';
  * Text color adapts to the (user-chosen) team color for contrast.
  */
 export default function TeamPickButton({ name, color, index, selected = false, onPress, disabled = false, style }) {
-  const fg = readableOn(color);
+  const surface = accessibleSurface(color);
+  const fg = readableOn(surface);
   return (
     <Pressable
       onPress={disabled ? undefined : onPress}
@@ -23,7 +24,7 @@ export default function TeamPickButton({ name, color, index, selected = false, o
       accessibilityState={{ selected, disabled }}
       style={({ pressed }) => [
         styles.button,
-        { backgroundColor: color },
+        { backgroundColor: surface },
         selected && styles.selected,
         disabled && styles.disabled,
         pressed && styles.pressed,

@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { borders, colors, radii, spacing, touch, typography, useGameTheme } from '../theme';
 import AppText from './AppText';
+import { accessibleSurface, readableOn } from './readableOn';
 import Icon from './Icon';
 
 /**
@@ -13,7 +14,7 @@ import Icon from './Icon';
  */
 export default function PlayerChip({ name, color, isHost = false, isMe = false, status = null, dimmed = false, meLabel, hostLabel, style }) {
   const theme = useGameTheme();
-  const tokenColor = color || theme.accent;
+  const tokenColor = accessibleSurface(color || theme.accent);
   const initial = (name || '?').trim().charAt(0);
 
   const statusColor = status?.tone === 'success' ? colors.successDeep : status?.tone === 'muted' ? colors.inkSoft : theme.accentInk;
@@ -25,7 +26,7 @@ export default function PlayerChip({ name, color, isHost = false, isMe = false, 
       accessibilityLabel={[name, isMe && meLabel, isHost && hostLabel, status?.label].filter(Boolean).join(', ')}
     >
       <View style={[styles.token, { backgroundColor: tokenColor }]}>
-        <AppText variant="bodyStrong" color={colors.white} align="center" maxScale={1.4} style={styles.initial}>
+        <AppText variant="bodyStrong" color={readableOn(tokenColor)} align="center" maxScale={1.4} style={styles.initial}>
           {initial}
         </AppText>
         {isHost && (

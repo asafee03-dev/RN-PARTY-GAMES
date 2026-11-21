@@ -3,7 +3,7 @@ import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import Svg, { Line, Path } from 'react-native-svg';
 import { S } from '../../strings';
 import { colors, radii, spacing, useGameTheme } from '../../theme';
-import { AppText, Card, Icon, physicalLeft, readableOn } from '../../ui';
+import { AppText, Card, Icon, accessibleSurface, physicalLeft, readableOn } from '../../ui';
 
 const TOTAL_SQUARES = 60;
 
@@ -398,7 +398,7 @@ export default function GameBoard({ teams, goldenSquares = [] }) {
                   {teamsHere.length > 0 && (
                     <View style={styles.pawns}>
                       {teamsHere.map(({ team, index }) => {
-                        const teamColor = team.color || '#CCCCCC';
+                        const teamColor = accessibleSurface(team.color || '#CCCCCC');
                         return (
                           <View key={index} style={[styles.pawn, { backgroundColor: teamColor }]}>
                             <AppText variant="caption" maxScale={1} color={readableOn(teamColor)} style={styles.pawnText}>
@@ -421,7 +421,7 @@ export default function GameBoard({ teams, goldenSquares = [] }) {
         {teams && Array.isArray(teams) && teams.map((team, idx) => {
           if (!team) return null;
           const teamPosition = team.position !== undefined ? team.position : 0;
-          const teamColor = team.color || '#CCCCCC';
+          const teamColor = accessibleSurface(team.color || '#CCCCCC');
           const teamName = team.name || S.alias.board.teamFallback(idx + 1);
 
           return (

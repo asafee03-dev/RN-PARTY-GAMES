@@ -6,7 +6,7 @@ import FrequencyGauge from '../../components/frequency/FrequencyGauge';
 import ScoreBoard from '../../components/frequency/ScoreBoard';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
-import { db, waitForFirestoreReady } from '../../firebase';
+import { db } from '../../firebase';
 import { arrayUnion, doc, getDoc, updateDoc, onSnapshot, collection, getDocs, runTransaction } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
@@ -243,7 +243,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
       setIsLoading(true);
       console.log('🔵 Loading Frequency room with code:', roomCode);
       
-      await waitForFirestoreReady();
       
       const roomRef = doc(db, 'FrequencyRoom', roomCode);
       const roomSnap = await getDoc(roomRef);

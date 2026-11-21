@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { db, waitForFirestoreReady } from '../../firebase';
+import { db } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction, arrayRemove } from 'firebase/firestore';
 import CodenamesBoard from '../../components/codenames/CodenamesBoard';
 import ClueInput from '../../components/codenames/ClueInput';
@@ -155,7 +155,6 @@ export default function CodenamesGameScreen({ navigation, route }) {
 
   const loadRoom = async () => {
     try {
-      await waitForFirestoreReady();
       
       const roomRef = doc(db, 'CodenamesRoom', roomCode);
       let snapshot = await getDoc(roomRef);

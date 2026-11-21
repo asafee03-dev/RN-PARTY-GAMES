@@ -1,6 +1,7 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, initializeFirestore } from "firebase/firestore";
+import { Platform } from "react-native";
 
 // Your Firebase configuration
 const firebaseConfig = {
@@ -17,50 +18,21 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore - connect to default database (explicitly specify databaseId)
-const db = getFirestore(app, "default");
+// Firestore on the named database "default".
+// On iOS/Android the default streaming connection sometimes stalls (often
+// after the app was in the background); the SDK then waits ~10s per request
+// before falling back, which made creating/joining a room take up to ~20s.
+// Long polling avoids that on native. Web keeps the default transport.
+const db = initializeFirestore(
+  app,
+  Platform.OS === 'web' ? {} : { experimentalForceLongPolling: true },
+  "default"
+);
 
-// Wait for Firestore to be ready (online)
-let firestoreReady = false;
-let firestoreReadyResolve = null;
-const firestoreReadyPromise = new Promise((resolve) => {
-  firestoreReadyResolve = resolve;
-});
-
-// Check if Firestore is online
-const checkFirestoreReady = async () => {
-  try {
-    // Try to read from Firestore to check if it's online
-    const testDoc = doc(db, "_test", "connection");
-    await getDoc(testDoc);
-    if (!firestoreReady) {
-      firestoreReady = true;
-      if (firestoreReadyResolve) {
-        firestoreReadyResolve();
-      }
-    }
-  } catch (error) {
-    // If error, Firestore might be offline, but we'll still resolve after a shorter timeout
-    setTimeout(() => {
-      if (!firestoreReady) {
-        firestoreReady = true;
-        if (firestoreReadyResolve) {
-          firestoreReadyResolve();
-        }
-      }
-    }, 300);
-  }
-};
-
-// Start checking
-checkFirestoreReady();
-
-export const waitForFirestoreReady = async () => {
-  if (firestoreReady) {
-    return Promise.resolve();
-  }
-  return firestoreReadyPromise;
-};
+// Open the connection at startup (while the player types a name), so the
+// first create/join doesn't also pay for connecting. Fire-and-forget: nothing
+// waits on it (rules deny this path, so it fails fast once connected).
+getDoc(doc(db, "_test", "connection")).catch(() => {});
 
 // Export for use in other files
 export { app, db };

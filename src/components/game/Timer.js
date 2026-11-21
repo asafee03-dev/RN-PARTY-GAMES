@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet } from 'react-native';
 import { S } from '../../strings';
 import { TimerDisplay } from '../../ui';
-import { serverNow } from '../../utils/serverClock';
+import { secondsLeft, startSecondTicker } from '../../utils/serverClock';
 
 /**
  * Timer component that uses startTime and duration
@@ -16,7 +16,6 @@ import { serverNow } from '../../utils/serverClock';
 export default function Timer({ duration, startTime, onTimeUp, compact = false }) {
   const [displayTime, setDisplayTime] = useState(duration);
   const hasCalledTimeUpRef = useRef(false);
-  const intervalRef = useRef(null);
 
   useEffect(() => {
     if (!startTime) {
@@ -27,9 +26,9 @@ export default function Timer({ duration, startTime, onTimeUp, compact = false }
 
     hasCalledTimeUpRef.current = false;
 
+    let stop = () => {};
     const updateTimer = () => {
-      const elapsed = Math.floor((serverNow() - startTime) / 1000);
-      const remaining = Math.max(0, duration - elapsed);
+      const remaining = secondsLeft(startTime, duration);
       setDisplayTime(remaining);
 
       if (remaining === 0 && !hasCalledTimeUpRef.current) {
@@ -37,25 +36,17 @@ export default function Timer({ duration, startTime, onTimeUp, compact = false }
         if (onTimeUp) {
           onTimeUp();
         }
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-        }
+        stop();
       }
     };
 
-    updateTimer();
-    intervalRef.current = setInterval(updateTimer, 100);
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
+    // Ticks on the server clock's second boundaries, so every phone shows the
+    // same number at the same moment
+    stop = startSecondTicker(startTime, updateTimer);
+    return () => stop();
   }, [startTime, duration, onTimeUp]);
 
-  // Display only - the timing logic above is unchanged
+  // Display only
   return (
     <TimerDisplay
       remaining={displayTime}

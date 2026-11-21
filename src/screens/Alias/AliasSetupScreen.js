@@ -8,6 +8,7 @@ import { db } from '../../firebase';
 import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
 import storage from '../../utils/storage';
 import { randomInt, shuffle } from '../../utils/random';
+import { syncServerClock } from '../../utils/serverClock';
 import { S } from '../../strings';
 import { colors, radii, spacing, touch, useGameTheme } from '../../theme';
 import { AppText, Button, Card, Icon, IconButton, PlayerChip, Screen, accessibleSurface, readableOn } from '../../ui';
@@ -106,6 +107,14 @@ export default function AliasSetupScreen({ navigation, route }) {
     });
     return unsubscribeNav;
   }, [navigation]);
+
+  // Measure the server clock offset while still in setup, so it's ready
+  // before the first turn's timer (runs once per app session)
+  useEffect(() => {
+    if (room?.id) {
+      syncServerClock('GameRoom', room.id);
+    }
+  }, [room?.id]);
 
   // Auto-navigate when game starts
   const hasNavigatedToGame = useRef(false);

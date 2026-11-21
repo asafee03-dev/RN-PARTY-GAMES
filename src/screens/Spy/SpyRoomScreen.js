@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BannerAd from '../../components/shared/BannerAd';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
-import { db, waitForFirestoreReady } from '../../firebase';
+import { db } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, collection, getDocs, runTransaction, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
@@ -18,7 +18,12 @@ import { colors, motion, radii, spacing, useGameTheme } from '../../theme';
 import { AppText, Badge, Button, Card, Icon, PlayerChip, Screen, TextField, TimerDisplay, feedback } from '../../ui';
 import { REPEAT_SPY_WEIGHT, pickFresh, remember, weightedSample } from '../../utils/random';
 import { dealRoles } from '../../logic/spyLocal';
-import { serverNow, syncServerClock } from '../../utils/serverClock';
+import { serverNow, startSecondTicker, syncServerClock } from '../../utils/serverClock';
+
+// The game timer ref holds the ticker's stop function
+const stopTicker = (ref) => {
+  if (typeof ref.current === 'function') ref.current();
+};
 
 const GAME_SECONDS = 360; // 6 minutes
 // If the acting host's phone is asleep, any player may end an overdue game
@@ -157,7 +162,7 @@ export default function SpyRoomScreen({ navigation, route }) {
       unsubscribeRef.current = null;
     }
     if (timerInterval.current) {
-      clearInterval(timerInterval.current);
+      stopTicker(timerInterval);
       timerInterval.current = null;
     }
 
@@ -170,7 +175,7 @@ export default function SpyRoomScreen({ navigation, route }) {
         unsubscribeRef.current = null;
       }
       if (timerInterval.current) {
-        clearInterval(timerInterval.current);
+        stopTicker(timerInterval);
         timerInterval.current = null;
       }
     };
@@ -188,7 +193,7 @@ export default function SpyRoomScreen({ navigation, route }) {
         });
       }
       if (timerInterval.current) {
-        clearInterval(timerInterval.current);
+        stopTicker(timerInterval);
         timerInterval.current = null;
       }
       if (unsubscribeRef.current) {
@@ -203,7 +208,7 @@ export default function SpyRoomScreen({ navigation, route }) {
     // Start timer when game starts
     if (room?.game_status === 'playing' && room?.game_start_time) {
       if (timerInterval.current) {
-        clearInterval(timerInterval.current);
+        stopTicker(timerInterval);
       }
 
       const updateTimer = () => {
@@ -223,16 +228,17 @@ export default function SpyRoomScreen({ navigation, route }) {
         }
       };
 
-      updateTimer();
-      timerInterval.current = setInterval(updateTimer, 1000);
+      // Ticks on the server clock's second boundaries, so every phone shows
+      // the same number at the same moment
+      timerInterval.current = startSecondTicker(room.game_start_time, updateTimer);
     } else if (room?.game_status !== 'playing' && timerInterval.current) {
-      clearInterval(timerInterval.current);
+      stopTicker(timerInterval);
       timerInterval.current = null;
     }
 
     return () => {
       if (timerInterval.current) {
-        clearInterval(timerInterval.current);
+        stopTicker(timerInterval);
         timerInterval.current = null;
       }
     };
@@ -242,7 +248,6 @@ export default function SpyRoomScreen({ navigation, route }) {
     console.log('🔵 Loading Spy room with code:', roomCode);
     try {
       setIsLoading(true);
-      await waitForFirestoreReady();
       
       const roomRef = doc(db, 'SpyRoom', roomCode);
       const roomSnap = await getDoc(roomRef);
@@ -823,7 +828,7 @@ export default function SpyRoomScreen({ navigation, route }) {
     
     // Cancel timer
     if (timerInterval.current) {
-      clearInterval(timerInterval.current);
+      stopTicker(timerInterval);
       timerInterval.current = null;
     }
     
@@ -882,7 +887,7 @@ export default function SpyRoomScreen({ navigation, route }) {
 
       // Cleanup all listeners and timers
       if (timerInterval.current) {
-        clearInterval(timerInterval.current);
+        stopTicker(timerInterval);
         timerInterval.current = null;
       }
       if (unsubscribeRef.current) {

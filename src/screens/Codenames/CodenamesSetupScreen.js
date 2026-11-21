@@ -5,7 +5,7 @@ import BannerAd from '../../components/shared/BannerAd';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import TwoPhonesLobby from '../../components/codenames/TwoPhonesLobby';
-import { db, waitForFirestoreReady } from '../../firebase';
+import { db } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { shuffle } from '../../utils/random';
@@ -94,7 +94,6 @@ export default function CodenamesSetupScreen({ navigation, route }) {
   const loadRoom = async (playerName) => {
     console.log('🔵 Loading Codenames room with code:', roomCode);
     try {
-      await waitForFirestoreReady();
       
       const roomRef = doc(db, 'CodenamesRoom', roomCode);
       let snapshot = await getDoc(roomRef);

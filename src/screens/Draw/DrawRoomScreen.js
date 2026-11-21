@@ -8,7 +8,7 @@ import DrawCanvas from '../../components/draw/DrawCanvas';
 import Timer from '../../components/game/Timer';
 import RulesModal from '../../components/shared/RulesModal';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
-import { db, waitForFirestoreReady } from '../../firebase';
+import { db } from '../../firebase';
 import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 import storage from '../../utils/storage';
@@ -557,7 +557,6 @@ export default function DrawRoomScreen({ navigation, route }) {
     console.log('🔵 Loading Draw room with code:', roomCode);
     try {
       setIsLoading(true);
-      await waitForFirestoreReady();
       
       // Query by room_code field instead of document ID
       const q = query(collection(db, 'DrawRoom'), where('room_code', '==', roomCode.toUpperCase()));

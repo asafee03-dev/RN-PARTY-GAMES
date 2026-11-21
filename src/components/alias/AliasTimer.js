@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { S } from '../../strings';
 import { TimerDisplay } from '../../ui';
-import { serverNow } from '../../utils/serverClock';
+import { secondsLeft, startSecondTicker } from '../../utils/serverClock';
 
 /**
  * Timer component for Alias
@@ -23,8 +23,7 @@ export default function AliasTimer({
     }
 
     const updateTimer = () => {
-      const elapsed = Math.floor((serverNow() - startTime) / 1000);
-      const remaining = Math.max(0, duration - elapsed);
+      const remaining = secondsLeft(startTime, duration);
 
       setTimeLeft(remaining);
 
@@ -33,13 +32,9 @@ export default function AliasTimer({
       }
     };
 
-    // Update immediately
-    updateTimer();
-
-    // Update every second
-    const interval = setInterval(updateTimer, 1000);
-
-    return () => clearInterval(interval);
+    // Ticks on the server clock's second boundaries, so every phone shows the
+    // same number at the same moment
+    return startSecondTicker(startTime, updateTimer);
   }, [startTime, duration, onTimeUp]);
 
   return (

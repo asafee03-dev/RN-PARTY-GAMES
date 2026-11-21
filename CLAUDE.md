@@ -36,7 +36,7 @@ There is no test suite. Pushing to `main` triggers `.github/workflows/firebase-h
 - Saved navigation state is cleared on every cold start, so the app always opens at Home.
 
 **Game state / Firestore:**
-- `src/firebase.js` exports `db`. It uses the named database `"default"` via `getFirestore(app, "default")`, so keep that argument.
+- `src/firebase.js` exports `db`. It uses the named database `"default"` via `initializeFirestore(app, settings, "default")`, so keep that argument. Native forces long polling (the streaming transport stalled for ~10s per request on phones); web uses the default transport.
 - Room collections, with the room code as document ID: `GameRoom` (Alias), `CodenamesRoom`, `DrawRoom`, `FrequencyRoom`, `SpyRoom`.
 - Read-only content collections: `WordCard`, `DrawWord`, `SpyLocation`, `FrequencyTopic`.
 - Field names are snake_case. `FIRESTORE_VERIFICATION.md` documents the per-collection schema, and `FIRESTORE_RULES.txt` is the reference copy of the security rules (deployed manually; not wired into `firebase.json`).
@@ -50,7 +50,7 @@ There is no test suite. Pushing to `main` triggers `.github/workflows/firebase-h
 - `src/utils/roomManagement.js`: unique room-code generation, plus `setupAllAutoDeletions`, which handles client-side deletion of rooms that are finished, empty, or too old.
 - `src/utils/playerJoin.js`: `atomicPlayerJoin`, a transaction-based join/rejoin (safe for several friends joining at once).
 - `src/utils/gameSync.js`: acting-host, next-active-player and `markPlayerInactive` helpers.
-- `src/utils/serverClock.js`: `serverNow()` is `Date.now()` corrected by this device's offset from the Firestore server clock (measured once per session via `syncServerClock(collection, roomId)`). Use it for every timer and for start timestamps written to Firestore; plain `Date.now()` made phones with a wrong clock show different countdowns.
+- `src/utils/serverClock.js`: `serverNow()` is `Date.now()` corrected by this device's offset from the Firestore server clock (measured once per session via `syncServerClock(collection, roomId)`). Use it for every timer and for start timestamps written to Firestore; plain `Date.now()` made phones with a wrong clock show different countdowns. Drive countdowns with `startSecondTicker(startTime, tick)` / `secondsLeft()`, not a plain 1s `setInterval` (each phone's interval ticks at a different point in the second, so displays drifted up to 1s apart).
 
 New room features should go through these utilities rather than reimplementing them.
 

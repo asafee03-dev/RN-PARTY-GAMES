@@ -82,6 +82,8 @@ export const typography = {
   label: { fontFamily: fonts.medium, fontSize: 16, lineHeight: 22 },
   button: { fontFamily: fonts.bold, fontSize: 18, lineHeight: 24 },
   caption: { fontFamily: fonts.regular, fontSize: 16, lineHeight: 22 },
+  // Dense graphics only (dial / board labels drawn in SVG), never body text
+  dial: { fontFamily: fonts.bold, fontSize: 13, lineHeight: 16 },
 };
 
 /**

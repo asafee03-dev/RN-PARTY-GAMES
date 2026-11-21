@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Dimensions, PanResponder, StyleSheet, View } from 'react-native';
 import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 import { S } from '../../strings';
-import { colors, radii, spacing, useGameTheme } from '../../theme';
+import { colors, radii, spacing, typography, useGameTheme } from '../../theme';
 import { AppText, Icon, physicalRow } from '../../ui';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -245,22 +245,24 @@ export default function FrequencyGauge({
     return sectors.map((sector, i) => {
       const midAngle = (Math.max(0, sector.start) + Math.min(180, sector.end)) / 2;
       const midRad = (midAngle + 180) * Math.PI / 180;
-      const labelX = centerX + (radius * 0.62) * Math.cos(midRad);
-      const labelY = centerY + (radius * 0.62) * Math.sin(midRad);
+      // In the outer band of the dial, where a 10-degree sector is widest, so
+      // the three numbers never overlap
+      const labelX = centerX + radius * Math.cos(midRad);
+      const labelY = centerY + radius * Math.sin(midRad);
       const isTop = sector.points === 2;
+      const label = isMobile ? typography.dial : typography.label;
 
       return (
         <SvgText
           key={`text-${i}`}
           x={labelX}
-          y={labelY + 7}
-          fontSize={isMobile ? 20 : 24}
-          fontFamily="Rubik-Bold"
-          fontWeight="bold"
+          y={labelY + label.fontSize * 0.36}
+          fontSize={label.fontSize}
+          fontFamily={typography.dial.fontFamily}
           textAnchor="middle"
           fill={isTop ? colors.white : colors.ink}
           stroke={isTop ? SECTOR_TOP : SECTOR_SIDE}
-          strokeWidth={3}
+          strokeWidth={2}
           paintOrder="stroke"
         >
           {sector.points}

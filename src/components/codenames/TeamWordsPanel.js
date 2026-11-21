@@ -1,16 +1,24 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { StyleSheet, View } from 'react-native';
+import { S } from '../../strings';
+import { colors, radii, spacing } from '../../theme';
+import { AppText, Badge, Card, Icon } from '../../ui';
+import { getTeamStyle } from './teamStyle';
 
-export default function TeamWordsPanel({ 
-  words, 
-  keyMap, 
-  revealedIndices, 
-  teamColor, 
-  compact = false 
+/**
+ * The spymaster's list of their team's words; revealed words are crossed out
+ * with a check (not just dimmed). Same props as before.
+ */
+export default function TeamWordsPanel({
+  words,
+  keyMap,
+  revealedIndices,
+  teamColor,
+  compact = false // eslint-disable-line no-unused-vars
 }) {
+  const t = getTeamStyle(teamColor);
   const teamWords = [];
-  
+
   keyMap.forEach((color, index) => {
     if (color === teamColor) {
       teamWords.push({
@@ -25,135 +33,71 @@ export default function TeamWordsPanel({
   const totalCount = teamWords.length;
 
   return (
-    <View style={[styles.container, teamColor === 'red' ? styles.redContainer : styles.blueContainer]}>
-      <LinearGradient
-        colors={teamColor === 'red' ? ['#EF4444', '#DC2626'] : ['#3B82F6', '#2563EB']}
-        style={styles.header}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-      >
-        <Text style={[styles.title, compact && styles.compactTitle]}>
-          מילות הקבוצה
-        </Text>
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>
-            {revealedCount}/{totalCount}
-          </Text>
-        </View>
-      </LinearGradient>
-      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        <View style={[styles.grid, compact && styles.compactGrid]}>
-          {teamWords.map((item, idx) => (
-            <View
-              key={idx}
-              style={[
-                styles.wordItem,
-                compact && styles.compactWordItem,
-                item.revealed ? styles.revealedItem : styles.unrevealedItem
-              ]}
+    <Card padding="md" style={[styles.card, { borderColor: t.fill }]}>
+      <View style={styles.header}>
+        <Icon name={t.icon} size={22} color={t.ink} />
+        <AppText variant="subtitle" color={t.ink} style={styles.flex}>
+          {S.codenames.teams.teamWords}
+        </AppText>
+        <Badge label={`${revealedCount}/${totalCount}`} icon="check" tone="neutral" />
+      </View>
+      <View style={styles.chips}>
+        {teamWords.map((item, idx) => (
+          <View
+            key={idx}
+            accessible
+            accessibilityLabel={item.revealed ? `${item.word}, ${S.codenames.board.revealed}` : item.word}
+            style={[styles.chip, item.revealed && styles.chipDone]}
+          >
+            {item.revealed ? <Icon name="check" size={16} color={colors.inkSoft} /> : null}
+            <AppText
+              variant="label"
+              color={item.revealed ? colors.inkSoft : colors.ink}
+              style={item.revealed && styles.struck}
             >
-              <Text style={[
-                styles.wordText,
-                compact && styles.compactWordText,
-                item.revealed && styles.revealedText
-              ]}>
-                {item.word}
-              </Text>
-            </View>
-          ))}
-        </View>
-      </ScrollView>
-    </View>
+              {item.word}
+            </AppText>
+          </View>
+        ))}
+      </View>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    borderWidth: 2,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
+  flex: {
+    flex: 1,
   },
-  redContainer: {
-    borderColor: '#EF4444',
-    backgroundColor: '#FEE2E2',
-  },
-  blueContainer: {
-    borderColor: '#3B82F6',
-    backgroundColor: '#DBEAFE',
+  card: {
+    gap: spacing.sm,
+    borderWidth: 2.5,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    gap: 8,
+    gap: spacing.sm,
   },
-  compactHeader: {
-    padding: 8,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  compactTitle: {
-    fontSize: 14,
-  },
-  badge: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  content: {
-    maxHeight: 200,
-  },
-  contentContainer: {
-    padding: 16,
-  },
-  grid: {
+  chips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: spacing.sm,
   },
-  compactGrid: {
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 4,
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
   },
-  wordItem: {
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    minWidth: '30%',
+  chipDone: {
+    backgroundColor: colors.cardboard,
+    borderStyle: 'dashed',
   },
-  compactWordItem: {
-    padding: 6,
-    minWidth: '45%',
-  },
-  revealedItem: {
-    backgroundColor: '#D1FAE5',
-    borderColor: '#10B981',
-  },
-  unrevealedItem: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#D1D5DB',
-  },
-  wordText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  compactWordText: {
-    fontSize: 12,
-  },
-  revealedText: {
+  struck: {
     textDecorationLine: 'line-through',
-    color: '#6B7280',
   },
 });
-

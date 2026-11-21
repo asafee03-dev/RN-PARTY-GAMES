@@ -1,410 +1,154 @@
-import React, { useCallback, useState, useRef, forwardRef, useImperativeHandle, useEffect } from 'react';
-import { View, StyleSheet, Dimensions, PanResponder } from 'react-native';
-import Svg, { Path, G } from 'react-native-svg';
-
-const { width, height } = Dimensions.get('window');
-// Canvas takes 70-80% of screen height on mobile, centered and large
-// Use consistent size calculation to ensure canvas fits in same space on mobile
-const CANVAS_SIZE = Math.min(width - 40, height * 0.7, 600); // 70% of height, max 600px, with padding
-const CANVAS_WIDTH = CANVAS_SIZE;
-const CANVAS_HEIGHT = CANVAS_SIZE;
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { PanResponder, StyleSheet, View } from 'react-native';
+import Svg, { G, Path } from 'react-native-svg';
 
 /**
- * Draw Canvas component using react-native-svg
- * Supports Vite API: strokes, onStrokeComplete, canDraw, color, brushSize, toolType
- * Also supports legacy API: initialStrokes, onDrawingChange, disabled
+ * Drawing canvas with device-independent coordinates.
+ *
+ * Every stroke is stored on a fixed GRID x GRID square (0..1000, i.e. 0..1
+ * with three decimals) and drawn through an SVG viewBox, so each device scales
+ * the whole drawing - stroke thickness included - to its own canvas size. An
+ * iPad drawing is shown complete on a phone and the other way round.
+ *
+ * Stroke format (written to Firestore by the Draw screen):
+ *   { v: 2, path: 'M 120 340 Q ...' (grid units), color, width (grid units), points: [] }
+ * Strokes without v: 2 (the old pixel format) are ignored, never crash.
+ *
+ * props: strokes, onStrokeComplete(stroke), canDraw, color, brushSize (px on a
+ * ~360px phone canvas, converted to grid units), toolType, size (px, square)
  */
-const DrawCanvas = forwardRef(({ 
-  // Vite API
+export const GRID = 1000;
+export const STROKE_VERSION = 2;
+const BRUSH_TO_GRID = GRID / 360; // keeps the old look of 3/6/9 px brushes on a phone
+
+const round1 = (n) => Math.round(n * 10) / 10;
+
+export const isCurrentStroke = (s) => !!s && s.v === STROKE_VERSION && typeof s.path === 'string';
+
+// Quadratic smoothing through the midpoints (grid units)
+const pointsToPath = (points) => {
+  if (points.length === 0) return '';
+  const p0 = points[0];
+  if (points.length === 1) return `M ${p0.x} ${p0.y} L ${p0.x + 0.1} ${p0.y}`; // a dot
+  if (points.length === 2) return `M ${p0.x} ${p0.y} L ${points[1].x} ${points[1].y}`;
+  let d = `M ${p0.x} ${p0.y}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const c = points[i];
+    const n = points[i + 1];
+    d += ` Q ${c.x} ${c.y} ${round1((c.x + n.x) / 2)} ${round1((c.y + n.y) / 2)}`;
+  }
+  const last = points[points.length - 1];
+  return `${d} L ${last.x} ${last.y}`;
+};
+
+export default function DrawCanvas({
   strokes = [],
   onStrokeComplete,
   canDraw = false,
   color = '#000000',
   brushSize = 3,
   toolType = 'pencil',
-  // Legacy API
-  onDrawingChange,
-  initialStrokes = [],
-  disabled = false,
-  onExportReady
-}, ref) => {
-  // Use Vite API if strokes prop is provided, otherwise use legacy
-  const useViteAPI = strokes !== undefined && strokes.length >= 0;
-  const isDisabled = useViteAPI ? !canDraw : disabled;
-  
-  const [paths, setPaths] = useState(() => {
-    if (useViteAPI) {
-      return strokes.map(stroke => ({
-        pathString: stroke.path || '',
-        color: stroke.color || color,
-        width: stroke.width || brushSize,
-        points: stroke.points || [],
-      }));
-    } else {
-      return initialStrokes.map(stroke => ({
-        pathString: stroke.path || '',
-        color: stroke.color || '#000000',
-        width: stroke.width || 3,
-        points: stroke.points || [],
-      }));
-    }
-  });
-
+  size = 300,
+}) {
   const [currentPath, setCurrentPath] = useState(null);
-  const currentPointsRef = useRef([]); // points of the stroke being drawn (not rendered, so no state)
-  const pathsRef = useRef([]); // latest completed paths, for callbacks outside state updaters
-  const latestPropsRef = useRef({}); // latest callbacks/flags - the PanResponder is created once
-  const isDrawingRef = useRef(false);
-  const justCompletedStrokeRef = useRef(false);
-  const svgRef = useRef(null);
-  const disabledRef = useRef(isDisabled);
-  const currentColorRef = useRef(color);
-  const currentBrushSizeRef = useRef(brushSize);
-  const currentToolTypeRef = useRef(toolType);
-  
-  // Update refs when props change
+  const pointsRef = useRef([]);
+  const drawingRef = useRef(false);
+  // The PanResponder is created once, so it reads the latest props from a ref
+  const latest = useRef({});
+  latest.current = { canDraw, color, brushSize, toolType, size, onStrokeComplete };
+
+  // Turn ended / tool disabled mid-stroke: drop the unfinished stroke
   useEffect(() => {
-    latestPropsRef.current = { useViteAPI, onStrokeComplete, onDrawingChange };
-    disabledRef.current = isDisabled;
-    currentColorRef.current = color;
-    currentBrushSizeRef.current = brushSize;
-    currentToolTypeRef.current = toolType;
-  }, [isDisabled, color, brushSize, toolType, useViteAPI, onStrokeComplete, onDrawingChange]);
-
-  useEffect(() => {
-    pathsRef.current = paths;
-  }, [paths]);
-
-  // Update paths when strokes prop changes (Vite API)
-  // Only update if we're not currently drawing to prevent erasing strokes
-  // Also skip update if we just completed a stroke locally (to prevent race conditions)
-  useEffect(() => {
-    if (useViteAPI && strokes && !isDrawingRef.current && !justCompletedStrokeRef.current) {
-      setPaths(prevPaths => {
-        // Only update if strokes prop has a different length (external update)
-        // This prevents overwriting when we just completed a stroke locally
-        if (strokes.length !== prevPaths.length) {
-          const newPaths = strokes.map(stroke => ({
-            pathString: stroke.path || '',
-            color: stroke.color || color,
-            width: stroke.width || brushSize,
-            points: stroke.points || [],
-          }));
-          return newPaths;
-        }
-        // If lengths match, keep local paths (they may have just been updated)
-        return prevPaths;
-      });
-    }
-  }, [useViteAPI, strokes, color, brushSize]);
-
-  // Update paths when initialStrokes changes (Legacy API)
-  useEffect(() => {
-    if (!useViteAPI && initialStrokes) {
-      if (initialStrokes.length > 0) {
-        const newPaths = initialStrokes.map(stroke => ({
-          pathString: stroke.path || '',
-          color: stroke.color || '#000000',
-          width: stroke.width || 3,
-          points: stroke.points || [],
-        }));
-        setPaths(newPaths);
-      } else if (initialStrokes.length === 0 && paths.length > 0) {
-        setPaths([]);
-      }
-    }
-  }, [useViteAPI, initialStrokes]);
-
-  // Convert points array to SVG path string
-  const pointsToPath = useCallback((points) => {
-    if (points.length === 0) return '';
-    if (points.length === 1) {
-      return `M ${points[0].x} ${points[0].y}`;
-    }
-    
-    let pathString = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 1; i < points.length; i++) {
-      pathString += ` L ${points[i].x} ${points[i].y}`;
-    }
-    return pathString;
-  }, []);
-
-  // Create smooth path using quadratic curves
-  const pointsToSmoothPath = useCallback((points) => {
-    if (points.length === 0) return '';
-    if (points.length === 1) {
-      return `M ${points[0].x} ${points[0].y}`;
-    }
-    if (points.length === 2) {
-      return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
-    }
-
-    let pathString = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 1; i < points.length - 1; i++) {
-      const current = points[i];
-      const next = points[i + 1];
-      const midX = (current.x + next.x) / 2;
-      const midY = (current.y + next.y) / 2;
-      
-      if (i === 1) {
-        pathString += ` Q ${current.x} ${current.y} ${midX} ${midY}`;
-      } else {
-        pathString += ` T ${midX} ${midY}`;
-      }
-    }
-    
-    const lastPoint = points[points.length - 1];
-    pathString += ` T ${lastPoint.x} ${lastPoint.y}`;
-    
-    return pathString;
-  }, []);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: (evt, gestureState) => {
-        if (disabledRef.current) return false;
-        // Always capture touch events when enabled
-        return true;
-      },
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-        if (disabledRef.current) return false;
-        // Capture move events to prevent scrolling
-        return true;
-      },
-      onPanResponderTerminationRequest: () => false, // Don't allow termination
-      onPanResponderGrant: (evt) => {
-        if (disabledRef.current) return;
-        // Prevent default to stop page scrolling
-        evt.preventDefault?.();
-        evt.stopPropagation?.();
-        const { locationX, locationY } = evt.nativeEvent;
-        const point = { x: locationX, y: locationY };
-        isDrawingRef.current = true;
-        
-        // Sync with strokes prop only if it has more strokes than local state
-        // This handles external updates (from Firestore) without overwriting local additions
-        if (useViteAPI && strokes) {
-          setPaths(prev => {
-            // Only sync if strokes prop has more items than local paths (external update)
-            if (strokes.length > prev.length) {
-              const existingPaths = strokes.map(stroke => ({
-                pathString: stroke.path || '',
-                color: stroke.color || color,
-                width: stroke.width || brushSize,
-                points: stroke.points || [],
-              }));
-              return existingPaths;
-            }
-            // Keep local paths if they're up to date or have more items
-            return prev;
-          });
-        }
-        
-        currentPointsRef.current = [point];
-        
-        const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
-        const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
-        
-        setCurrentPath({
-          pathString: `M ${point.x} ${point.y}`,
-          color: strokeColor,
-          width: strokeWidth,
-        });
-      },
-      onPanResponderMove: (evt) => {
-        if (disabledRef.current || !isDrawingRef.current) return;
-        // Prevent default to stop page scrolling
-        evt.preventDefault?.();
-        evt.stopPropagation?.();
-        const { locationX, locationY } = evt.nativeEvent;
-        const point = { x: locationX, y: locationY };
-        
-        const newPoints = [...currentPointsRef.current, point];
-        currentPointsRef.current = newPoints;
-
-        const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
-        const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
-
-        setCurrentPath({
-          pathString: pointsToSmoothPath(newPoints),
-          color: strokeColor,
-          width: strokeWidth,
-        });
-      },
-      onPanResponderRelease: () => {
-        if (disabledRef.current || !isDrawingRef.current) return;
-
-        // Everything with side effects (Firestore callbacks, refs, timers) runs
-        // here, NOT inside a state updater: React may call updaters twice, which
-        // would send the same stroke twice.
-        const points = currentPointsRef.current;
-        currentPointsRef.current = [];
-        isDrawingRef.current = false;
-        setCurrentPath(null);
-        if (points.length === 0) return;
-
-        const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
-        const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
-        const finalPathString = pointsToSmoothPath(points);
-        // Save as path string only to save space, not points
-        const newPath = { pathString: finalPathString, color: strokeColor, width: strokeWidth, points: [] };
-
-        const updatedPaths = [...pathsRef.current, newPath];
-        pathsRef.current = updatedPaths;
-        setPaths(updatedPaths);
-
-        // Prevent the strokes-prop effect from overwriting this local update
-        justCompletedStrokeRef.current = true;
-        setTimeout(() => {
-          justCompletedStrokeRef.current = false;
-        }, 100);
-
-        const { useViteAPI: viteApi, onStrokeComplete: strokeDone, onDrawingChange: drawingChanged } = latestPropsRef.current;
-        if (viteApi && strokeDone) {
-          // Vite API: one stroke at a time
-          strokeDone({ path: finalPathString, color: strokeColor, width: strokeWidth, points: [] });
-        }
-        if (!viteApi && drawingChanged) {
-          // Legacy API: all strokes
-          drawingChanged(updatedPaths.map((p) => ({ path: p.pathString, color: p.color, width: p.width, points: [] })));
-        }
-      },
-      onPanResponderTerminate: () => {
-        setCurrentPath(null);
-        currentPointsRef.current = [];
-        isDrawingRef.current = false;
-      },
-    })
-  ).current;
-
-  // Export drawing as SVG string
-  const exportDrawing = useCallback(async () => {
-    try {
-      const svgString = `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
-  ${paths.map((pathData, index) => 
-    `<path 
-      key="${index}"
-      d="${pathData.pathString}" 
-      stroke="${pathData.color}" 
-      stroke-width="${pathData.width}" 
-      fill="none" 
-      stroke-linecap="round" 
-      stroke-linejoin="round"
-    />`
-  ).join('\n  ')}
-</svg>`;
-
-      if (onExportReady) {
-        onExportReady({
-          svg: svgString,
-          strokes: paths.map(p => ({
-            path: p.pathString,
-            color: p.color,
-            width: p.width,
-            points: p.points,
-          })),
-        });
-      }
-    } catch (error) {
-      console.error('Error exporting drawing:', error);
-    }
-  }, [paths, onExportReady]);
-
-  // Expose export function via ref
-  useImperativeHandle(ref, () => ({
-    exportDrawing,
-    clearCanvas: () => {
-      setPaths([]);
+    if (!canDraw) {
+      drawingRef.current = false;
+      pointsRef.current = [];
       setCurrentPath(null);
-      currentPointsRef.current = [];
-      pathsRef.current = [];
-      isDrawingRef.current = false;
-      if (!useViteAPI && onDrawingChange) {
-        onDrawingChange([]);
-      }
-    },
-  }));
+    }
+  }, [canDraw]);
+
+  const strokeStyle = () => {
+    const { toolType: tool, color: c, brushSize: b } = latest.current;
+    const eraser = tool === 'eraser';
+    return { color: eraser ? '#FFFFFF' : c, width: round1((eraser ? b * 2 : b) * BRUSH_TO_GRID) };
+  };
+
+  // Touch position (px inside the canvas) -> grid units, clamped to the sheet
+  const toGrid = (evt) => {
+    const s = latest.current.size || 1;
+    const { locationX, locationY } = evt.nativeEvent;
+    const clamp = (v) => Math.max(0, Math.min(GRID, Math.round((v / s) * GRID)));
+    return { x: clamp(locationX), y: clamp(locationY) };
+  };
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !!latest.current.canDraw,
+        onMoveShouldSetPanResponder: () => !!latest.current.canDraw,
+        onPanResponderTerminationRequest: () => false, // keep the gesture while drawing
+        onPanResponderGrant: (evt) => {
+          if (!latest.current.canDraw) return;
+          drawingRef.current = true;
+          pointsRef.current = [toGrid(evt)];
+          setCurrentPath({ ...strokeStyle(), path: pointsToPath(pointsRef.current) });
+        },
+        onPanResponderMove: (evt) => {
+          if (!drawingRef.current || !latest.current.canDraw) return;
+          const p = toGrid(evt);
+          const prev = pointsRef.current[pointsRef.current.length - 1];
+          if (prev && Math.abs(prev.x - p.x) < 2 && Math.abs(prev.y - p.y) < 2) return; // skip jitter
+          pointsRef.current = [...pointsRef.current, p];
+          setCurrentPath({ ...strokeStyle(), path: pointsToPath(pointsRef.current) });
+        },
+        onPanResponderRelease: () => {
+          if (!drawingRef.current) return;
+          drawingRef.current = false;
+          const points = pointsRef.current;
+          pointsRef.current = [];
+          setCurrentPath(null);
+          if (points.length === 0 || !latest.current.canDraw) return;
+          const { color: c, width } = strokeStyle();
+          latest.current.onStrokeComplete?.({ v: STROKE_VERSION, path: pointsToPath(points), color: c, width, points: [] });
+        },
+        onPanResponderTerminate: () => {
+          drawingRef.current = false;
+          pointsRef.current = [];
+          setCurrentPath(null);
+        },
+      }),
+    []
+  );
+
+  const visible = (strokes || []).filter(isCurrentStroke);
 
   return (
-    <View 
-      style={styles.container} 
-      {...panResponder.panHandlers}
-      onStartShouldSetResponder={() => !disabledRef.current}
-      onMoveShouldSetResponder={() => !disabledRef.current}
-      onResponderTerminationRequest={() => false}
-      onTouchStart={(e) => {
-        if (!disabledRef.current) {
-          e.stopPropagation();
-        }
-      }}
-      onTouchMove={(e) => {
-        if (!disabledRef.current) {
-          e.stopPropagation();
-        }
-      }}
+    <View
+      style={[styles.sheet, { width: size, height: size }, canDraw && styles.drawing]}
+      {...(canDraw ? panResponder.panHandlers : {})}
     >
-      <Svg
-        ref={svgRef}
-        width={CANVAS_WIDTH}
-        height={CANVAS_HEIGHT}
-        style={styles.svg}
-      >
+      <Svg width={size} height={size} viewBox={`0 0 ${GRID} ${GRID}`} pointerEvents="none">
         <G>
-          {/* Render all completed paths */}
-          {paths.map((pathData, index) => (
-            <Path
-              key={`path-${index}`}
-              d={pathData.pathString}
-              stroke={pathData.color}
-              strokeWidth={pathData.width}
-              fill="none"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+          {visible.map((s, i) => (
+            <Path key={i} d={s.path} stroke={s.color} strokeWidth={s.width} fill="none" strokeLinecap="round" strokeLinejoin="round" />
           ))}
-          
-          {/* Render current drawing path */}
-          {currentPath && (
-            <Path
-              d={currentPath.pathString}
-              stroke={currentPath.color}
-              strokeWidth={currentPath.width}
-              fill="none"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
+          {currentPath ? (
+            <Path d={currentPath.path} stroke={currentPath.color} strokeWidth={currentPath.width} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          ) : null}
         </G>
       </Svg>
     </View>
   );
-});
-
-DrawCanvas.displayName = 'DrawCanvas';
-
-export default DrawCanvas;
+}
 
 const styles = StyleSheet.create({
-  container: {
-    width: CANVAS_WIDTH,
-    height: CANVAS_HEIGHT,
+  sheet: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 12,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
-    // Prevent scrolling while drawing
-    touchAction: 'none',
-    // Ensure canvas captures all touch events
-    pointerEvents: 'box-only',
-    // Prevent parent scroll when touching canvas
-    zIndex: 10,
   },
-  svg: {
-    flex: 1,
+  // Web: gestures on the canvas never scroll or zoom the page
+  drawing: {
+    touchAction: 'none',
+    userSelect: 'none',
   },
 });

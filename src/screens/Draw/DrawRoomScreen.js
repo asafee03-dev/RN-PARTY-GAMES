@@ -1,7 +1,7 @@
 import { collection, doc, getDocs, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BannerAd from '../../components/shared/BannerAd';
 import DrawCanvas from '../../components/draw/DrawCanvas';
@@ -154,6 +154,8 @@ export default function DrawRoomScreen({ navigation, route }) {
   const [toolType, setToolType] = useState('pencil');
   const [brushSize, setBrushSize] = useState(3);
   const [localStrokes, setLocalStrokes] = useState([]);
+  // Space available for the canvas (measured), so it fits every screen size
+  const [canvasArea, setCanvasArea] = useState({ width: 0, height: 0 });
   const [guessInput, setGuessInput] = useState('');
   const [drinkingMode, setDrinkingMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -1141,6 +1143,15 @@ export default function DrawRoomScreen({ navigation, route }) {
     room.players && Array.isArray(room.players) &&
     room.players.some(p => p && p.name === currentPlayerName));
 
+  // Drawer's turn: no scrolling. Word, timer and toolbar always stay on screen
+  // and the (square) canvas takes the space that is left.
+  const drawerMode = !!(iAmDrawing && room.game_status === 'playing' && !room.show_round_summary);
+  const canvasSize = canvasArea.width > 0
+    ? Math.max(120, Math.floor(drawerMode
+      ? Math.min(canvasArea.width - FRAME_X, canvasArea.height - FRAME_Y)
+      : Math.min(canvasArea.width - FRAME_X, MAX_GUESSER_CANVAS)))
+    : 0;
+
   return (
     <Screen
       header={
@@ -1153,7 +1164,8 @@ export default function DrawRoomScreen({ navigation, route }) {
         />
       }
       footer={<BannerAd />}
-      scrollEnabled={!iAmDrawing || !room || room.show_round_summary}
+      scroll={!drawerMode}
+      contentStyle={drawerMode ? styles.drawerContent : undefined}
     >
       <RulesModal
         visible={showRulesModal}
@@ -1260,13 +1272,17 @@ export default function DrawRoomScreen({ navigation, route }) {
         <>
           {/* Word (drawer) or who's drawing (guessers) */}
           {iAmDrawing && room.current_word ? (
-            <View style={[styles.wordCard, { backgroundColor: theme.accent, borderColor: theme.accentDeep }]}>
-              <AppText variant="label" color={theme.onAccent} align="center">
-                {S.draw.room.yourWord}
-              </AppText>
-              <AppText variant="heading" color={theme.onAccent} align="center">
-                {room.current_word}
-              </AppText>
+            <View style={[styles.wordBar, { backgroundColor: theme.accent, borderColor: theme.accentDeep }]}>
+              <View style={styles.wordText}>
+                <AppText variant="label" color={theme.onAccent}>
+                  {S.draw.room.yourWord}
+                </AppText>
+                <AppText variant="title" color={theme.onAccent} numberOfLines={1}>
+                  {room.current_word}
+                </AppText>
+              </View>
+              <IconButton icon="undo" label={S.draw.room.undo} onPress={handleUndo} disabled={localStrokes.length === 0} />
+              <IconButton icon="trash" label={S.draw.room.clear} onPress={handleClearAll} disabled={localStrokes.length === 0} />
             </View>
           ) : (
             <View style={styles.drawerRow}>
@@ -1286,38 +1302,32 @@ export default function DrawRoomScreen({ navigation, route }) {
             />
           )}
 
-          {/* Canvas - a sheet of paper in a cardboard frame */}
+          {/* Canvas - a sheet of paper in a cardboard frame, sized to the space it gets */}
           <View
-            style={[styles.canvasFrame, { borderColor: iAmDrawing ? theme.accent : colors.cardboardDeep }]}
-            onStartShouldSetResponder={() => iAmDrawing && !room?.show_round_summary}
-            onMoveShouldSetResponder={() => iAmDrawing && !room?.show_round_summary}
-            onResponderTerminationRequest={() => false}
-            onTouchStart={(e) => {
-              if (iAmDrawing && !room?.show_round_summary) {
-                e.stopPropagation();
-              }
-            }}
-            onTouchMove={(e) => {
-              if (iAmDrawing && !room?.show_round_summary) {
-                e.stopPropagation();
-              }
+            style={drawerMode ? styles.canvasAreaFill : styles.canvasArea}
+            onLayout={(e) => {
+              const { width, height } = e.nativeEvent.layout;
+              setCanvasArea((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
             }}
           >
-            <View collapsable={false}>
-              <DrawCanvas
-                strokes={localStrokes}
-                onStrokeComplete={handleStrokeComplete}
-                canDraw={iAmDrawing}
-                color={selectedColor}
-                brushSize={brushSize}
-                toolType={toolType}
-              />
-            </View>
+            {canvasSize > 0 ? (
+              <View style={[styles.canvasFrame, { borderColor: iAmDrawing ? theme.accent : colors.cardboardDeep }]}>
+                <DrawCanvas
+                  strokes={localStrokes}
+                  onStrokeComplete={handleStrokeComplete}
+                  canDraw={drawerMode}
+                  color={selectedColor}
+                  brushSize={brushSize}
+                  toolType={toolType}
+                  size={canvasSize}
+                />
+              </View>
+            ) : null}
           </View>
 
           {/* Drawing tools - drawer only */}
-          {iAmDrawing && (
-            <Card padding="md" style={styles.section}>
+          {drawerMode && (
+            <Card padding="sm" style={styles.toolbar}>
               <View style={styles.toolsRow}>
                 {/* Tool toggle */}
                 <View style={styles.toolGroup} accessibilityRole="radiogroup">
@@ -1376,7 +1386,12 @@ export default function DrawRoomScreen({ navigation, route }) {
 
               {/* Crayon colors (pencil only): selected one gets a check mark, not just a ring */}
               {toolType === 'pencil' && (
-                <View style={styles.crayons} accessibilityRole="radiogroup">
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.crayons}
+                  accessibilityRole="radiogroup"
+                >
                   {CRAYONS.map(({ color, name }) => {
                     const active = selectedColor === color;
                     return (
@@ -1389,35 +1404,16 @@ export default function DrawRoomScreen({ navigation, route }) {
                         accessibilityRole="radio"
                         accessibilityState={{ selected: active }}
                         accessibilityLabel={`${S.draw.room.color} ${S.draw.colorNames[name]}`}
+                        hitSlop={4}
                         style={[styles.crayon, { backgroundColor: color }, active && styles.crayonActive]}
                       >
                         {active ? <Icon name="check" size={18} color={name === 'yellow' ? colors.ink : colors.white} /> : null}
                       </Pressable>
                     );
                   })}
-                </View>
+                </ScrollView>
               )}
 
-              <View style={styles.actionsRow}>
-                <Button
-                  title={S.draw.room.undo}
-                  icon="undo"
-                  size="sm"
-                  variant="secondary"
-                  onPress={handleUndo}
-                  disabled={localStrokes.length === 0}
-                  style={styles.flex}
-                />
-                <Button
-                  title={S.draw.room.clear}
-                  icon="trash"
-                  size="sm"
-                  variant="secondary"
-                  onPress={handleClearAll}
-                  disabled={localStrokes.length === 0}
-                  style={styles.flex}
-                />
-              </View>
             </Card>
           )}
 
@@ -1448,8 +1444,25 @@ export default function DrawRoomScreen({ navigation, route }) {
             </View>
           )}
 
-          {/* Guesses feed + players */}
-          {!room.show_round_summary && (
+          {/* Drawer: latest guesses in one compact line (newest first) */}
+          {drawerMode && allGuesses.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.guessStrip}>
+              {[...allGuesses].reverse().map((guess, idx) => {
+                const isCorrect = room.current_word && guess.guess?.toLowerCase().trim() === room.current_word.toLowerCase().trim();
+                return (
+                  <Badge
+                    key={idx}
+                    label={`${guess.playerName}: ${guess.guess}`}
+                    icon={isCorrect ? 'check' : undefined}
+                    tone={isCorrect ? 'success' : 'neutral'}
+                  />
+                );
+              })}
+            </ScrollView>
+          )}
+
+          {/* Guesses feed + players (guessers) */}
+          {!room.show_round_summary && !drawerMode && (
             <>
               <Card padding="md" style={styles.section}>
                 <View style={styles.titleRow}>
@@ -1621,17 +1634,8 @@ export default function DrawRoomScreen({ navigation, route }) {
 
             {/* The drawing, scaled to fit the dialog */}
             <AppText variant="label" color={colors.inkSoft}>{S.draw.room.drawingTitle}</AppText>
-            <View style={[styles.summaryCanvasBox, { width: SUMMARY_CANVAS, height: SUMMARY_CANVAS }]}>
-              <View style={{ transform: [{ scale: SUMMARY_SCALE }] }}>
-                <DrawCanvas
-                  strokes={summaryStrokes}
-                  onStrokeComplete={() => {}}
-                  canDraw={false}
-                  color={selectedColor}
-                  brushSize={brushSize}
-                  toolType={toolType}
-                />
-              </View>
+            <View style={styles.summaryCanvasBox}>
+              <DrawCanvas strokes={summaryStrokes} canDraw={false} size={SUMMARY_CANVAS} />
             </View>
 
             <AppText variant="label" color={colors.inkSoft}>{S.draw.room.guessesSectionTitle}</AppText>
@@ -1759,12 +1763,14 @@ const MEDAL_COLORS = ['#E0A526', '#C9CED6', '#D49A62'];
 // Visual token colors for players (Draw players have no color field)
 const PLAYER_TOKEN_COLORS = ['#7A4FC2', '#2F6FB5', '#B83E33', '#3F7D3A', '#8A5A2B', '#22335C', '#B07E12', '#6B5443'];
 
-// The canvas is sized by DrawCanvas from the window; in the summary dialog it is
-// scaled down to fit (visual only - same formula as DrawCanvas)
+// Canvas sizes. Drawings are stored in device-independent units (see
+// DrawCanvas), so any size shows the whole drawing.
 const WINDOW = Dimensions.get('window');
-const CANVAS_SIZE = Math.min(WINDOW.width - 40, WINDOW.height * 0.7, 600);
-const SUMMARY_CANVAS = Math.min(CANVAS_SIZE, 280);
-const SUMMARY_SCALE = SUMMARY_CANVAS / CANVAS_SIZE;
+const SUMMARY_CANVAS = Math.min(WINDOW.width - 96, 280);
+const MAX_GUESSER_CANVAS = Math.min(600, WINDOW.height * 0.6);
+// canvasFrame padding + borders around the sheet
+const FRAME_X = 2 * (4 + 3);
+const FRAME_Y = 4 + 4 + 3 + 7;
 
 const styles = StyleSheet.create({
   flex: {
@@ -1821,6 +1827,39 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderBottomWidth: 6,
   },
+  drawerContent: {
+    gap: spacing.sm,
+  },
+  wordBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.lg,
+    borderWidth: 2,
+    borderBottomWidth: 5,
+  },
+  wordText: {
+    flex: 1,
+  },
+  canvasArea: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  canvasAreaFill: {
+    flex: 1,
+    minHeight: 140,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toolbar: {
+    gap: spacing.sm,
+  },
+  guessStrip: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
   drawerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1857,9 +1896,12 @@ const styles = StyleSheet.create({
   },
   crayons: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
+    alignItems: 'center',
     gap: spacing.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.xs,
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   crayon: {
     width: 40,

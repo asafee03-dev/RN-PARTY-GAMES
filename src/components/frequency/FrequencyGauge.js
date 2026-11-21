@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Dimensions, PanResponder, StyleSheet, View } from 'react-native';
+import { Dimensions, PanResponder, Platform, StyleSheet, View } from 'react-native';
 import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 import { S } from '../../strings';
 import { colors, radii, spacing, typography, useGameTheme } from '../../theme';
@@ -27,6 +27,18 @@ const angleToPoint = (angle) => {
     x: centerX + radius * Math.cos(rad),
     y: centerY + radius * Math.sin(rad)
   };
+};
+
+// Native only: stop touches from reaching parent views while dragging. On web
+// this broke dragging: react-native-web tracks gestures from touch events that
+// bubble up to `document`, so stopping them left only a tap (via the emulated
+// mouse click). On web, `touchAction: 'none'` already keeps the page from scrolling.
+const nativeTouchGuards = (canMove) => {
+  if (Platform.OS === 'web') return null;
+  const stop = (e) => {
+    if (canMove) e.stopPropagation();
+  };
+  return { onTouchStart: stop, onTouchMove: stop };
 };
 
 export default function FrequencyGauge({
@@ -308,16 +320,7 @@ export default function FrequencyGauge({
         onStartShouldSetResponder={() => canMove}
         onMoveShouldSetResponder={() => canMove}
         onResponderTerminationRequest={() => false}
-        onTouchStart={(e) => {
-          if (canMove) {
-            e.stopPropagation();
-          }
-        }}
-        onTouchMove={(e) => {
-          if (canMove) {
-            e.stopPropagation();
-          }
-        }}
+        {...nativeTouchGuards(canMove)}
       >
         <View style={styles.svgWrapper}>
           <Svg width={GAUGE_WIDTH} height={GAUGE_HEIGHT + 4} viewBox={`0 0 ${GAUGE_WIDTH} ${GAUGE_HEIGHT + 4}`}>

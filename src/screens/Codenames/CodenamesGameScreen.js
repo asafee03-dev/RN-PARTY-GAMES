@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction, arrayRemove } from 'firebase/firestore';
 import CodenamesBoard from '../../components/codenames/CodenamesBoard';
 import ClueInput from '../../components/codenames/ClueInput';
 import TeamInfo from '../../components/codenames/TeamInfo';
@@ -564,6 +564,58 @@ export default function CodenamesGameScreen({ navigation, route }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  /**
+   * Called when a player leaves a running game. Without this a spymaster who
+   * leaves keeps the role forever and their team can never get a clue.
+   * - guesser leaves: removed from the team (only that array changes).
+   * - spymaster leaves: the first guesser is promoted to spymaster.
+   * - the team would be left without a guesser (or spymaster): it forfeits and
+   *   the other team wins, so the game never hangs.
+   * Runs in a transaction and writes only the changed fields. Rivals mode is
+   * deliberately not touched.
+   */
+  const leaveGameRole = async () => {
+    if (!room || !room.id || !currentPlayerName) return;
+    try {
+      const roomRef = doc(db, 'CodenamesRoom', room.id);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomRef);
+        if (!snap.exists()) return;
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing' || fresh.game_mode === 'rivals') return;
+
+        const role = getRoleIn(fresh, currentPlayerName);
+        if (!role) return;
+        const teamKey = role.team + '_team';
+        const otherTeam = role.team === 'red' ? 'blue' : 'red';
+        const guessers = (fresh[teamKey]?.guessers || []).filter((n) => n && n !== currentPlayerName);
+
+        const forfeit = () =>
+          transaction.update(roomRef, { game_status: 'finished', winner_team: otherTeam, guesses_remaining: 0 });
+
+        if (role.role === 'guesser') {
+          if (guessers.length === 0) {
+            forfeit();
+          } else {
+            transaction.update(roomRef, { [teamKey + '.guessers']: arrayRemove(currentPlayerName) });
+          }
+        } else if (guessers.length < 2) {
+          // Promoting the only guesser would leave the team with nobody to guess
+          forfeit();
+        } else {
+          const promoted = guessers[0];
+          transaction.update(roomRef, {
+            [teamKey + '.spymaster']: promoted,
+            [teamKey + '.guessers']: arrayRemove(promoted, currentPlayerName),
+          });
+        }
+      });
+      console.log('✅ Left Codenames team role');
+    } catch (error) {
+      console.error('❌ Error leaving team role:', error);
+    }
+  };
+
   const goBack = async () => {
     // Show interstitial ad before navigating to main menu
     showInterstitialIfAvailable(async () => {
@@ -573,6 +625,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
         unsubscribeRef.current = null;
       }
       
+      await leaveGameRole();
       await clearCurrentRoom();
       
       // Navigate to main menu using reset to clear the stack

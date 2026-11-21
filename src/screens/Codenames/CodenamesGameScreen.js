@@ -28,6 +28,14 @@ const otherTeam = (team) => (team === 'red' ? 'blue' : 'red');
 
 const getRoleIn = (roomData, playerName) => {
   if (!roomData || !playerName) return null;
+  // Two phones: the clue-givers phone is the spymaster of whichever team is
+  // up, the guessers phone is that team's guesser (both phones are shared by
+  // both teams).
+  if (roomData.play_mode === 'two_phones' && roomData.current_turn) {
+    if (roomData.red_team?.spymaster === playerName) return { team: roomData.current_turn, role: 'spymaster' };
+    if (roomData.red_team?.guessers?.includes(playerName)) return { team: roomData.current_turn, role: 'guesser' };
+    return null;
+  }
   if (roomData.red_team?.spymaster === playerName) return { team: 'red', role: 'spymaster' };
   if (roomData.blue_team?.spymaster === playerName) return { team: 'blue', role: 'spymaster' };
   if (roomData.red_team?.guessers?.includes(playerName)) return { team: 'red', role: 'guesser' };
@@ -325,14 +333,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
   }, [room?.id, room?.created_at]);
 
   const getPlayerRole = () => {
-    if (!room || !currentPlayerName) return null;
-    
-    if (room.red_team.spymaster === currentPlayerName) return { team: 'red', role: 'spymaster' };
-    if (room.blue_team.spymaster === currentPlayerName) return { team: 'blue', role: 'spymaster' };
-    if (room.red_team.guessers.includes(currentPlayerName)) return { team: 'red', role: 'guesser' };
-    if (room.blue_team.guessers.includes(currentPlayerName)) return { team: 'blue', role: 'guesser' };
-    
-    return null;
+    return getRoleIn(room, currentPlayerName);
   };
 
   const isMyTurn = () => {
@@ -582,7 +583,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
         const snap = await transaction.get(roomRef);
         if (!snap.exists()) return;
         const fresh = snap.data();
-        if (fresh.game_status !== 'playing' || fresh.game_mode === 'rivals') return;
+        if (fresh.game_status !== 'playing' || fresh.game_mode === 'rivals' || fresh.play_mode === 'two_phones') return;
 
         const role = getRoleIn(fresh, currentPlayerName);
         if (!role) return;

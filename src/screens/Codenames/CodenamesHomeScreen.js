@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import BannerAd from '../../components/shared/BannerAd';
+import PlayModeDialog from '../../components/shared/PlayModeDialog';
 import { db } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs, Timestamp } from 'firebase/firestore';
 import storage from '../../utils/storage';
@@ -16,6 +17,7 @@ export default function CodenamesHomeScreen({ navigation, route }) {
   const [roomCode, setRoomCode] = useState('');
   const [error, setError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const isCreatingRoomRef = useRef(false);
 
   useEffect(() => {
@@ -41,7 +43,7 @@ export default function CodenamesHomeScreen({ navigation, route }) {
     return Math.floor(Math.random() * 10000).toString().padStart(4, '0');
   };
 
-  const createRoom = async () => {
+  const createRoom = async (twoPhones = false) => {
     if (isCreatingRoomRef.current) {
       console.log('⚠️ [CODENAMES] Room creation already in progress, ignoring duplicate call');
       return;
@@ -83,6 +85,8 @@ export default function CodenamesHomeScreen({ navigation, route }) {
         room_code: newRoomCode,
         host_name: playerName,
         game_mode: 'friends',
+        // Two phones: one for the clue-givers, one for the guessers
+        ...(twoPhones === true ? { play_mode: 'two_phones' } : {}),
         red_team: {
           spymaster: '',
           guessers: [],
@@ -190,6 +194,7 @@ export default function CodenamesHomeScreen({ navigation, route }) {
   };
 
   return (
+    <>
     <GameEntryLayout
       icon="codenames"
       title={S.codenames.entry.title}
@@ -207,11 +212,21 @@ export default function CodenamesHomeScreen({ navigation, route }) {
       roomCodeMaxLength={4}
       error={error}
       isCreating={isCreating}
-      onCreate={createRoom}
+      onCreate={() => setModeDialogOpen(true)}
       onJoin={joinRoom}
       onBack={goBack}
       steps={S.codenames.entry.steps}
       footer={<BannerAd />}
     />
+    <PlayModeDialog
+      visible={modeDialogOpen}
+      onClose={() => setModeDialogOpen(false)}
+      onRegular={() => createRoom(false)}
+      onLocal={() => createRoom(true)}
+      localTitle={S.codenames.phones.modeTitle}
+      localHint={S.codenames.phones.modeHint}
+      localIcon="phones"
+    />
+    </>
   );
 }

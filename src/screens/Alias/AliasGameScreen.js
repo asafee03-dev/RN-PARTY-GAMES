@@ -7,7 +7,6 @@ import TimeUpPopup from '../../components/alias/TimeUpPopup';
 import GoldenWordPopup from '../../components/alias/GoldenWordPopup';
 import GoldenRoundCard from '../../components/alias/GoldenRoundCard';
 import RoundSummary from '../../components/alias/RoundSummary';
-import DrinkingPopup from '../../components/alias/DrinkingPopup';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db } from '../../firebase';
@@ -48,21 +47,6 @@ const moveTeam = (teams, teamIndex, delta) => teams.map((t, i) => (i === teamInd
   ? { ...t, position: Math.max(0, Math.min(MAX_POSITION, (t.position || 0) + delta)) }
   : t));
 
-// Drinking mode: after a full round, the team that advanced the fewest tiles
-// drinks (ties -> first such team). Requires each team's round_start_position,
-// which is now kept until the full round completes.
-const buildDrinkingPopup = (teams) => {
-  const progress = teams.map((team, index) => {
-    const currentPos = team.position || 0;
-    const startPos = team.round_start_position ?? currentPos;
-    return { teamIndex: index, teamName: team.name || S.alias.board.teamFallback(index + 1), moved: currentPos - startPos };
-  });
-  if (progress.length === 0) return null;
-  const minMoved = Math.min(...progress.map(t => t.moved));
-  const losingTeam = progress.find(t => t.moved === minMoved);
-  return { team_name: losingTeam.teamName, team_index: losingTeam.teamIndex, timestamp: Date.now() };
-};
-
 export default function AliasGameScreen({ navigation, route }) {
   const roomCode = route?.params?.roomCode || '';
   const insets = useSafeAreaInsets();
@@ -75,9 +59,6 @@ export default function AliasGameScreen({ navigation, route }) {
   const [timerKey, setTimerKey] = useState(0);
   const [showGoldenPopup, setShowGoldenPopup] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
-  const [drinkingMode, setDrinkingMode] = useState(false);
-  const [showDrinkingPopup, setShowDrinkingPopup] = useState(false);
-  const [drinkingTeamName, setDrinkingTeamName] = useState('');
   const previousTurnRef = useRef(null); // Track previous turn to detect full round completion
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
@@ -126,10 +107,6 @@ export default function AliasGameScreen({ navigation, route }) {
         const savedName = await storage.getItem('playerName');
         if (savedName) {
           setPlayerName(savedName);
-        }
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
         }
       } catch (e) {
         console.warn('Could not load player name:', e);
@@ -270,19 +247,6 @@ export default function AliasGameScreen({ navigation, route }) {
 
       const roomData = { id: roomSnap.id, ...roomSnap.data() };
       setRoom(roomData);
-      
-      // Load drinking mode from room data (preferred) or local storage (fallback)
-      if (roomData.drinking_mode !== undefined) {
-        setDrinkingMode(roomData.drinking_mode);
-        // Also sync to local storage
-        await storage.setItem('drinkingMode', roomData.drinking_mode.toString());
-      } else {
-        // Fallback to local storage if room doesn't have it yet
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
-        }
-      }
     } catch (error) {
       console.error('Error loading room:', error);
       throw error;
@@ -301,22 +265,6 @@ export default function AliasGameScreen({ navigation, route }) {
     unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const roomData = { id: snapshot.id, ...snapshot.data() };
-        
-        // Sync drinking mode from room data
-        if (roomData.drinking_mode !== undefined) {
-          setDrinkingMode(roomData.drinking_mode);
-          // Also sync to local storage
-          storage.setItem('drinkingMode', roomData.drinking_mode.toString()).catch(() => {});
-        }
-        
-        // Handle drinking popup from room data
-        if (roomData.drinking_popup && roomData.drinking_popup.team_name) {
-          setDrinkingTeamName(roomData.drinking_popup.team_name);
-          setShowDrinkingPopup(true);
-        } else if (roomData.drinking_popup === null && showDrinkingPopup) {
-          // Popup was cleared
-          setShowDrinkingPopup(false);
-        }
         
         // Handle reset trigger for showing ad to all players (non-host)
         // Handle reset trigger for showing ad to all players (non-host)
@@ -505,7 +453,7 @@ export default function AliasGameScreen({ navigation, route }) {
           round_start_time: serverNow(),
           round_start_position: startPosition,
           // Each team keeps its start position until the full round completes
-          // (used for this round's progress and the drinking check)
+          // (used for this round's progress)
           teams: teams.map((t, i) => (i === turn ? { ...t, round_start_position: startPosition } : t)),
           used_cards: [],
           round_cards: selectedWords,
@@ -725,10 +673,6 @@ export default function AliasGameScreen({ navigation, route }) {
 
         // Full round = every team has played (back to the team that started)
         if (nextTurn === (fresh.starting_turn ?? 0)) {
-          if (fresh.drinking_mode) {
-            const popup = buildDrinkingPopup(teams);
-            if (popup) update.drinking_popup = popup;
-          }
           update.teams = teams.map(t => ({ ...t, round_start_position: null }));
         }
 
@@ -778,7 +722,6 @@ export default function AliasGameScreen({ navigation, route }) {
         last_word_on_time_up: null,
         current_word_is_golden: false,
         winner_team: null,
-        drinking_popup: null,
         reset_triggered_at: Date.now() // Signal to other players to show ad
       });
 
@@ -1031,7 +974,6 @@ export default function AliasGameScreen({ navigation, route }) {
         <UnifiedTopBar
           roomCode={roomCode}
           variant="alias"
-          drinkingMode={drinkingMode}
           onExit={exitToHome}
           onRulesPress={() => setShowRulesModal(true)}
         />
@@ -1041,22 +983,6 @@ export default function AliasGameScreen({ navigation, route }) {
         visible={showRulesModal}
         onClose={() => setShowRulesModal(false)}
         variant="alias"
-      />
-
-      {/* Drinking Popup */}
-      <DrinkingPopup
-        visible={showDrinkingPopup}
-        onClose={() => {
-          setShowDrinkingPopup(false);
-          // Clear drinking popup from room data
-          if (room && room.id) {
-            const roomRef = doc(db, 'GameRoom', room.id);
-            updateDoc(roomRef, { drinking_popup: null }).catch(err =>
-              console.error('Error clearing drinking popup:', err)
-            );
-          }
-        }}
-        teamName={drinkingTeamName}
       />
 
       {/* Whose turn */}

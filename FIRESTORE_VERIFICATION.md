@@ -39,7 +39,6 @@
   - `current_clue` (object: { number }, nullable)
   - `turn_start_time` (timestamp, nullable)
   - `winner_team` (string, nullable)
-  - `drinking_popup` (object, nullable)
   - `round_baseline_reveals` (object: { red, blue }, nullable)
 
 ### 3. DrawRoom (Draw Game)
@@ -58,7 +57,6 @@
   - `guesses` (array)
   - `scores` (object)
   - `winner` (string, nullable)
-  - `drinking_popup` (object, nullable)
 
 ### 4. SpyRoom (Spy Game)
 - **Document ID**: Room code (string)
@@ -73,7 +71,6 @@
   - `votes` (object)
   - `game_start_time` (timestamp, nullable)
   - `winner` (string, nullable)
-  - `drinking_popup` (object, nullable)
 
 ### 5. FrequencyRoom (Frequency Game)
 - **Document ID**: Room code (string)
@@ -91,7 +88,6 @@
   - `guesses` (array)
   - `scores` (object)
   - `winner` (string, nullable)
-  - `drinking_popup` (object, nullable)
 
 ### 6. WordCard (Word Cards for Alias/Codenames)
 - **Document ID**: Auto-generated
@@ -124,6 +120,5 @@
 
 - All room collections use `room_code` as both document ID and a field
 - Reference collections (WordCard, DrawWord, SpyLocation, FrequencyTopic) use auto-generated IDs
-- All games support `drinking_popup` for drinking mode functionality
 - Game status fields follow consistent patterns across all games
 

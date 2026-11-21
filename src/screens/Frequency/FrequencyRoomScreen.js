@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Alert, ActivityIndicator, Switch, Platform } from 'react-native';
+import { View, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BannerAd from '../../components/shared/BannerAd';
 import FrequencyGauge from '../../components/frequency/FrequencyGauge';
@@ -55,18 +55,6 @@ const getSectorScore = (guessAngle, sectors) => {
     }
   }
   return 0;
-};
-
-// Is the guess inside the sector that contains the target position?
-const isInCorrectSector = (guessAngle, targetPosition, sectors) => {
-  const clampedTarget = Math.max(0, Math.min(180, targetPosition));
-  const correctSector = (sectors || []).find(sector =>
-    clampedTarget >= Math.max(0, sector.start) && clampedTarget <= Math.min(180, sector.end)
-  );
-  if (!correctSector) return false;
-
-  const clampedGuess = Math.max(0, Math.min(180, guessAngle));
-  return clampedGuess >= Math.max(0, correctSector.start) && clampedGuess <= Math.min(180, correctSector.end);
 };
 
 const getGuessSubmittedNames = (roomData) => {
@@ -135,25 +123,6 @@ const buildRoundSummary = (roomData) => {
 
   const totalPoints = guesses.reduce((sum, g) => sum + g.points_earned, 0);
 
-  // Drinking: nobody correct -> clue giver drinks; partial -> missers drink; all correct -> nobody
-  let drinkingPlayers = [];
-  if (roomData.drinking_mode === true && targetPos !== undefined && targetPos !== null) {
-    const correct = [];
-    const incorrect = [];
-    guesses.forEach(g => {
-      if (g.guess_angle !== null && isInCorrectSector(g.guess_angle, targetPos, sectors)) {
-        correct.push(g.player_name);
-      } else {
-        incorrect.push(g.player_name);
-      }
-    });
-    if (correct.length === 0) {
-      drinkingPlayers = [clueGiver];
-    } else if (incorrect.length > 0) {
-      drinkingPlayers = incorrect;
-    }
-  }
-
   return {
     turn_phase: 'summary',
     last_guess_result: {
@@ -164,8 +133,7 @@ const buildRoundSummary = (roomData) => {
       clue_giver: clueGiver,
       clue_giver_points: totalPoints / 2,
       show_popup: true
-    },
-    drinking_players: drinkingPlayers.length > 0 ? drinkingPlayers : null
+    }
   };
 };
 
@@ -218,7 +186,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [room, setRoom] = useState(null);
   const [currentPlayerName, setCurrentPlayerName] = useState('');
-  const [drinkingMode, setDrinkingMode] = useState(false);
   const [isAdvancingTurn, setIsAdvancingTurn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -356,7 +323,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         if (savedName) {
           setCurrentPlayerName(savedName);
         }
-        // Drinking mode is synced from the room document by the realtime listener
       } catch (e) {
         console.warn('Could not load player name:', e);
       }
@@ -477,13 +443,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const newRoom = { id: snapshot.id, ...snapshot.data() };
-        
-        // Sync drinking mode from room data
-        if (newRoom.drinking_mode !== undefined) {
-          setDrinkingMode(newRoom.drinking_mode);
-          // Also sync to local storage
-          storage.setItem('drinkingMode', newRoom.drinking_mode.toString()).catch(() => {});
-        }
         
         // Handle reset trigger for showing ad to all players (non-host)
         // Show ad AFTER state has been updated to lobby (all players are on lobby screen)
@@ -620,7 +579,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           needle_positions: {},
           guess_submitted_names: {},
           last_guess_result: null,
-          drinking_players: null,
           winner_name: null,
           current_round_id: newRoundId(startIndex)
         });
@@ -793,8 +751,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
             players: updatedPlayers,
             game_status: 'finished',
             winner_name: winner.name,
-            last_guess_result: null,
-            drinking_players: null
+            last_guess_result: null
           });
           return;
         }
@@ -828,7 +785,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           guess_submitted_names: {},
           turn_phase: 'clue',
           last_guess_result: null,
-          drinking_players: null,
           current_round_id: newRoundId(nextTurnIndex)
         });
       });
@@ -906,7 +862,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         turn_phase: null,
         last_guess_result: null,
         winner_name: null,
-        drinking_players: null,
         reset_triggered_at: Date.now() // Signal to other players to show ad
       });
       
@@ -1034,14 +989,11 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           variant="frequency"
           onExit={goBack}
           onRulesPress={handleRulesPress}
-          drinkingMode={drinkingMode}
         />
       }
       footer={<BannerAd />}
       scrollEnabled={!canGuess}
     >
-      {drinkingMode && <Badge label={S.common.drinkingMode} icon="drink" tone="gold" />}
-
       <RulesModal
         visible={showRulesModal}
         onClose={() => setShowRulesModal(false)}
@@ -1061,41 +1013,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           {isHost ? (
             <Card tone="tint" padding="md" style={styles.hostBox}>
               <Badge label={S.frequency.room.youAreHost} icon="crown" tone="gold" />
-              <View style={styles.toggleRow}>
-                <Icon name="drink" size={22} color={colors.ink} />
-                <AppText variant="bodyStrong" style={styles.flex}>
-                  {S.frequency.room.drinkingToggle}
-                </AppText>
-                <Switch
-                  value={drinkingMode}
-                  accessibilityLabel={S.frequency.room.drinkingToggle}
-                  onValueChange={async (checked) => {
-                    setDrinkingMode(checked);
-                    try {
-                      // Save to local storage
-                      await storage.setItem('drinkingMode', checked.toString());
-
-                      // Save to Firestore room data so all players see it
-                      if (room && room.id) {
-                        const roomRef = doc(db, 'FrequencyRoom', room.id);
-                        await updateDoc(roomRef, {
-                          drinking_mode: checked
-                        });
-                        console.log('✅ Drinking mode updated:', checked);
-                      }
-                    } catch (error) {
-                      console.error('Error saving drinking mode:', error);
-                      setDrinkingMode(!checked); // Revert on error
-                      Alert.alert(S.common.error, S.frequency.room.drinkingUpdateFailed);
-                    }
-                  }}
-                  trackColor={{ false: colors.line, true: theme.accent }}
-                  thumbColor={colors.card}
-                />
-              </View>
             </Card>
-          ) : drinkingMode ? (
-            <Badge label={S.frequency.room.drinkingActive} icon="drink" tone="gold" />
           ) : null}
 
           <AppText variant="label" color={colors.inkSoft}>
@@ -1221,57 +1139,6 @@ export default function FrequencyRoomScreen({ navigation, route }) {
                 </AppText>
               </View>
             )}
-          </>
-        ) : null}
-      </Dialog>
-
-      {/* Drinking Mode */}
-      <Dialog
-        visible={!!(room.drinking_players && room.drinking_players.length > 0)}
-        icon="drink"
-        title={S.frequency.room.drinkingTitle}
-        actions={
-          <Button
-            title={S.common.continue}
-            fullWidth
-            onPress={async () => {
-              if (!room?.id) return;
-              try {
-                const roomRef = doc(db, 'FrequencyRoom', room.id);
-                await updateDoc(roomRef, {
-                  drinking_players: null
-                });
-              } catch (error) {
-                console.error('Error clearing drinking players:', error);
-              }
-            }}
-          />
-        }
-      >
-        {room.drinking_players && room.drinking_players.length > 0 ? (
-          <>
-            <AppText align="center" variant="bodyStrong">
-              {(() => {
-                const clueGiver = room.players[room.current_turn_index]?.name;
-                const isClueGiverDrinking = room.drinking_players.includes(clueGiver);
-
-                if (isClueGiverDrinking) {
-                  return S.frequency.room.drinkClueGiver;
-                } else if (room.drinking_players.length === 1) {
-                  return S.frequency.room.drinkOne;
-                } else {
-                  return S.frequency.room.drinkMany;
-                }
-              })()}
-            </AppText>
-            <View style={[styles.chips, styles.centerChips]}>
-              {room.drinking_players.map((name, idx) => (
-                <Badge key={idx} label={name} icon="player" tone="gold" />
-              ))}
-            </View>
-            <AppText variant="title" align="center" color={theme.accentInk}>
-              {room.drinking_players.length === 1 ? S.frequency.room.shotOne : S.frequency.room.shotMany}
-            </AppText>
           </>
         ) : null}
       </Dialog>
@@ -1492,19 +1359,10 @@ const styles = StyleSheet.create({
   hostBox: {
     gap: spacing.md,
   },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    minHeight: 48,
-  },
   chips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
-  },
-  centerChips: {
-    justifyContent: 'center',
   },
   waitingRow: {
     flexDirection: 'row',

@@ -155,12 +155,9 @@ export function calculatePointsByTime(timestamp, turnStartTime) {
  * @param {Object} gameState - Current game state
  * @param {Array} guesses - All guesses for the round
  * @param {string} currentDrawer - Name of current drawer
- * @param {Object} options - Options { drinkingMode: boolean }
  * @returns {Object} Updated game state
  */
-export function calculateRoundEnd(gameState, guesses, currentDrawer, options = {}) {
-  const { drinkingMode = false } = options;
-
+export function calculateRoundEnd(gameState, guesses, currentDrawer) {
   // Find all players who guessed correctly and calculate their points
   const correctGuessers = new Map(); // Map of playerName -> points earned
   let firstWinner = null;
@@ -179,7 +176,6 @@ export function calculateRoundEnd(gameState, guesses, currentDrawer, options = {
   });
 
   const hasCorrectGuess = correctGuessers.size > 0;
-  const drinkingPlayers = [];
 
   // Calculate scores
   const playersWithScores = gameState.players.map(player => {
@@ -197,10 +193,6 @@ export function calculateRoundEnd(gameState, guesses, currentDrawer, options = {
       return { ...player, score: player.score + pointsEarned };
     }
 
-    if (drinkingMode && !correctGuessers.has(player.name)) {
-      drinkingPlayers.push(player.name);
-    }
-
     return player;
   });
 
@@ -213,7 +205,6 @@ export function calculateRoundEnd(gameState, guesses, currentDrawer, options = {
     allGuesses: guesses,
     showRoundSummary: true,
     roundWinner: firstWinner,
-    drinkingPlayers: drinkingMode && drinkingPlayers.length > 0 ? drinkingPlayers : null,
     gameStatus: winner ? 'finished' : gameState.gameStatus,
     winnerName: winner ? winner.name : null
   };
@@ -264,7 +255,6 @@ export function continueToNextRound(gameState, nextWord) {
     drawingData: null,
     showRoundSummary: false,
     roundWinner: null,
-    drinkingPlayers: null,
     allGuesses: [],
     turnStartTime: Date.now()
   };
@@ -290,10 +280,9 @@ export function updateDrawingData(gameState, drawingData) {
 /**
  * Handle timer expiration
  * @param {Object} gameState - Current game state
- * @param {Object} options - Options { drinkingMode: boolean }
  * @returns {Object} Updated game state
  */
-export function handleTimerExpiration(gameState, options = {}) {
+export function handleTimerExpiration(gameState) {
   if (gameState.gameStatus !== 'playing') {
     return gameState;
   }
@@ -303,7 +292,7 @@ export function handleTimerExpiration(gameState, options = {}) {
   }
 
   const currentDrawer = gameState.players[gameState.currentTurnIndex]?.name;
-  return calculateRoundEnd(gameState, gameState.allGuesses, currentDrawer, options);
+  return calculateRoundEnd(gameState, gameState.allGuesses, currentDrawer);
 }
 
 /**
@@ -459,8 +448,7 @@ export function resetGame(gameState) {
     turnStartTime: null,
     showRoundSummary: false,
     roundWinner: null,
-    winnerName: null,
-    drinkingPlayers: null
+    winnerName: null
   };
 }
 

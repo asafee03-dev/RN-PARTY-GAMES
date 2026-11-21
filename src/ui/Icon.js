@@ -54,7 +54,6 @@ const ICONS = {
   trophy: { glyph: 'trophy' },
   star: { glyph: 'star' },
   golden: { glyph: 'star-four-points' },
-  drink: { glyph: 'glass-mug-variant' },
   party: { glyph: 'party-popper' },
   vote: { glyph: 'vote' },
   target: { glyph: 'target' },

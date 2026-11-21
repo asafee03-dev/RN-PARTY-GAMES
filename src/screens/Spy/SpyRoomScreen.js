@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Pressable, Alert, ActivityIndicator, Switch, Platform } from 'react-native';
+import { View, StyleSheet, Pressable, Alert, ActivityIndicator, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BannerAd from '../../components/shared/BannerAd';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
@@ -60,7 +60,6 @@ export default function SpyRoomScreen({ navigation, route }) {
   const [currentPlayerName, setCurrentPlayerName] = useState('');
   const [timeLeft, setTimeLeft] = useState(360); // 6 minutes
   const [showRulesModal, setShowRulesModal] = useState(false);
-  const [drinkingMode, setDrinkingMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showLocations, setShowLocations] = useState(false);
@@ -110,10 +109,6 @@ export default function SpyRoomScreen({ navigation, route }) {
         const savedName = await storage.getItem('playerName');
         if (savedName) {
           setCurrentPlayerName(savedName);
-        }
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
         }
       } catch (e) {
         console.warn('Could not load player name:', e);
@@ -299,19 +294,6 @@ export default function SpyRoomScreen({ navigation, route }) {
         }
       }
 
-      // Load drinking mode from room data (preferred) or local storage (fallback)
-      if (roomData.drinking_mode !== undefined) {
-        setDrinkingMode(roomData.drinking_mode);
-        // Also sync to local storage
-        await storage.setItem('drinkingMode', roomData.drinking_mode.toString());
-      } else {
-        // Fallback to local storage if room doesn't have it yet
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
-        }
-      }
-
       // Check game status first - don't allow new joins if game is playing/finished
       if (playerName && (roomData.game_status === 'playing' || roomData.game_status === 'finished')) {
         const playerExists = roomData.players && Array.isArray(roomData.players) && 
@@ -385,13 +367,6 @@ export default function SpyRoomScreen({ navigation, route }) {
     unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const newRoom = { id: snapshot.id, ...snapshot.data() };
-        
-        // Sync drinking mode from room data
-        if (newRoom.drinking_mode !== undefined) {
-          setDrinkingMode(newRoom.drinking_mode);
-          // Also sync to local storage
-          storage.setItem('drinkingMode', newRoom.drinking_mode.toString()).catch(() => {});
-        }
 
         // Sync game mode from room data
         if (newRoom.game_mode !== undefined && newRoom.game_mode !== null) {
@@ -975,7 +950,6 @@ export default function SpyRoomScreen({ navigation, route }) {
           variant="spy"
           onExit={goBack}
           onRulesPress={handleRulesPress}
-          drinkingMode={drinkingMode}
         />
       }
       footer={<BannerAd />}
@@ -1005,39 +979,6 @@ export default function SpyRoomScreen({ navigation, route }) {
           {isHost && (
             <Card tone="tint" padding="md" style={styles.section}>
               <Badge label={S.spy.room.youAreHost} icon="crown" tone="gold" />
-
-              <View style={styles.toggleRow}>
-                <Icon name="drink" size={22} color={colors.ink} />
-                <AppText variant="bodyStrong" style={styles.flex}>
-                  {S.spy.room.drinkingToggle}
-                </AppText>
-                <Switch
-                  value={drinkingMode}
-                  accessibilityLabel={S.spy.room.drinkingToggle}
-                  onValueChange={async (checked) => {
-                    setDrinkingMode(checked);
-                    try {
-                      // Save to local storage
-                      await storage.setItem('drinkingMode', checked.toString());
-
-                      // Save to Firestore room data so all players see it
-                      if (room && room.id) {
-                        const roomRef = doc(db, 'SpyRoom', room.id);
-                        await updateDoc(roomRef, {
-                          drinking_mode: checked
-                        });
-                        console.log('✅ Drinking mode updated:', checked);
-                      }
-                    } catch (error) {
-                      console.error('Error saving drinking mode:', error);
-                      setDrinkingMode(!checked); // Revert on error
-                      Alert.alert(S.common.error, S.spy.room.drinkingUpdateFailed);
-                    }
-                  }}
-                  trackColor={{ false: colors.line, true: theme.accent }}
-                  thumbColor={colors.card}
-                />
-              </View>
 
               {/* Game Mode Selection */}
               <View style={styles.setting}>
@@ -1144,10 +1085,6 @@ export default function SpyRoomScreen({ navigation, route }) {
           {!isHost && room?.number_of_spies ? (
             <Badge label={S.spy.room.spiesInfo(room.number_of_spies)} icon="spy" tone="tint" />
           ) : null}
-
-          {!isHost && room?.drinking_mode === true && (
-            <Badge label={S.spy.room.drinkingActive} icon="drink" tone="gold" />
-          )}
 
           <AppText variant="subtitle">{S.spy.room.greeting(currentPlayerName)}</AppText>
 
@@ -1505,18 +1442,6 @@ export default function SpyRoomScreen({ navigation, route }) {
               </Card>
             ) : null}
 
-            {room.drinking_mode && (
-              <Card style={[styles.section, styles.drinkCard]}>
-                <View style={styles.titleRow}>
-                  <Icon name="drink" size={26} color={colors.ink} />
-                  <AppText variant="title">{S.spy.room.drinkingTitle}</AppText>
-                </View>
-                <AppText variant="bodyStrong">
-                  {spyWon ? S.spy.room.drinkSpyWon(spyNames.length) : S.spy.room.drinkSpyCaught(spyNames.length)}
-                </AppText>
-              </Card>
-            )}
-
             <Card style={styles.section}>
               <View style={styles.titleRow}>
                 <Icon name="vote" size={24} color={theme.accentInk} />
@@ -1576,12 +1501,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    minHeight: 48,
   },
   setting: {
     gap: spacing.sm,
@@ -1754,10 +1673,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     gap: spacing.xs,
-  },
-  drinkCard: {
-    backgroundColor: colors.goldTint,
-    borderColor: colors.gold,
   },
   resultRow: {
     flexDirection: 'row',

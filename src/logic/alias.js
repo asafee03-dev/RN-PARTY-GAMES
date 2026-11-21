@@ -308,32 +308,14 @@ export function freezeWordOnTimeUp(gameState, cards, cardIndex) {
 /**
  * Finish round and advance to next turn
  * @param {Object} gameState - Current game state
- * @param {Object} options - Options for finishing round
  * @returns {Object} Updated game state
  */
-export function finishRound(gameState, options = {}) {
+export function finishRound(gameState) {
   if (!gameState.showRoundSummary) {
     throw new Error('Round summary must be shown before finishing');
   }
 
-  const { drinkingMode = false } = options;
   const nextTurn = (gameState.currentTurn + 1) % gameState.teams.length;
-
-  // Drinking mode: find team with minimum progress
-  let drinkingTeam = null;
-  if (drinkingMode && nextTurn === 0) {
-    let minProgress = Infinity;
-    let minTeamIndex = 0;
-
-    gameState.teams.forEach((team, idx) => {
-      if (team.position < minProgress) {
-        minProgress = team.position;
-        minTeamIndex = idx;
-      }
-    });
-
-    drinkingTeam = gameState.teams[minTeamIndex].name;
-  }
 
   return {
     ...gameState,
@@ -343,8 +325,7 @@ export function finishRound(gameState, options = {}) {
     currentRoundScore: 0,
     usedCards: [],
     lastWordOnTimeUp: null,
-    currentWordIsGolden: false,
-    drinkingPopup: drinkingTeam ? { team: drinkingTeam } : null
+    currentWordIsGolden: false
   };
 }
 
@@ -473,8 +454,7 @@ export function resetGame(gameState) {
     showRoundSummary: false,
     lastWordOnTimeUp: null,
     currentWordIsGolden: false,
-    winnerTeam: null,
-    drinkingPopup: null
+    winnerTeam: null
   };
 }
 

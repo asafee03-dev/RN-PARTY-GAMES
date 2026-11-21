@@ -22,7 +22,6 @@ export default function AliasLocalSetupScreen({ navigation, route }) {
     initial ? initial.map((t) => ({ ...t, draft: '' })) : [makeTeam(0), makeTeam(1)]
   );
   const [goldenRounds, setGoldenRounds] = useState(!!route?.params?.goldenRounds);
-  const [drinking, setDrinking] = useState(!!route?.params?.drinking);
   const [error, setError] = useState('');
 
   // Pre-fill the saved nickname as the first player (new games only)
@@ -68,7 +67,6 @@ export default function AliasLocalSetupScreen({ navigation, route }) {
     navigation.navigate('AliasLocalGame', {
       teams: teams.map((t, i) => ({ name: names[i], color: t.color, players: t.players })),
       goldenRounds,
-      drinking,
     });
   };
 
@@ -161,13 +159,6 @@ export default function AliasLocalSetupScreen({ navigation, route }) {
             {S.alias.setup.goldenRounds}
           </AppText>
           <Switch value={goldenRounds} onValueChange={setGoldenRounds} accessibilityLabel={S.alias.setup.goldenRounds} trackColor={{ false: colors.line, true: theme.accent }} thumbColor={colors.card} />
-        </View>
-        <View style={styles.optionRow}>
-          <Icon name="drink" size={22} color={theme.accentInk} />
-          <AppText variant="bodyStrong" style={styles.flex}>
-            {S.alias.setup.drinking}
-          </AppText>
-          <Switch value={drinking} onValueChange={setDrinking} accessibilityLabel={S.alias.setup.drinking} trackColor={{ false: colors.line, true: theme.accent }} thumbColor={colors.card} />
         </View>
       </Card>
 

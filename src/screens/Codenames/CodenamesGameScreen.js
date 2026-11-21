@@ -46,10 +46,8 @@ const getRoleIn = (roomData, playerName) => {
 /**
  * Fields to write when the turn passes to the other team - whether because a
  * guesser pressed "end turn", picked a wrong word, or ran out of guesses.
- * Also runs the drinking-mode round check when the turn returns to the
- * starting team (previously this only happened on "end turn").
  */
-const buildTurnSwitch = (fresh, revealedAfter) => {
+const buildTurnSwitch = (fresh) => {
   const nextTeam = otherTeam(fresh.current_turn);
   const updates = {
     current_turn: nextTeam,
@@ -61,28 +59,6 @@ const buildTurnSwitch = (fresh, revealedAfter) => {
   if (fresh.game_mode === 'rivals') {
     updates.turn_phase = 'clue';
     updates.turn_start_time = Date.now();
-  }
-
-  // A round is complete when the turn cycles back to the starting team
-  if (fresh.drinking_mode === true && nextTeam === fresh.starting_team) {
-    const red = revealedAfter.red.length;
-    const blue = revealedAfter.blue.length;
-    updates.round_baseline_reveals = { red, blue };
-
-    const oldBaseline = fresh.round_baseline_reveals;
-    if (oldBaseline) {
-      const redInRound = red - oldBaseline.red;
-      const blueInRound = blue - oldBaseline.blue;
-      // The team that revealed fewer words this round drinks (no popup on a tie)
-      const drinkingTeam = redInRound < blueInRound ? 'red' : blueInRound < redInRound ? 'blue' : null;
-      if (drinkingTeam) {
-        const teamData = drinkingTeam === 'red' ? fresh.red_team : fresh.blue_team;
-        updates.drinking_popup = {
-          team: drinkingTeam,
-          team_name: teamData?.spymaster || (drinkingTeam === 'red' ? 'אדומה' : 'כחולה')
-        };
-      }
-    }
   }
 
   return updates;
@@ -98,7 +74,6 @@ export default function CodenamesGameScreen({ navigation, route }) {
   const [error, setError] = useState(null);
   const [showTeamWords, setShowTeamWords] = useState(false);
   const [forceCloseModal, setForceCloseModal] = useState(false);
-  const [drinkingMode, setDrinkingMode] = useState(false);
   const unsubscribeRef = useRef(null);
   const autoDeletionCleanupRef = useRef({ cancelGameEnd: () => {}, cancelEmptyRoom: () => {}, cancelAge: () => {} });
   const lastResetTriggerRef = useRef(null); // Track last reset trigger to show ad once per reset
@@ -176,19 +151,6 @@ export default function CodenamesGameScreen({ navigation, route }) {
       
       const roomData = { id: snapshot.id, ...snapshot.data() };
       setRoom(roomData);
-      
-      // Load drinking mode from room data (preferred) or local storage (fallback)
-      if (roomData.drinking_mode !== undefined) {
-        setDrinkingMode(roomData.drinking_mode);
-        // Also sync to local storage
-        await storage.setItem('drinkingMode', roomData.drinking_mode.toString());
-      } else {
-        // Fallback to local storage if room doesn't have it yet
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
-        }
-      }
     } catch (error) {
       console.error('❌ Failed to load room:', error);
       navigation.navigate('CodenamesHome');
@@ -239,11 +201,6 @@ export default function CodenamesGameScreen({ navigation, route }) {
           return;
         }
         
-        // Keep the drinking badge in sync with the room setting
-        if (updatedRoom.drinking_mode !== undefined) {
-          setDrinkingMode(updatedRoom.drinking_mode === true);
-        }
-
         // Always apply the server state. (A previous "block board/key_map
         // changes" check here could leave players on different boards if the
         // game was started twice.)
@@ -514,7 +471,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
           updates.guesses_remaining = 0;
         } else if (wordColor !== currentTeam || fresh.guesses_remaining - 1 <= 0) {
           // Wrong color or out of guesses -> turn passes to the other team
-          Object.assign(updates, buildTurnSwitch(fresh, { red: newRed, blue: newBlue }));
+          Object.assign(updates, buildTurnSwitch(fresh));
         } else {
           updates.guesses_remaining = fresh.guesses_remaining - 1;
         }
@@ -550,10 +507,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
         const myRole = getRoleIn(fresh, currentPlayerName);
         if (!myRole || myRole.role !== 'guesser' || myRole.team !== fresh.current_turn) return;
 
-        transaction.update(roomRef, buildTurnSwitch(fresh, {
-          red: fresh.red_team?.revealed_words || [],
-          blue: fresh.blue_team?.revealed_words || []
-        }));
+        transaction.update(roomRef, buildTurnSwitch(fresh));
       });
       console.log('✅ Turn ended successfully');
     } catch (error) {
@@ -683,8 +637,6 @@ export default function CodenamesGameScreen({ navigation, route }) {
         current_clue: null,
         winner_team: null,
         turn_start_time: null,
-        drinking_popup: null,
-        round_baseline_reveals: null,
         reset_triggered_at: Date.now() // Signal to other players to show ad
       });
       console.log('✅ Game reset successfully - all state cleared');
@@ -711,16 +663,6 @@ export default function CodenamesGameScreen({ navigation, route }) {
       console.error('❌ Error resetting game:', error);
       Alert.alert(S.codenames.game.error, S.codenames.game.resetFailed);
       setForceCloseModal(false);
-    }
-  };
-
-  const clearDrinkingPopup = async () => {
-    if (!room || !room.id) return;
-    try {
-      const roomRef = doc(db, 'CodenamesRoom', room.id);
-      await updateDoc(roomRef, { drinking_popup: null });
-    } catch (error) {
-      console.error('❌ Error clearing drinking popup:', error);
     }
   };
 
@@ -791,42 +733,14 @@ export default function CodenamesGameScreen({ navigation, route }) {
           variant="codenames"
           onExit={goBack}
           onRulesPress={() => setShowRulesModal(true)}
-          drinkingMode={drinkingMode}
         />
       }
     >
-      {drinkingMode && <Badge label={S.common.drinkingMode} icon="drink" tone="gold" />}
-
       <RulesModal
         visible={showRulesModal}
         onClose={() => setShowRulesModal(false)}
         variant="codenames"
       />
-
-      {/* Drinking Mode Popup */}
-      <Dialog
-        visible={!!room.drinking_popup}
-        icon="drink"
-        title={S.codenames.game.drinkingTitle}
-        onRequestClose={clearDrinkingPopup}
-        actions={<Button title={S.common.continue} onPress={clearDrinkingPopup} fullWidth />}
-      >
-        {room.drinking_popup ? (
-          <>
-            <View style={styles.centerRow}>
-              <Icon name={getTeamStyle(room.drinking_popup.team).icon} size={28} color={getTeamStyle(room.drinking_popup.team).ink} />
-              <AppText variant="title" align="center" style={styles.flexShrink}>
-                {room.drinking_popup.team_name
-                  ? S.codenames.game.drinkingTeamName(room.drinking_popup.team_name)
-                  : S.codenames.game.drinkingTeamColor(room.drinking_popup.team)}
-              </AppText>
-            </View>
-            <AppText align="center" color={colors.inkSoft}>
-              {S.codenames.game.drinkingSub}
-            </AppText>
-          </>
-        ) : null}
-      </Dialog>
 
       {/* Winner */}
       <Dialog
@@ -1017,12 +931,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-  },
-  centerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
   },
   winnerBox: {
     alignItems: 'center',

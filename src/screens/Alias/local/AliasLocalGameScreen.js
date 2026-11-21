@@ -12,7 +12,6 @@ import AliasTimer from '../../../components/alias/AliasTimer';
 import RoundSummary from '../../../components/alias/RoundSummary';
 import TimeUpPopup from '../../../components/alias/TimeUpPopup';
 import GoldenRoundCard from '../../../components/alias/GoldenRoundCard';
-import DrinkingPopup from '../../../components/alias/DrinkingPopup';
 import { confirmAction } from '../../../utils/gameSync';
 
 const wordsPerRound = TURN_DECK_SIZE;
@@ -24,13 +23,12 @@ const wordsPerRound = TURN_DECK_SIZE;
  */
 export default function AliasLocalGameScreen({ navigation, route }) {
   const theme = useGameTheme();
-  const { teams: setupTeams, goldenRounds, drinking } = route.params;
-  const [game, setGame] = useState(() => L.createLocalGame(setupTeams, { goldenRounds, drinking }));
+  const { teams: setupTeams, goldenRounds } = route.params;
+  const [game, setGame] = useState(() => L.createLocalGame(setupTeams, { goldenRounds }));
   const [wordPool, setWordPool] = useState(null); // null = loading
   const [cards, setCards] = useState([]);
   const [timeIsUp, setTimeIsUp] = useState(false);
   const [timerKey, setTimerKey] = useState(0);
-  const [drinkingTeam, setDrinkingTeam] = useState(null);
   const gameRef = useRef(game);
   gameRef.current = game;
   const cardsRef = useRef(cards);
@@ -99,7 +97,6 @@ export default function AliasLocalGameScreen({ navigation, route }) {
     const next = L.finishRound(game);
     setGame(next);
     setTimeIsUp(false);
-    if (next.drinking_popup) setDrinkingTeam(next.drinking_popup.team_name);
   };
 
   const exitToHome = () => {
@@ -156,7 +153,7 @@ export default function AliasLocalGameScreen({ navigation, route }) {
           title={S.alias.local.sameTeams}
           icon="dice"
           onPress={() => {
-            setGame(L.createLocalGame(setupTeams, { goldenRounds, drinking }));
+            setGame(L.createLocalGame(setupTeams, { goldenRounds }));
             setTimeIsUp(false);
           }}
           fullWidth
@@ -170,7 +167,6 @@ export default function AliasLocalGameScreen({ navigation, route }) {
   if (game.show_round_summary) {
     return (
       <Screen header={header}>
-        <DrinkingPopup visible={!!drinkingTeam} onClose={() => setDrinkingTeam(null)} teamName={drinkingTeam} />
         <RoundSummary
           room={game}
           currentTeam={currentTeam}
@@ -188,7 +184,6 @@ export default function AliasLocalGameScreen({ navigation, route }) {
   if (!game.round_active) {
     return (
       <>
-        <DrinkingPopup visible={!!drinkingTeam} onClose={() => setDrinkingTeam(null)} teamName={drinkingTeam} />
         <PassPhone
           title={S.local.passTo(L.getExplainer(game))}
           subtitle={S.alias.local.passSubtitle(currentTeam.name)}

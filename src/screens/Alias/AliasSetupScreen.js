@@ -24,7 +24,6 @@ export default function AliasSetupScreen({ navigation, route }) {
   const [isHost, setIsHost] = useState(false);
   const [isJoiningTeam, setIsJoiningTeam] = useState(false);
   const [isStartingGame, setIsStartingGame] = useState(false);
-  const [drinkingMode, setDrinkingMode] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
   const unsubscribeRef = useRef(null);
 
@@ -34,10 +33,6 @@ export default function AliasSetupScreen({ navigation, route }) {
         const savedName = await storage.getItem('playerName');
         if (savedName) {
           setPlayerName(savedName);
-        }
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
         }
       } catch (e) {
         console.warn('Could not load player name:', e);
@@ -151,19 +146,6 @@ export default function AliasSetupScreen({ navigation, route }) {
       // Check if current player is host
       const currentPlayerName = playerName || (await storage.getItem('playerName')) || '';
       setIsHost(roomData.host_name === currentPlayerName);
-      
-      // Load drinking mode from room data (preferred) or local storage (fallback)
-      if (roomData.drinking_mode !== undefined) {
-        setDrinkingMode(roomData.drinking_mode);
-        // Also sync to local storage
-        await storage.setItem('drinkingMode', roomData.drinking_mode.toString());
-      } else {
-        // Fallback to local storage if room doesn't have it yet
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
-        }
-      }
     } catch (error) {
       console.error('Error loading room:', error);
       Alert.alert(S.alias.setup.error, S.alias.setup.loadFailed);
@@ -186,13 +168,6 @@ export default function AliasSetupScreen({ navigation, route }) {
       if (snapshot.exists()) {
         const roomData = { id: snapshot.id, ...snapshot.data() };
         setRoom(roomData);
-
-        // Sync drinking mode from room data
-        if (roomData.drinking_mode !== undefined) {
-          setDrinkingMode(roomData.drinking_mode);
-          // Also sync to local storage
-          storage.setItem('drinkingMode', roomData.drinking_mode.toString()).catch(() => {});
-        }
 
         // Check if current player is host
         storage.getItem('playerName').then(savedName => {
@@ -322,30 +297,6 @@ export default function AliasSetupScreen({ navigation, route }) {
     } catch (error) {
       console.error('Error toggling golden rounds:', error);
       Alert.alert(S.alias.setup.error, S.alias.setup.settingsFailed);
-    }
-  };
-
-  const handleToggleDrinkingMode = async () => {
-    if (!isHost || !room) return;
-
-    const newValue = !drinkingMode;
-    setDrinkingMode(newValue);
-
-    try {
-      // Save to local storage
-      await storage.setItem('drinkingMode', newValue.toString());
-
-      // Save to Firestore room data so all players see it
-      const roomRef = doc(db, 'GameRoom', roomCode);
-      await updateDoc(roomRef, {
-        drinking_mode: newValue
-      });
-
-      console.log('✅ Drinking mode updated:', newValue);
-    } catch (error) {
-      console.error('Error saving drinking mode:', error);
-      setDrinkingMode(!newValue); // Revert on error
-      Alert.alert(S.alias.setup.error, S.alias.setup.drinkingFailed);
     }
   };
 
@@ -502,7 +453,6 @@ export default function AliasSetupScreen({ navigation, route }) {
             }
           }}
           onRulesPress={() => setShowRulesModal(true)}
-          drinkingMode={drinkingMode}
         />
       }
       footer={<BannerAd />}
@@ -513,25 +463,9 @@ export default function AliasSetupScreen({ navigation, route }) {
         variant="alias"
       />
 
-      {/* Settings */}
+      {/* Settings: Golden Rounds Toggle (Host Only) */}
+      {isHost && (
       <Card padding="md" style={styles.section}>
-        <View style={styles.toggleRow}>
-          <Icon name="drink" size={22} color={colors.ink} />
-          <AppText variant="bodyStrong" style={styles.flex}>
-            {S.alias.setup.drinking}
-          </AppText>
-          <Switch
-            value={drinkingMode}
-            onValueChange={handleToggleDrinkingMode}
-            disabled={!isHost}
-            accessibilityLabel={S.alias.setup.drinking}
-            trackColor={{ false: colors.line, true: theme.accent }}
-            thumbColor={colors.card}
-          />
-        </View>
-
-        {/* Golden Rounds Toggle (Host Only) */}
-        {isHost && (
           <View style={styles.toggleRow}>
             <Icon name="golden" size={22} color={colors.goldDeep} />
             <AppText variant="bodyStrong" style={styles.flex}>
@@ -545,8 +479,8 @@ export default function AliasSetupScreen({ navigation, route }) {
               thumbColor={colors.card}
             />
           </View>
-        )}
       </Card>
+      )}
 
       {/* Teams */}
       <View style={styles.sectionHeader}>

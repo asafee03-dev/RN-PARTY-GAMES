@@ -25,9 +25,9 @@ const randomGoldenSquares = () => {
 
 /**
  * @param {Array<{name: string, color: string, players: string[]}>} teams
- * @param {{goldenRounds?: boolean, drinking?: boolean}} options
+ * @param {{goldenRounds?: boolean}} options
  */
-export function createLocalGame(teams, { goldenRounds = false, drinking = false } = {}) {
+export function createLocalGame(teams, { goldenRounds = false } = {}) {
   // Random starting team, and a random first explainer inside each team
   const startingTurn = randomInt(teams.length);
   return {
@@ -52,8 +52,6 @@ export function createLocalGame(teams, { goldenRounds = false, drinking = false 
     winner_team: null,
     golden_rounds_enabled: !!goldenRounds,
     golden_squares: goldenRounds ? randomGoldenSquares() : [],
-    drinking_mode: !!drinking,
-    drinking_popup: null,
   };
 }
 
@@ -194,13 +192,6 @@ export function reassignCardTeam(state, cardIndex, newTeamIndex) {
   return next;
 }
 
-/** Drinking mode: after a full round the team that advanced least drinks. */
-function drinkingTeamName(teams) {
-  const progress = teams.map((t, i) => ({ i, name: t.name, moved: (t.position || 0) - (t.round_start_position ?? t.position ?? 0) }));
-  const min = Math.min(...progress.map((p) => p.moved));
-  return progress.find((p) => p.moved === min)?.name || null;
-}
-
 /** Close the summary and hand the turn to the next team. */
 export function finishRound(state) {
   if (!state.show_round_summary) return state;
@@ -221,10 +212,6 @@ export function finishRound(state) {
   };
   // Full round = back to the team that started
   if (nextTurn === (state.starting_turn ?? 0)) {
-    if (state.drinking_mode) {
-      const name = drinkingTeamName(state.teams);
-      if (name) next.drinking_popup = { team_name: name };
-    }
     teams = teams.map((t) => ({ ...t, round_start_position: null }));
   }
   next.teams = teams;

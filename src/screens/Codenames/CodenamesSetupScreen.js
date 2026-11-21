@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Alert, ActivityIndicator, Switch } from 'react-native';
+import { View, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BannerAd from '../../components/shared/BannerAd';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import TwoPhonesLobby from '../../components/codenames/TwoPhonesLobby';
 import { db } from '../../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, query, collection, where, getDocs, runTransaction } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { shuffle } from '../../utils/random';
 import { loadContent } from '../../utils/contentCache';
@@ -24,7 +24,6 @@ export default function CodenamesSetupScreen({ navigation, route }) {
   const [room, setRoom] = useState(null);
   const [currentPlayerName, setCurrentPlayerName] = useState('');
   const [isHost, setIsHost] = useState(false);
-  const [drinkingMode, setDrinkingMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [showRulesModal, setShowRulesModal] = useState(false);
   const unsubscribeRef = useRef(null);
@@ -76,11 +75,6 @@ export default function CodenamesSetupScreen({ navigation, route }) {
 
         setCurrentPlayerName(playerName);
 
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
-        }
-
         await loadRoom(playerName);
         setIsLoading(false);
       } catch (err) {
@@ -117,19 +111,6 @@ export default function CodenamesSetupScreen({ navigation, route }) {
       
       const existingRoom = { id: snapshot.id, ...snapshot.data() };
       console.log('✅ Room loaded successfully:', existingRoom.id, 'with code:', existingRoom.room_code);
-
-      // Load drinking mode from room data (preferred) or local storage (fallback)
-      if (existingRoom.drinking_mode !== undefined) {
-        setDrinkingMode(existingRoom.drinking_mode);
-        // Also sync to local storage
-        await storage.setItem('drinkingMode', existingRoom.drinking_mode.toString());
-      } else {
-        // Fallback to local storage if room doesn't have it yet
-        const savedMode = await storage.getItem('drinkingMode');
-        if (savedMode) {
-          setDrinkingMode(savedMode === 'true');
-        }
-      }
 
       // Check if player is already in the room
       const playerInRoom = existingRoom.red_team.spymaster === playerName ||
@@ -181,13 +162,6 @@ export default function CodenamesSetupScreen({ navigation, route }) {
         const updatedRoom = { id: snapshot.id, ...snapshot.data() };
         setRoom(updatedRoom);
         setIsHost(updatedRoom.host_name === currentPlayerName);
-        
-        // Sync drinking mode from room data
-        if (updatedRoom.drinking_mode !== undefined) {
-          setDrinkingMode(updatedRoom.drinking_mode);
-          // Also sync to local storage
-          storage.setItem('drinkingMode', updatedRoom.drinking_mode.toString()).catch(() => {});
-        }
         
         if (updatedRoom.game_status === 'playing') {
           navigation.navigate('CodenamesGame', { roomCode });
@@ -393,10 +367,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
           turn_phase: 'clue',
           current_clue: null,
           guesses_remaining: 0,
-          winner_team: null,
-          drinking_popup: null,
-          // Use the room's drinking setting (shared by everyone), not this device's storage
-          round_baseline_reveals: fresh.drinking_mode === true ? { red: 0, blue: 0 } : null
+          winner_team: null
         });
         return 'ok';
       });
@@ -571,7 +542,6 @@ export default function CodenamesSetupScreen({ navigation, route }) {
           variant="codenames"
           onExit={goBack}
           onRulesPress={() => setShowRulesModal(true)}
-          drinkingMode={drinkingMode}
           showRules={true}
         />
       }
@@ -605,45 +575,12 @@ export default function CodenamesSetupScreen({ navigation, route }) {
             <AppText variant="caption" color={colors.inkSoft}>
               {isRivalsMode ? S.codenames.setup.hostHintRivals : S.codenames.setup.hostHint}
             </AppText>
-            <View style={styles.toggleRow}>
-              <Icon name="drink" size={22} color={colors.ink} />
-              <AppText variant="bodyStrong" style={styles.flex}>
-                {S.codenames.setup.drinkingToggle}
-              </AppText>
-              <Switch
-                value={drinkingMode}
-                accessibilityLabel={S.codenames.setup.drinkingToggle}
-                trackColor={{ false: colors.line, true: theme.accent }}
-                thumbColor={colors.card}
-                onValueChange={async (checked) => {
-                  setDrinkingMode(checked);
-                  try {
-                    // Save to local storage
-                    await storage.setItem('drinkingMode', checked.toString());
-
-                    // Save to Firestore room data so all players see it
-                    if (room && room.id) {
-                      const roomRef = doc(db, 'CodenamesRoom', room.id);
-                      await updateDoc(roomRef, {
-                        drinking_mode: checked
-                      });
-                      console.log('✅ Drinking mode updated:', checked);
-                    }
-                  } catch (error) {
-                    console.error('Error saving drinking mode:', error);
-                    setDrinkingMode(!checked); // Revert on error
-                    Alert.alert(S.codenames.setup.error, S.codenames.setup.drinkingFailed);
-                  }
-                }}
-              />
-            </View>
           </Card>
         )}
 
         {!isHost && (
           <View style={styles.section}>
             <AppText variant="subtitle">{S.codenames.setup.hello(currentPlayerName)}</AppText>
-            {drinkingMode ? <Badge label={S.codenames.setup.drinkingActive} icon="drink" tone="gold" /> : null}
             <AppText color={colors.inkSoft}>
               {isRivalsMode ? S.codenames.setup.waitingAuto : S.codenames.setup.chooseRole}
             </AppText>
@@ -724,12 +661,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    minHeight: 48,
   },
   teamCard: {
     borderRadius: radii.lg,

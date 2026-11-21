@@ -205,21 +205,18 @@ export function submitGuess(gameState, playerName, angle) {
  * Advance to next turn
  * @param {Object} gameState - Current game state
  * @param {Object} nextTopic - Next topic object with { left, right }
- * @param {Object} options - Options { drinkingMode: boolean }
  * @returns {Object} Updated game state
  */
-export function advanceToNextTurn(gameState, nextTopic, options = {}) {
+export function advanceToNextTurn(gameState, nextTopic) {
   if (gameState.turnPhase !== 'summary') {
     throw new Error('Must be in summary phase');
   }
 
-  const { drinkingMode = false } = options;
   const sectors = gameState.currentRoundSectors;
   const currentClueGiver = gameState.players[gameState.currentTurnIndex]?.name;
   
   // Calculate and apply scores
   let totalPointsEarnedByGuessers = 0;
-  const drinkingPlayers = [];
 
   const updatedPlayers = gameState.players.map(player => {
     if (player.name === currentClueGiver) {
@@ -229,10 +226,6 @@ export function advanceToNextTurn(gameState, nextTopic, options = {}) {
     const angle = gameState.needlePositions[player.name];
     const pointsEarned = angle !== undefined ? getSectorScore(angle, sectors) : 0;
     totalPointsEarnedByGuessers += pointsEarned;
-
-    if (drinkingMode && pointsEarned === 0) {
-      drinkingPlayers.push(player.name);
-    }
 
     return {
       ...player,
@@ -261,8 +254,7 @@ export function advanceToNextTurn(gameState, nextTopic, options = {}) {
       players: finalUpdatedPlayers,
       gameStatus: 'finished',
       winnerName: winner.name,
-      lastGuessResult: null,
-      drinkingPlayers: drinkingPlayers.length > 0 ? drinkingPlayers : null
+      lastGuessResult: null
     };
   }
 
@@ -294,8 +286,7 @@ export function advanceToNextTurn(gameState, nextTopic, options = {}) {
     guessSubmittedNames: {},
     currentRoundSectors: newSectors,
     turnPhase: 'clue',
-    lastGuessResult: null,
-    drinkingPlayers: drinkingPlayers.length > 0 ? drinkingPlayers : null
+    lastGuessResult: null
   };
 }
 
@@ -456,8 +447,7 @@ export function resetGame(gameState) {
     currentRoundSectors: null,
     turnPhase: null,
     lastGuessResult: null,
-    winnerName: null,
-    drinkingPlayers: null
+    winnerName: null
   };
 }
 

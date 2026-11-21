@@ -1,7 +1,7 @@
 import { arrayUnion, collection, doc, getDocs, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BannerAd from '../../components/shared/BannerAd';
 import DrawCanvas from '../../components/draw/DrawCanvas';
@@ -75,7 +75,6 @@ const getDrawerName = (roomData) => roomData?.players?.[roomData.current_turn_in
  */
 const buildRoundEnd = (roomData, guesses) => {
   const currentDrawer = getDrawerName(roomData);
-  const drinkingModeActive = roomData.drinking_mode === true;
 
   const correctGuessers = new Map(); // playerName -> points
   let firstWinner = null;
@@ -92,20 +91,6 @@ const buildRoundEnd = (roomData, guesses) => {
   });
   const hasCorrectGuess = correctGuessers.size > 0;
 
-  // Drinking: nobody correct -> drawer drinks; otherwise everyone who missed drinks
-  const drinkingPlayers = [];
-  if (drinkingModeActive) {
-    if (!hasCorrectGuess) {
-      drinkingPlayers.push(currentDrawer);
-    } else {
-      (roomData.players || [])
-        .filter(p => p && p.name && p.name !== currentDrawer && p.active !== false)
-        .forEach(p => {
-          if (!correctGuessers.has(p.name)) drinkingPlayers.push(p.name);
-        });
-    }
-  }
-
   const players = (roomData.players || []).map(player => {
     if (!player || player.active === false) return player;
     if (player.name === currentDrawer) {
@@ -121,7 +106,6 @@ const buildRoundEnd = (roomData, guesses) => {
     players,
     show_round_summary: true,
     round_winner: firstWinner,
-    drinking_players: drinkingModeActive && drinkingPlayers.length > 0 ? drinkingPlayers : null,
     final_draw_image: null
   };
 
@@ -171,7 +155,6 @@ export default function DrawRoomScreen({ navigation, route }) {
   // Space available for the canvas (measured), so it fits every screen size
   const [canvasArea, setCanvasArea] = useState({ width: 0, height: 0 });
   const [guessInput, setGuessInput] = useState('');
-  const [drinkingMode, setDrinkingMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [timeRemaining, setTimeRemaining] = useState(60);
@@ -243,7 +226,6 @@ export default function DrawRoomScreen({ navigation, route }) {
         if (savedName) {
           setCurrentPlayerName(savedName);
         }
-        // Drinking mode is synced from the room document by the realtime listener
       } catch (e) {
         console.warn('Could not load player name:', e);
       }
@@ -378,13 +360,6 @@ export default function DrawRoomScreen({ navigation, route }) {
     unsubscribeRef.current = onSnapshot(roomDocRef, (snapshot) => {
       if (snapshot.exists()) {
         const newRoom = { id: snapshot.id, ...snapshot.data() };
-        
-        // Sync drinking mode from room data
-        if (newRoom.drinking_mode !== undefined) {
-          setDrinkingMode(newRoom.drinking_mode);
-          // Also sync to local storage
-          storage.setItem('drinkingMode', newRoom.drinking_mode.toString()).catch(() => {});
-        }
         
         // Handle reset trigger for showing ad to all players (non-host)
         const playerName = currentPlayerNameRef.current || '';
@@ -736,7 +711,6 @@ export default function DrawRoomScreen({ navigation, route }) {
           turn_start_time: serverNow(),
           show_round_summary: false,
           round_winner: null,
-          drinking_players: null,
           winner_name: null
         });
         return true;
@@ -904,7 +878,6 @@ export default function DrawRoomScreen({ navigation, route }) {
           drawing_data: null,
           show_round_summary: false,
           round_winner: null,
-          drinking_players: null,
           players: players.map(p => (p && p.name ? { ...p, current_guess: '', has_submitted: false } : p)),
           all_guesses: [],
           final_draw_image: null,
@@ -957,7 +930,6 @@ export default function DrawRoomScreen({ navigation, route }) {
         show_round_summary: false,
         round_winner: null,
         winner_name: null,
-        drinking_players: null,
         all_guesses: [],
         final_draw_image: null,
         turn_start_time: null,
@@ -1147,14 +1119,11 @@ export default function DrawRoomScreen({ navigation, route }) {
     }
     return localStrokes;
   })();
-  const showSummary = !!(room && room.show_round_summary && !room.drinking_players && !forceCloseModal &&
+  const showSummary = !!(room && room.show_round_summary && !forceCloseModal &&
     room.game_status !== 'finished' &&
     room.players && Array.isArray(room.players) &&
     room.players.some(p => p && p.name === currentPlayerName) &&
     currentPlayerName);
-  const showDrinking = !!(room.drinking_players && room.drinking_players.length > 0 &&
-    room.players && Array.isArray(room.players) &&
-    room.players.some(p => p && p.name === currentPlayerName));
   const showFinished = !!(room.game_status === 'finished' && !forceCloseModal &&
     room.players && Array.isArray(room.players) &&
     room.players.some(p => p && p.name === currentPlayerName));
@@ -1176,7 +1145,6 @@ export default function DrawRoomScreen({ navigation, route }) {
           variant="draw"
           onExit={goBack}
           onRulesPress={handleRulesPress}
-          drinkingMode={drinkingMode}
         />
       }
       footer={<BannerAd />}
@@ -1202,43 +1170,7 @@ export default function DrawRoomScreen({ navigation, route }) {
           {isHost && (
             <Card tone="tint" padding="md" style={styles.section}>
               <Badge label={S.draw.room.youAreHost} icon="crown" tone="gold" />
-              <View style={styles.toggleRow}>
-                <Icon name="drink" size={22} color={colors.ink} />
-                <AppText variant="bodyStrong" style={styles.flex}>
-                  {S.draw.room.drinkingToggle}
-                </AppText>
-                <Switch
-                  value={drinkingMode}
-                  accessibilityLabel={S.draw.room.drinkingToggle}
-                  onValueChange={async (checked) => {
-                    setDrinkingMode(checked);
-                    try {
-                      // Save to local storage
-                      await storage.setItem('drinkingMode', checked.toString());
-
-                      // Save to Firestore room data so all players see it
-                      if (room && room.id) {
-                        const roomRef = doc(db, 'DrawRoom', room.id);
-                        await updateDoc(roomRef, {
-                          drinking_mode: checked
-                        });
-                        console.log('✅ Drinking mode updated:', checked);
-                      }
-                    } catch (error) {
-                      console.error('Error saving drinking mode:', error);
-                      setDrinkingMode(!checked); // Revert on error
-                      Alert.alert(S.common.error, S.draw.room.drinkingUpdateFailed);
-                    }
-                  }}
-                  trackColor={{ false: colors.line, true: theme.accent }}
-                  thumbColor={colors.card}
-                />
-              </View>
             </Card>
-          )}
-
-          {!isHost && drinkingMode && (
-            <Badge label={S.draw.room.drinkingActive} icon="drink" tone="gold" />
           )}
 
           <AppText variant="label" color={colors.inkSoft}>
@@ -1536,58 +1468,6 @@ export default function DrawRoomScreen({ navigation, route }) {
         </>
       )}
 
-      {/* Drinking */}
-      <Dialog
-        visible={showDrinking}
-        icon="drink"
-        title={S.draw.room.drinkingTitle}
-        actions={
-          <Button
-            title={S.common.continue}
-            fullWidth
-            onPress={async () => {
-              try {
-                const roomRef = doc(db, 'DrawRoom', room.id);
-                await updateDoc(roomRef, {
-                  drinking_players: null
-                });
-              } catch (error) {
-                console.error('Error clearing drinking players:', error);
-              }
-            }}
-          />
-        }
-      >
-        {showDrinking ? (
-          <>
-            <AppText align="center" variant="bodyStrong">
-              {(() => {
-                const currentDrawer = room.players[room.current_turn_index]?.name;
-                const isDrawerDrinking = room.drinking_players.includes(currentDrawer);
-
-                if (isDrawerDrinking) {
-                  return S.draw.room.drinkDrawer(currentDrawer);
-                } else if (room.drinking_players.length === 1) {
-                  return S.draw.room.drinkOne;
-                } else {
-                  return S.draw.room.drinkMany;
-                }
-              })()}
-            </AppText>
-            <View style={[styles.chips, styles.centerChips]}>
-              {room.drinking_players
-                .filter((name) => name != null)
-                .map((name, idx) => (
-                  <Badge key={`drinking-${idx}`} label={typeof name === 'string' ? name : String(name || '')} icon="player" tone="gold" />
-                ))}
-            </View>
-            <AppText variant="title" align="center" color={theme.accentInk}>
-              {room.drinking_players.length === 1 ? S.draw.room.shotOne : S.draw.room.shotMany}
-            </AppText>
-          </>
-        ) : null}
-      </Dialog>
-
       {/* Round Summary - must be answered (no close) */}
       <Dialog
         visible={showSummary}
@@ -1812,12 +1692,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    minHeight: 48,
   },
   chips: {
     flexDirection: 'row',

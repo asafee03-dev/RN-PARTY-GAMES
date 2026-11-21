@@ -9,10 +9,9 @@ import { borders, colors, GameThemeProvider, radii, spacing, touch, useGameTheme
 import { AppText, feedback, Icon, IconButton } from '../../ui';
 
 /**
- * Top bar shown inside every game room. Same props and behavior as before
- * (copy code, share link, rules, exit, drinking-mode indicator) with the
- * new board-game look. Start side: room code + share; end side: drinking
- * token, rules, exit. All targets >= 48dp, all icon-only buttons labeled.
+ * Top bar shown inside every game room (copy code, share link, rules, exit)
+ * with the board-game look. Start side: room code + share; end side: rules,
+ * exit. All targets >= 48dp, all icon-only buttons labeled.
  */
 export default function UnifiedTopBar(props) {
   return (
@@ -28,29 +27,11 @@ function TopBarContent({
   onExit,
   onRulesPress,
   showRules = true,
-  drinkingMode: propDrinkingMode = null, // Override from prop, otherwise read storage (unchanged)
 }) {
   const theme = useGameTheme();
   const insets = useSafeAreaInsets();
-  const [drinkingMode, setDrinkingMode] = useState(false);
   const [playerName, setPlayerName] = useState('');
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    const loadDrinkingMode = async () => {
-      if (propDrinkingMode !== null) {
-        setDrinkingMode(propDrinkingMode);
-      } else {
-        try {
-          const savedMode = await storage.getItem('drinkingMode');
-          setDrinkingMode(savedMode === 'true');
-        } catch (e) {
-          console.warn('Could not load drinking mode:', e);
-        }
-      }
-    };
-    loadDrinkingMode();
-  }, [propDrinkingMode]);
 
   useEffect(() => {
     const loadPlayerName = async () => {
@@ -99,13 +80,8 @@ function TopBarContent({
         <IconButton icon="share" label={S.topBar.shareLink} onPress={handleShareRoomLink} size={touch.min - 4} />
       </View>
 
-      {/* End side: drinking indicator, rules, exit */}
+      {/* End side: rules, exit */}
       <View style={styles.group}>
-        {drinkingMode && (
-          <View style={styles.drinkToken} accessible accessibilityLabel={S.topBar.drinkingOn}>
-            <Icon name="drink" size={22} color={colors.ink} />
-          </View>
-        )}
         {showRules && onRulesPress && (
           <IconButton icon="rules" label={S.topBar.rules} onPress={onRulesPress} size={touch.min - 4} />
         )}
@@ -157,16 +133,6 @@ const styles = StyleSheet.create({
   },
   pressed: {
     transform: [{ scale: 0.97 }],
-  },
-  drinkToken: {
-    width: 40,
-    height: 40,
-    borderRadius: radii.pill,
-    backgroundColor: colors.gold,
-    borderWidth: 2,
-    borderColor: colors.goldDeep,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   toast: {
     position: 'absolute',

@@ -10,6 +10,7 @@
     "ios": "node ./scripts/fix-podfile.js && expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "test:logic": "node ./scripts/tests/run.cjs",
     "build:web": "npx expo export --platform web --output-dir dist",
     "deploy": "npm run build:web && firebase deploy --only hosting",
     "fix-podfile": "node ./scripts/fix-podfile.js"

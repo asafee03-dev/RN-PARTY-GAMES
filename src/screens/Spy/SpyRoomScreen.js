@@ -5,7 +5,7 @@ import BannerAd from '../../components/shared/BannerAd';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db } from '../../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, collection, getDocs, runTransaction, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot, runTransaction, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
@@ -17,6 +17,7 @@ import { S } from '../../strings';
 import { colors, motion, radii, spacing, useGameTheme } from '../../theme';
 import { AppText, Badge, Button, Card, Icon, PlayerChip, Screen, TextField, TimerDisplay, feedback } from '../../ui';
 import { REPEAT_SPY_WEIGHT, pickFresh, remember, weightedSample } from '../../utils/random';
+import { loadContent } from '../../utils/contentCache';
 import { dealRoles } from '../../logic/spyLocal';
 import { serverNow, startSecondTicker, syncServerClock } from '../../utils/serverClock';
 
@@ -548,9 +549,8 @@ export default function SpyRoomScreen({ navigation, route }) {
 
     try {
       if (currentGameMode === 'locations') {
-        const locations = [];
-        const locationsSnapshot = await getDocs(collection(db, 'SpyLocation'));
-        locationsSnapshot.forEach((d) => locations.push({ id: d.id, ...d.data() }));
+        // Cached in memory and on the device
+        const locations = await loadContent('SpyLocation');
         const valid = locations.filter(l => l && l.location && Array.isArray(l.roles) && l.roles.length > 0);
         if (valid.length === 0) {
           Alert.alert(S.common.error, S.spy.room.noLocations);
@@ -560,9 +560,9 @@ export default function SpyRoomScreen({ navigation, route }) {
         allLocationNames = locations.map(loc => loc.location).filter(loc => loc != null);
       } else {
         const words = [];
-        const wordsSnapshot = await getDocs(collection(db, 'WordCard'));
-        wordsSnapshot.forEach((d) => {
-          const w = d.data()?.word;
+        const wordDocs = await loadContent('WordCard');
+        wordDocs.forEach((d) => {
+          const w = d?.word;
           if (typeof w === 'string' && w.trim().length > 0) words.push(w.trim());
         });
         if (words.length === 0) {

@@ -11,7 +11,7 @@ import DrinkingPopup from '../../components/alias/DrinkingPopup';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db } from '../../firebase';
-import { arrayUnion, doc, getDoc, updateDoc, onSnapshot, collection, getDocs, runTransaction } from 'firebase/firestore';
+import { arrayUnion, doc, getDoc, updateDoc, onSnapshot, runTransaction } from 'firebase/firestore';
 import { dealTurnDeck, deckWordAt, TURN_DECK_SIZE } from '../../logic/alias';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
@@ -19,6 +19,7 @@ import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomMan
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 import { serverNow, syncServerClock } from '../../utils/serverClock';
 import { shuffle, uniqueBy } from '../../utils/random';
+import { loadContent } from '../../utils/contentCache';
 import { S } from '../../strings';
 import { colors, radii, spacing, useGameTheme } from '../../theme';
 import { AppText, Badge, Button, Card, Icon, Screen, feedback } from '../../ui';
@@ -440,11 +441,8 @@ export default function AliasGameScreen({ navigation, route }) {
 
   const loadWordCardsFromDB = async () => {
     try {
-      const cardsSnapshot = await getDocs(collection(db, 'WordCard'));
-      const cards = [];
-      cardsSnapshot.forEach((doc) => {
-        cards.push({ id: doc.id, ...doc.data() });
-      });
+      // Cached in memory and on the device (no full re-read per screen)
+      const cards = await loadContent('WordCard');
       
       if (cards && cards.length > 0) {
         // Deduplicated: some words are stored twice, and a word must not

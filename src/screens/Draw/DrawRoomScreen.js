@@ -18,6 +18,7 @@ import { AppText, Badge, Button, Card, Dialog, Icon, IconButton, PlayerChip, Scr
 import { getActingHostName, getFirstActiveIndex, getNextActiveIndex, markPlayerInactive } from '../../utils/gameSync';
 import { serverNow, syncServerClock } from '../../utils/serverClock';
 import { pickForGame, pickRandom } from '../../utils/random';
+import { loadContent } from '../../utils/contentCache';
 
 const WINNING_SCORE = 12;
 const TURN_SECONDS = 60;
@@ -133,13 +134,14 @@ const buildRoundEnd = (roomData, guesses) => {
   return update;
 };
 
-// All words (a query, which can't run inside a transaction). The pick itself
-// happens inside the transaction, against the room's used_words.
+// All words (cached in memory and on the device, so a turn doesn't re-read
+// the list). The pick itself happens inside the transaction, against the
+// room's used_words.
 const loadWordPool = async () => {
-  const wordsSnapshot = await getDocs(collection(db, 'DrawWord'));
+  const wordDocs = await loadContent('DrawWord');
   const words = [];
-  wordsSnapshot.forEach((d) => {
-    const w = d.data()?.word;
+  wordDocs.forEach((d) => {
+    const w = d?.word;
     if (typeof w === 'string' && w.trim()) words.push(w.trim());
   });
   return words;

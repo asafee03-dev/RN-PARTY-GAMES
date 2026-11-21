@@ -9,6 +9,7 @@ import { db } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction } from 'firebase/firestore';
 import storage from '../../utils/storage';
 import { shuffle } from '../../utils/random';
+import { loadContent } from '../../utils/contentCache';
 import { S } from '../../strings';
 import { colors, radii, spacing, useGameTheme } from '../../theme';
 import { AppText, Badge, Button, Card, Icon, PlayerChip, Screen } from '../../ui';
@@ -337,13 +338,13 @@ export default function CodenamesSetupScreen({ navigation, route }) {
       return;
     }
 
-    // Word list is a query, which can't run inside a transaction - load it first
+    // Word list (cached in memory and on the device) - loaded before the transaction
     let selectedWords;
     try {
-      const wordsSnapshot = await getDocs(collection(db, 'WordCard'));
+      const wordDocs = await loadContent('WordCard');
       const validWords = [];
-      wordsSnapshot.forEach((d) => {
-        const w = d.data()?.word;
+      wordDocs.forEach((d) => {
+        const w = d?.word;
         if (typeof w === 'string' && w.trim().length > 0) validWords.push(w.trim());
       });
 

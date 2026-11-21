@@ -7,10 +7,11 @@ import ScoreBoard from '../../components/frequency/ScoreBoard';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db } from '../../firebase';
-import { arrayUnion, doc, getDoc, updateDoc, onSnapshot, collection, getDocs, runTransaction } from 'firebase/firestore';
+import { arrayUnion, doc, getDoc, updateDoc, onSnapshot, runTransaction } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
 import { pickForGame, pickRandom } from '../../utils/random';
+import { loadContent } from '../../utils/contentCache';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
@@ -170,13 +171,13 @@ const buildRoundSummary = (roomData) => {
 
 const topicKey = (t) => (t.left_side || t.left || '') + '|' + (t.right_side || t.right || '');
 
-// All topics, in the room's { left_side, right_side } shape (a query, which
-// can't run inside a transaction). The pick happens inside the transaction.
+// All topics, in the room's { left_side, right_side } shape (cached in memory
+// and on the device, so a turn doesn't re-read the list). The pick happens
+// inside the transaction.
 const loadTopicPool = async () => {
-  const topicsSnapshot = await getDocs(collection(db, 'FrequencyTopic'));
+  const topicDocs = await loadContent('FrequencyTopic');
   const valid = [];
-  topicsSnapshot.forEach((d) => {
-    const data = d.data();
+  topicDocs.forEach((data) => {
     if (data && data.left && data.right) {
       valid.push({ left_side: data.left, right_side: data.right });
     }

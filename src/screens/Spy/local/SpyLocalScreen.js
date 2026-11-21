@@ -1,7 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../../../firebase';
 import { S } from '../../../strings';
 import { borders, colors, radii, spacing, useGameTheme } from '../../../theme';
 import { AppText, Badge, Button, Card, Icon, IconButton, PlayerChip, Screen, TextField, TimerDisplay, feedback } from '../../../ui';
@@ -9,6 +7,7 @@ import { GAME_SECONDS, dealSpyGame, maxSpiesFor } from '../../../logic/spyLocal'
 import { confirmAction } from '../../../utils/gameSync';
 import storage from '../../../utils/storage';
 import { pickFresh, remember } from '../../../utils/random';
+import { loadContent } from '../../../utils/contentCache';
 
 /**
  * Single phone Spy. Everything happens on this phone (no room):
@@ -84,19 +83,18 @@ export default function SpyLocalScreen({ navigation }) {
     try {
       let content;
       if (mode === 'locations') {
-        const snapshot = await getDocs(collection(db, 'SpyLocation'));
+        const locationDocs = await loadContent('SpyLocation');
         const valid = [];
-        snapshot.forEach((d) => {
-          const data = d.data();
+        locationDocs.forEach((data) => {
           if (data && data.location && Array.isArray(data.roles) && data.roles.length > 0) valid.push(data);
         });
         if (valid.length === 0) throw new Error(S.spy.room.noLocations);
         content = { location: pickFresh(valid, recentSecretsRef.current, (l) => l.location) };
       } else {
         const words = [];
-        const snapshot = await getDocs(collection(db, 'WordCard'));
-        snapshot.forEach((d) => {
-          const w = d.data()?.word;
+        const wordDocs = await loadContent('WordCard');
+        wordDocs.forEach((d) => {
+          const w = d?.word;
           if (typeof w === 'string' && w.trim()) words.push(w.trim());
         });
         if (words.length === 0) throw new Error(S.spy.room.noWords);

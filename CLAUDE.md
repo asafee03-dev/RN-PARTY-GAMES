@@ -16,9 +16,10 @@ npm run ios            # runs scripts/fix-podfile.js, then expo run:ios
 npm run lint           # expo lint (eslint-config-expo, flat config)
 npm run build:web      # export web bundle to dist/
 npm run deploy         # build:web + firebase deploy --only hosting
+npm run test:logic     # logic tests in scripts/tests (mocked Firestore, no network)
 ```
 
-There is no test suite. Pushing to `main` triggers `.github/workflows/firebase-hosting-merge.yml`, which builds the web bundle and deploys it to Firebase Hosting (project `party-games-c1025`). PRs get preview channels. Native builds go through EAS (`eas.json`; app version comes from `appVersionSource: remote`).
+There is no UI test suite; `npm run test:logic` runs Node tests of pure logic (`scripts/tests/*.test.cjs`, loading `src/` through Babel). Never test against the production Firebase project: it is the live database and has a daily quota. Pushing to `main` triggers `.github/workflows/firebase-hosting-merge.yml`, which builds the web bundle and deploys it to Firebase Hosting (project `party-games-c1025`). PRs get preview channels. Native builds go through EAS (`eas.json`; app version comes from `appVersionSource: remote`).
 
 `npm run lint` still reports 8 old errors (undefined `copyRoomCode`/`copyRoomLink`/`setCopied` in dead helper functions of `AliasSetupScreen`, `CodenamesSetupScreen`, `CodenamesGameScreen`, and `__dirname` in `scripts/fix-podfile.js`). Nothing calls those helpers; don't treat them as new failures.
 
@@ -38,7 +39,7 @@ There is no test suite. Pushing to `main` triggers `.github/workflows/firebase-h
 **Game state / Firestore:**
 - `src/firebase.js` exports `db`. It uses the named database `"default"` via `initializeFirestore(app, settings, "default")`, so keep that argument. Native forces long polling (the streaming transport stalled for ~10s per request on phones); web uses the default transport.
 - Room collections, with the room code as document ID: `GameRoom` (Alias), `CodenamesRoom`, `DrawRoom`, `FrequencyRoom`, `SpyRoom`.
-- Read-only content collections: `WordCard`, `DrawWord`, `SpyLocation`, `FrequencyTopic`.
+- Read-only content collections: `WordCard`, `DrawWord`, `SpyLocation`, `FrequencyTopic`. Always load them with `loadContent(name)` from `src/utils/contentCache.js` (memory + device cache, freshness checked once per session via an optional `<Collection>/_meta` `{ version }` doc or the doc count), never `getDocs(collection(...))`: a full read is ~800 billed reads.
 - Field names are snake_case. `FIRESTORE_VERIFICATION.md` documents the per-collection schema, and `FIRESTORE_RULES.txt` is the reference copy of the security rules (deployed manually; not wired into `firebase.json`).
 - Screens subscribe with `onSnapshot`. The large `<Game>RoomScreen.js` / `<Game>GameScreen.js` files (1–3k lines) contain most of the actual game flow.
 - `src/logic/<game>.js` are pure game-logic modules (camelCase state, no React/Firestore), but screens barely use them: the Alias screens (online and single-phone) use `dealTurnDeck`/`deckWordAt` from `alias.js`, and single-phone Alias/Spy use `aliasLocal.js`/`spyLocal.js`. Check the screen before assuming logic lives in `src/logic`.

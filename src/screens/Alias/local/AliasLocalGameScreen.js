@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../../../firebase';
 import { S } from '../../../strings';
 import { colors, radii, spacing, useGameTheme } from '../../../theme';
 import { AppText, Badge, Button, Card, Icon, IconButton, PassPhone, Screen } from '../../../ui';
 import { dealTurnDeck, deckWordAt, TURN_DECK_SIZE } from '../../../logic/alias';
 import { uniqueBy } from '../../../utils/random';
+import { loadContent } from '../../../utils/contentCache';
 import * as L from '../../../logic/aliasLocal';
 import GameBoard from '../../../components/alias/GameBoard';
 import AliasTimer from '../../../components/alias/AliasTimer';
@@ -41,10 +40,10 @@ export default function AliasLocalGameScreen({ navigation, route }) {
     let active = true;
     (async () => {
       try {
-        const snapshot = await getDocs(collection(db, 'WordCard'));
+        const docs = await loadContent('WordCard');
         const words = [];
-        snapshot.forEach((d) => {
-          const w = d.data()?.word;
+        docs.forEach((d) => {
+          const w = d?.word;
           if (typeof w === 'string' && w.trim()) words.push(w.trim());
         });
         // Deduplicated, so a word can't show twice in the same turn

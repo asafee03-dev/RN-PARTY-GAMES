@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BannerAd from '../../components/shared/BannerAd';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
+import TwoPhonesLobby from '../../components/codenames/TwoPhonesLobby';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction } from 'firebase/firestore';
 import storage from '../../utils/storage';
@@ -442,6 +443,20 @@ export default function CodenamesSetupScreen({ navigation, route }) {
           {S.codenames.setup.loading}
         </AppText>
       </Screen>
+    );
+  }
+
+  // Two phones mode (clue-givers phone + guessers phone) has its own lobby
+  if (room.play_mode === 'two_phones') {
+    return (
+      <TwoPhonesLobby
+        room={room}
+        roomCode={roomCode}
+        playerName={currentPlayerName}
+        isHost={isHost}
+        onStart={startGame}
+        onExit={goBack}
+      />
     );
   }
 

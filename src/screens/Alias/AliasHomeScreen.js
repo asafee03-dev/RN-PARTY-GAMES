@@ -2,6 +2,7 @@ import { collection, doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 import BannerAd from '../../components/shared/BannerAd';
+import PlayModeDialog from '../../components/shared/PlayModeDialog';
 import { db } from '../../firebase';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
 import storage from '../../utils/storage';
@@ -22,6 +23,7 @@ export default function AliasHomeScreen({ navigation, route }) {
   const [roomCode, setRoomCode] = useState('');
   const [error, setError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const isCreatingRoomRef = useRef(false);
 
   useEffect(() => {
@@ -210,6 +212,7 @@ export default function AliasHomeScreen({ navigation, route }) {
   };
 
   return (
+    <>
     <GameEntryLayout
       icon="alias"
       title={S.alias.entry.title}
@@ -227,11 +230,21 @@ export default function AliasHomeScreen({ navigation, route }) {
       roomCodeMaxLength={4}
       error={error}
       isCreating={isCreating}
-      onCreate={createRoom}
+      onCreate={() => setModeDialogOpen(true)}
       onJoin={joinRoom}
       onBack={goBack}
       steps={S.alias.entry.steps}
       footer={<BannerAd />}
     />
+    <PlayModeDialog
+      visible={modeDialogOpen}
+      onClose={() => setModeDialogOpen(false)}
+      onRegular={createRoom}
+      onLocal={() => navigation.navigate('AliasLocalSetup')}
+      localTitle={S.alias.local.modeTitle}
+      localHint={S.alias.local.modeHint}
+      localIcon="phone"
+    />
+    </>
   );
 }

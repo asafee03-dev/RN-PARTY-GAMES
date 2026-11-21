@@ -12,7 +12,7 @@ export { default as ScoreToken } from './ScoreToken';
 export { default as Screen } from './Screen';
 export { default as TextField } from './TextField';
 export { default as TimerDisplay } from './TimerDisplay';
-export { feedback } from './feedback';
+export { feedback, setHapticsEnabled, HAPTICS_KEY } from './feedback';
 export { isRTL, physicalLeft, physicalRow, textAlignFor } from './direction';
 export { default as TeamPickButton } from './TeamPickButton';
 export { readableOn, accessibleSurface } from './readableOn';

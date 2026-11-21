@@ -40,6 +40,7 @@ const he = {
     subtitle: 'בחרו את המשחק שלכם ותתחילו את המסיבה!',
     play: 'שחק עכשיו',
     moreComing: 'משחקים נוספים בדרך...',
+    settings: 'הגדרות',
     // The game is intentionally called "אליאב"; the round timer is 60 seconds
     games: {
       alias: { name: 'אליאב', description: 'משחק ההסברות המהיר! 60 שניות להסביר כמה שיותר מילים' },
@@ -635,6 +636,23 @@ const he = {
         'ככל שהניחוש קרוב יותר — מקבלים יותר נקודות.',
       ],
     },
+  },
+
+  settings: {
+    title: 'הגדרות',
+    subtitle: 'התאימו את החוויה שלכם',
+    back: 'חזרה',
+    nicknameTitle: 'כינוי שחקן',
+    nicknameLabel: 'השם שיוצג במשחקים',
+    nicknamePlaceholder: 'הכניסו את הכינוי שלכם',
+    nicknameEmpty: 'הכינוי לא יכול להיות ריק',
+    experienceTitle: 'חוויה',
+    haptics: 'רטט במגע',
+    hapticsHint: 'משוב רטט בלחיצות ובחשיפת מילים (בטלפון בלבד)',
+    save: 'שמירה',
+    saved: 'נשמר',
+    error: 'שגיאה',
+    saveFailed: 'לא הצלחנו לשמור את ההגדרות',
   },
 
   // Full rules shown in the in-game rules window (texts unchanged)

@@ -3,7 +3,7 @@ import { Image, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 import { S } from '../../strings';
 import { borders, colors, depth, GameThemeProvider, motion, radii, spacing, useGameTheme } from '../../theme';
-import { AppText, feedback, Icon, Screen } from '../../ui';
+import { AppText, feedback, Icon, IconButton, Screen } from '../../ui';
 
 // Order and navigation targets are unchanged from the previous home screen
 const GAMES = [
@@ -81,7 +81,14 @@ export default function HomeScreen({ navigation }) {
   };
 
   return (
-    <Screen contentStyle={styles.content}>
+    <Screen
+      contentStyle={styles.content}
+      header={
+        <View style={styles.topBar}>
+          <IconButton icon="settings" label={S.home.settings} onPress={() => navigation.navigate('Settings')} />
+        </View>
+      }
+    >
       <Animated.View entering={reducedMotion ? undefined : FadeInDown.duration(motion.slow)} style={styles.header}>
         <Image
           source={require('../../../assets/images/partygameslogo.png')}
@@ -120,6 +127,12 @@ export default function HomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   content: {
     gap: spacing.xl,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start', // start side (right in RTL)
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
   },
   header: {
     alignItems: 'center',

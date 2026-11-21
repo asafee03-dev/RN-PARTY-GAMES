@@ -349,7 +349,6 @@ const he = {
       reqGuesserRed: 'לפחות מנחש אחד לקבוצה אדומה',
       reqGuesserBlue: 'לפחות מנחש אחד לקבוצה כחולה',
     },
-    // Text kept as-is ("בתפקידים" may be a typo for "בתפקידים")
     entry: {
       title: 'שם טוב',
       subtitle: 'משחק המרגלים והרמזים!',
@@ -363,6 +362,40 @@ const he = {
   },
 
   spy: {
+    // Single phone mode
+    local: {
+      modeTitle: 'טלפון אחד',
+      modeHint: 'מעבירים את הטלפון בין השחקנים, בלי חדר ובלי להצטרף',
+      setupTitle: 'המרגל – טלפון אחד',
+      setupSubtitle: 'הוסיפו את השחקנים והעבירו את הטלפון בזה אחר זה',
+      playersHeader: (n) => `שחקנים (${n})`,
+      needThree: 'נדרשים לפחות 3 שחקנים',
+      duplicatePlayer: 'השם כבר קיים במשחק',
+      spiesHeader: 'מספר מרגלים',
+      spiesCount: (n) => (n === 1 ? 'מרגל אחד' : `${n} מרגלים`),
+      modeHeader: 'מצב משחק',
+      loading: 'מכינים את המשחק...',
+      dealProgress: (i, n) => `שחקן ${i} מתוך ${n}`,
+      yourTurn: (name) => `${name}, התור שלך`,
+      dealHint: 'ודאו שרק אתם מסתכלים במסך, ואז הקישו על הקלף',
+      faceDown: 'הקישו כדי לראות את הקלף',
+      faceDownLabel: (name) => `הקלף של ${name}, מוסתר. הקישו כדי לגלות`,
+      hideAndPass: 'הבנתי, להסתיר ולהעביר',
+      hideAndStart: 'הבנתי, להסתיר ולהתחיל',
+      playingTitle: 'המשחק התחיל!',
+      playingHint: 'שאלו אחד את השני שאלות כדי לגלות מי המרגל',
+      endGame: 'סיום המשחק',
+      endTitle: 'סוף המשחק',
+      theSpies: (n) => (n === 1 ? 'המרגל היה' : 'המרגלים היו'),
+      secretLocation: 'המיקום היה',
+      secretWord: 'המילה הייתה',
+      spyTag: 'מרגל',
+      newGame: 'משחק חדש עם אותם שחקנים',
+      backToMenu: 'חזרה לתפריט הראשי',
+      exitTitle: 'לצאת מהמשחק?',
+      exitMessage: 'המשחק הנוכחי יימחק',
+      exit: 'יציאה',
+    },
     room: {
       loadErrorTitle: 'שגיאה בטעינת החדר',
       loadErrorMessage: 'לא הצלחנו לטעון את חדר המשחק',

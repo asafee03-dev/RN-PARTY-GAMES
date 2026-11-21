@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import BannerAd from '../../components/shared/BannerAd';
+import PlayModeDialog from '../../components/shared/PlayModeDialog';
 import { db } from '../../firebase';
 import { doc, getDoc, setDoc, query, collection, where, getDocs, Timestamp } from 'firebase/firestore';
 import storage from '../../utils/storage';
@@ -13,6 +14,7 @@ export default function SpyHomeScreen({ navigation, route }) {
   const [roomCode, setRoomCode] = useState('');
   const [error, setError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const isCreatingRoomRef = useRef(false);
 
   useEffect(() => {
@@ -173,6 +175,7 @@ export default function SpyHomeScreen({ navigation, route }) {
   };
 
   return (
+    <>
     <GameEntryLayout
       icon="spy"
       title={S.spy.entry.title}
@@ -190,11 +193,21 @@ export default function SpyHomeScreen({ navigation, route }) {
       roomCodeMaxLength={4}
       error={error}
       isCreating={isCreating}
-      onCreate={createRoom}
+      onCreate={() => setModeDialogOpen(true)}
       onJoin={joinRoom}
       onBack={goBack}
       steps={S.spy.entry.steps}
       footer={<BannerAd />}
     />
+    <PlayModeDialog
+      visible={modeDialogOpen}
+      onClose={() => setModeDialogOpen(false)}
+      onRegular={createRoom}
+      onLocal={() => navigation.navigate('SpyLocal')}
+      localTitle={S.spy.local.modeTitle}
+      localHint={S.spy.local.modeHint}
+      localIcon="phone"
+    />
+    </>
   );
 }

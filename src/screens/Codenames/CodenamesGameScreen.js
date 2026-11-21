@@ -366,36 +366,39 @@ export default function CodenamesGameScreen({ navigation, route }) {
 
     console.log('⏱️ Time up, switching turn...');
 
-    let updates = {};
-    const nextTeam = room.current_turn === 'red' ? 'blue' : 'red';
-
-    if (room.turn_phase === 'clue') {
-      updates = {
-        current_turn: nextTeam,
-        current_clue: null,
-        guesses_remaining: 0,
-        turn_phase: 'clue',
-        turn_start_time: Date.now()
-      };
-    } else if (room.turn_phase === 'guess') {
-      updates = {
-        current_turn: nextTeam,
-        current_clue: null,
-        guesses_remaining: 0,
-        turn_phase: 'clue',
-        turn_start_time: Date.now()
-      };
-    }
-    
-    if (!room || !room.id) {
+    if (!room.id) {
       console.error('❌ Cannot switch turn: room or room.id is missing');
       return;
     }
-    
+
+    // Every phone's timer fires time-up. A transaction that checks the turn is
+    // still the one this phone saw makes the later calls no-ops, so the turn
+    // can't be switched twice (or a newer turn overwritten).
+    const seenTurn = room.current_turn;
+    const seenStart = room.turn_start_time;
+
     console.log('🔵 Switching turn, updating room:', room.id);
     try {
       const roomRef = doc(db, 'CodenamesRoom', room.id);
-      await updateDoc(roomRef, updates);
+      const updates = await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomRef);
+        if (!snap.exists()) return null;
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing') return null;
+        if (fresh.current_turn !== seenTurn || fresh.turn_start_time !== seenStart) return null;
+        if (fresh.turn_phase !== 'clue' && fresh.turn_phase !== 'guess') return null;
+
+        const next = {
+          current_turn: otherTeam(fresh.current_turn),
+          current_clue: null,
+          guesses_remaining: 0,
+          turn_phase: 'clue',
+          turn_start_time: Date.now()
+        };
+        transaction.update(roomRef, next);
+        return next;
+      });
+      if (!updates) return; // Another phone already switched the turn
       console.log('✅ Turn switched successfully');
       setRoom(prev => ({ ...prev, ...updates }));
     } catch (error) {

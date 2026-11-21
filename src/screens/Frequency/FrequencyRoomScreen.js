@@ -7,10 +7,10 @@ import ScoreBoard from '../../components/frequency/ScoreBoard';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, collection, getDocs, runTransaction } from 'firebase/firestore';
+import { arrayUnion, doc, getDoc, updateDoc, onSnapshot, collection, getDocs, runTransaction } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
-import { pickFresh, pickRandom, remember } from '../../utils/random';
+import { pickForGame, pickRandom } from '../../utils/random';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
@@ -170,19 +170,30 @@ const buildRoundSummary = (roomData) => {
 
 const topicKey = (t) => (t.left_side || t.left || '') + '|' + (t.right_side || t.right || '');
 
-// Avoids the last topics of this room (recent_topics) so topics do not repeat
-const pickRandomTopic = async (recentTopics) => {
+// All topics, in the room's { left_side, right_side } shape (a query, which
+// can't run inside a transaction). The pick happens inside the transaction.
+const loadTopicPool = async () => {
   const topicsSnapshot = await getDocs(collection(db, 'FrequencyTopic'));
   const valid = [];
   topicsSnapshot.forEach((d) => {
     const data = d.data();
     if (data && data.left && data.right) {
-      valid.push(data);
+      valid.push({ left_side: data.left, right_side: data.right });
     }
   });
-  if (valid.length === 0) return null;
-  const topic = pickFresh(valid, recentTopics, topicKey);
-  return { left_side: topic.left, right_side: topic.right };
+  return valid;
+};
+
+/**
+ * Picks the next topic: never one already played in this game (used_topics,
+ * by topicKey). When every topic was played, a new cycle starts without the
+ * topic just played. Returns { topic, usedUpdate } or null for an empty pool.
+ */
+const pickGameTopic = (pool, fresh, { newGame = false } = {}) => {
+  const currentKey = fresh.current_topic ? topicKey(fresh.current_topic) : null;
+  const r = pickForGame(pool, { used: fresh.used_topics, currentKey, newGame, keyOf: topicKey });
+  if (!r) return null;
+  return { topic: r.item, usedUpdate: r.append ? arrayUnion(r.key) : r.nextUsed };
 };
 
 // Alert.alert with buttons is a no-op on react-native-web, so use window.confirm there
@@ -577,8 +588,8 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     }
 
     try {
-      const topic = await pickRandomTopic(room.recent_topics);
-      if (!topic) {
+      const pool = await loadTopicPool();
+      if (pool.length === 0) {
         Alert.alert(S.common.error, S.frequency.room.noTopics);
         return;
       }
@@ -595,12 +606,14 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         // Random first clue-giver among active players (it used to be the host)
         const activeIndexes = players.map((p, i) => (p && p.name && p.active !== false ? i : -1)).filter(i => i !== -1);
         const startIndex = activeIndexes.length ? pickRandom(activeIndexes) : 0;
+        // New game: the used-topics list starts over
+        const { topic, usedUpdate } = pickGameTopic(pool, fresh, { newGame: true });
 
         transaction.update(roomRef, {
           game_status: 'playing',
           current_turn_index: startIndex,
           current_topic: topic,
-          recent_topics: remember(fresh.recent_topics, topicKey(topic)),
+          used_topics: usedUpdate,
           target_position: Math.floor(Math.random() * 180),
           current_round_sectors: calculateSectors(),
           turn_phase: 'guessing',
@@ -734,9 +747,9 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     };
 
     try {
-      // Topic list is a query, which can't run inside a transaction - pick it first
-      const newTopic = await pickRandomTopic([topicKey(room.current_topic || {}), ...(room.recent_topics || [])]);
-      if (!newTopic) {
+      // Topic list is a query, which can't run inside a transaction - load it first
+      const pool = await loadTopicPool();
+      if (pool.length === 0) {
         Alert.alert(S.common.error, S.frequency.room.noTopics);
         return;
       }
@@ -802,11 +815,13 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           return;
         }
 
+        // Picked from the server's used_topics, so a topic is never played twice in a game
+        const { topic: newTopic, usedUpdate } = pickGameTopic(pool, fresh);
         transaction.update(roomRef, {
           players: updatedPlayers,
           current_turn_index: nextTurnIndex,
           current_topic: newTopic,
-          recent_topics: remember(fresh.recent_topics, topicKey(newTopic)),
+          used_topics: usedUpdate,
           target_position: Math.floor(Math.random() * 180),
           current_round_sectors: calculateSectors(),
           needle_positions: {},
@@ -885,6 +900,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         needle_positions: {},
         guess_submitted_names: {},
         current_topic: null,
+        used_topics: [],
         target_position: null,
         current_round_sectors: null,
         turn_phase: null,

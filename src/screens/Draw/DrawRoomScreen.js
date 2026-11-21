@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
+import { arrayUnion, collection, doc, getDocs, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
@@ -17,7 +17,7 @@ import { colors, radii, spacing, useGameTheme } from '../../theme';
 import { AppText, Badge, Button, Card, Dialog, Icon, IconButton, PlayerChip, Screen, TextField, feedback } from '../../ui';
 import { getActingHostName, getFirstActiveIndex, getNextActiveIndex, markPlayerInactive } from '../../utils/gameSync';
 import { serverNow, syncServerClock } from '../../utils/serverClock';
-import { pickFresh, pickRandom, remember } from '../../utils/random';
+import { pickForGame, pickRandom } from '../../utils/random';
 
 const WINNING_SCORE = 12;
 const TURN_SECONDS = 60;
@@ -133,16 +133,27 @@ const buildRoundEnd = (roomData, guesses) => {
   return update;
 };
 
-// Avoids the last words played in this room (recent_words) so words do not repeat
-const pickRandomWord = async (recentWords) => {
+// All words (a query, which can't run inside a transaction). The pick itself
+// happens inside the transaction, against the room's used_words.
+const loadWordPool = async () => {
   const wordsSnapshot = await getDocs(collection(db, 'DrawWord'));
   const words = [];
   wordsSnapshot.forEach((d) => {
     const w = d.data()?.word;
-    if (w) words.push(w);
+    if (typeof w === 'string' && w.trim()) words.push(w.trim());
   });
-  if (words.length === 0) return null;
-  return pickFresh(words, recentWords);
+  return words;
+};
+
+/**
+ * Picks this turn's word: never one already played in this game (used_words).
+ * When every word was played, a new cycle starts without the word just
+ * played. Returns { word, usedUpdate } (the used_words write), or null.
+ */
+const pickGameWord = (pool, fresh, { newGame = false } = {}) => {
+  const r = pickForGame(pool, { used: fresh.used_words, currentKey: fresh.current_word || null, newGame });
+  if (!r) return null;
+  return { word: r.item, usedUpdate: r.append ? arrayUnion(r.key) : r.nextUsed };
 };
 
 export default function DrawRoomScreen({ navigation, route }) {
@@ -675,8 +686,8 @@ export default function DrawRoomScreen({ navigation, route }) {
     }
 
     try {
-      const word = await pickRandomWord(currentRoom.recent_words);
-      if (!word) {
+      const pool = await loadWordPool();
+      if (pool.length === 0) {
         Alert.alert(S.common.error, S.draw.room.noWords);
         return;
       }
@@ -693,11 +704,13 @@ export default function DrawRoomScreen({ navigation, route }) {
         // Random first drawer among active players (it used to be the host every game)
         const activeIndexes = players.map((p, i) => (p && p.name && p.active !== false ? i : -1)).filter(i => i !== -1);
         const firstDrawer = activeIndexes.length ? pickRandom(activeIndexes) : Math.max(0, getFirstActiveIndex(players));
+        // New game: the used-words list starts over
+        const { word, usedUpdate } = pickGameWord(pool, fresh, { newGame: true });
         transaction.update(roomDocRef, {
           game_status: 'playing',
           current_turn_index: firstDrawer,
           current_word: word,
-          recent_words: remember(fresh.recent_words, word, 20),
+          used_words: usedUpdate,
           drawing_data: null,
           players: players.map(p => (p ? { ...p, current_guess: '', has_submitted: false } : p)),
           final_draw_image: null,
@@ -854,9 +867,9 @@ export default function DrawRoomScreen({ navigation, route }) {
     };
 
     try {
-      // Word list is a query, which can't run inside a transaction - pick it first
-      const word = await pickRandomWord([currentRoom.current_word, ...(currentRoom.recent_words || [])]);
-      if (!word) {
+      // Word list is a query, which can't run inside a transaction - load it first
+      const pool = await loadWordPool();
+      if (pool.length === 0) {
         Alert.alert(S.common.error, S.draw.room.noWords);
         return;
       }
@@ -878,10 +891,12 @@ export default function DrawRoomScreen({ navigation, route }) {
           return;
         }
 
+        // Picked from the server's used_words, so a word is never played twice in a game
+        const { word, usedUpdate } = pickGameWord(pool, fresh);
         transaction.update(roomDocRef, {
           current_turn_index: nextTurnIndex,
           current_word: word,
-          recent_words: remember(fresh.recent_words, word, 20),
+          used_words: usedUpdate,
           drawing_data: null,
           show_round_summary: false,
           round_winner: null,
@@ -933,6 +948,7 @@ export default function DrawRoomScreen({ navigation, route }) {
         game_status: 'lobby',
         current_turn_index: 0,
         current_word: null,
+        used_words: [],
         drawing_data: null,
         show_round_summary: false,
         round_winner: null,

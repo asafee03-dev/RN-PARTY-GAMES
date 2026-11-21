@@ -4,7 +4,34 @@
  * No JSX, DOM, CSS, window, or document dependencies
  */
 
-import { shuffle } from '../utils/random';
+import { shuffle, uniqueBy } from '../utils/random';
+
+/** Words per team turn (the turn's deck). */
+export const TURN_DECK_SIZE = 200;
+
+/**
+ * The deck for one team's turn: up to TURN_DECK_SIZE different words in
+ * random order. The pool is deduplicated first (the word collection holds
+ * some words twice), so a word can't show twice in the same turn. Words may
+ * come back in a later turn.
+ */
+export function dealTurnDeck(words, size = TURN_DECK_SIZE) {
+  return shuffle(uniqueBy(words)).slice(0, size);
+}
+
+/**
+ * Word for card number `index` of the turn. If a team ever gets through the
+ * whole deck, it starts over from the top, so the next word is never the one
+ * just shown (the deck holds different words) and every phone still computes
+ * the same word.
+ */
+export function deckWordAt(deck, index) {
+  if (!Array.isArray(deck) || deck.length === 0 || index < 0) return '';
+  const w = deck[index % deck.length];
+  if (w === undefined || w === null) return '';
+  if (typeof w === 'string') return w;
+  return Array.isArray(w) ? w[0] : String(w); // Older data may hold arrays
+}
 
 /**
  * Initialize a new game

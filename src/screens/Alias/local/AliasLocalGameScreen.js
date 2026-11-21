@@ -5,7 +5,8 @@ import { db } from '../../../firebase';
 import { S } from '../../../strings';
 import { colors, radii, spacing, useGameTheme } from '../../../theme';
 import { AppText, Badge, Button, Card, Icon, IconButton, PassPhone, Screen } from '../../../ui';
-import { generateCards } from '../../../logic/alias';
+import { dealTurnDeck, deckWordAt, TURN_DECK_SIZE } from '../../../logic/alias';
+import { uniqueBy } from '../../../utils/random';
 import * as L from '../../../logic/aliasLocal';
 import GameBoard from '../../../components/alias/GameBoard';
 import AliasTimer from '../../../components/alias/AliasTimer';
@@ -15,7 +16,7 @@ import GoldenRoundCard from '../../../components/alias/GoldenRoundCard';
 import DrinkingPopup from '../../../components/alias/DrinkingPopup';
 import { confirmAction } from '../../../utils/gameSync';
 
-const wordsPerRound = 200;
+const wordsPerRound = TURN_DECK_SIZE;
 
 /**
  * Single phone Alias. One phone, no room: all state is local and driven by the
@@ -46,7 +47,8 @@ export default function AliasLocalGameScreen({ navigation, route }) {
           const w = d.data()?.word;
           if (typeof w === 'string' && w.trim()) words.push(w.trim());
         });
-        if (active) setWordPool(words);
+        // Deduplicated, so a word can't show twice in the same turn
+        if (active) setWordPool(uniqueBy(words));
       } catch (error) {
         console.error('Error loading word cards:', error);
         if (active) setWordPool([]);
@@ -57,15 +59,12 @@ export default function AliasLocalGameScreen({ navigation, route }) {
     };
   }, []);
 
-  const currentWord = (state = game) => cards[state.used_cards.length] || '';
+  const currentWord = (state = game) => deckWordAt(cards, state.used_cards.length);
 
   const startRound = () => {
-    let selected;
-    try {
-      selected = generateCards(wordPool, wordsPerRound, 1);
-    } catch {
-      return;
-    }
+    // A new deck of different words for each team's turn
+    const selected = dealTurnDeck(wordPool, wordsPerRound);
+    if (selected.length === 0) return;
     setCards(selected);
     setTimeIsUp(false);
     setTimerKey((k) => k + 1);
@@ -77,7 +76,7 @@ export default function AliasLocalGameScreen({ navigation, route }) {
     const g = gameRef.current;
     if (!g.round_active) return;
     setTimeIsUp(true);
-    const word = cardsRef.current[g.used_cards.length];
+    const word = deckWordAt(cardsRef.current, g.used_cards.length);
     setGame((prev) => L.freezeLastWord(prev, word));
   }, []);
 

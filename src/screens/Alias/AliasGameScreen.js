@@ -11,14 +11,14 @@ import DrinkingPopup from '../../components/alias/DrinkingPopup';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db } from '../../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, collection, getDocs, runTransaction } from 'firebase/firestore';
-import { generateCards } from '../../logic/alias';
+import { arrayUnion, doc, getDoc, updateDoc, onSnapshot, collection, getDocs, runTransaction } from 'firebase/firestore';
+import { dealTurnDeck, deckWordAt, TURN_DECK_SIZE } from '../../logic/alias';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 import { serverNow, syncServerClock } from '../../utils/serverClock';
-import { shuffle } from '../../utils/random';
+import { shuffle, uniqueBy } from '../../utils/random';
 import { S } from '../../strings';
 import { colors, radii, spacing, useGameTheme } from '../../theme';
 import { AppText, Badge, Button, Card, Icon, Screen, feedback } from '../../ui';
@@ -31,13 +31,8 @@ const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC
 
 const MAX_POSITION = 59;
 
-// Card entries are plain strings; older data may hold arrays
-const wordAt = (cards, index) => {
-  const w = cards?.[index];
-  if (w === undefined || w === null) return '';
-  if (typeof w === 'string') return w;
-  return Array.isArray(w) ? w[0] : String(w);
-};
+// Word for card number `index` of the turn (wraps around if the deck runs out)
+const wordAt = deckWordAt;
 
 // The round's shared word list (stored in the room). Falls back to this
 // device's list only for rounds started before round_cards existed.
@@ -452,9 +447,11 @@ export default function AliasGameScreen({ navigation, route }) {
       });
       
       if (cards && cards.length > 0) {
-        const words = cards
+        // Deduplicated: some words are stored twice, and a word must not
+        // show twice in the same turn
+        const words = uniqueBy(cards
           .filter(c => c.word && typeof c.word === 'string' && c.word.trim().length > 0)
-          .map(c => c.word.trim());
+          .map(c => c.word.trim()));
         
         setWordCardsDB(words);
       }
@@ -469,7 +466,7 @@ export default function AliasGameScreen({ navigation, route }) {
       return;
     }
 
-    if (!wordCardsDB || wordCardsDB.length < 200) {
+    if (!wordCardsDB || wordCardsDB.length < TURN_DECK_SIZE) {
       Alert.alert(S.alias.game.error, S.alias.game.notEnoughWords);
       return;
     }
@@ -481,9 +478,9 @@ export default function AliasGameScreen({ navigation, route }) {
     if (isStartingRoundRef.current) return;
     isStartingRoundRef.current = true;
 
-    // The round's word list is stored in the room so every device shows the
-    // same words (it used to be generated separately on each phone).
-    const selectedWords = generateCards(wordCardsDB, 200, 1);
+    // The turn's deck (different words, so none repeats within the turn) is
+    // stored in the room so every device shows the same words.
+    let selectedWords = null;
 
     try {
       const roomRef = doc(db, 'GameRoom', room.id);
@@ -501,6 +498,8 @@ export default function AliasGameScreen({ navigation, route }) {
         if (!teams[turn]?.players?.includes(playerName)) return { outcome: 'not_my_turn' };
 
         const startPosition = teams[turn].position || 0;
+        // Dealt inside the transaction, only for the attempt that is written
+        selectedWords = dealTurnDeck(wordCardsDB);
         transaction.update(roomRef, {
           round_active: true,
           game_status: 'playing',
@@ -649,7 +648,8 @@ export default function AliasGameScreen({ navigation, route }) {
     const updatedUsedCards = [...usedCards, card];
     const update = {
       teams: updatedTeams,
-      used_cards: updatedUsedCards,
+      // Append only (the transaction already checked no one answered this card)
+      used_cards: arrayUnion(card),
       current_round_score: updatedUsedCards.filter(c => c.status === 'correct').length
     };
 
@@ -673,16 +673,18 @@ export default function AliasGameScreen({ navigation, route }) {
     // Golden words can't be skipped
     if (fresh.current_word_is_golden) return null;
 
-    const updatedUsedCards = [...usedCards, {
+    const card = {
       words: word,
       status: 'skipped',
       cardNumber: index + 1,
       isLastWord: !!timeUp,
       ...(timeUp ? { teamThatGuessed: null } : {})
-    }];
+    };
+    const updatedUsedCards = [...usedCards, card];
     const update = {
       teams: moveTeam(teams, turn, -1),
-      used_cards: updatedUsedCards
+      // Append only (the transaction already checked no one answered this card)
+      used_cards: arrayUnion(card)
     };
     if (timeUp) {
       update.show_round_summary = true;

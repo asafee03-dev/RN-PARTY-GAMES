@@ -19,6 +19,7 @@ import { getActingHostName, getFirstActiveIndex, getNextActiveIndex, markPlayerI
 import { serverNow, syncServerClock } from '../../utils/serverClock';
 import { pickForGame, pickRandom } from '../../utils/random';
 import { loadContent } from '../../utils/contentCache';
+import { createCoalescingQueue } from '../../logic/draw';
 
 const WINNING_SCORE = 12;
 const TURN_SECONDS = 60;
@@ -189,7 +190,23 @@ export default function DrawRoomScreen({ navigation, route }) {
   const isSubmittingGuessRef = useRef(false);
   // Drawing writes are serialized so strokes are stored in the order drawn;
   // strokes still in flight are shown locally on top of the server strokes.
-  const drawQueueRef = useRef(Promise.resolve());
+  // Strokes finished while a save is in flight go out together in the next
+  // single write (fewer writes, same or earlier delivery to other players).
+  // Each write is a transaction that checks it's still this player's turn,
+  // so a stroke finished right as the round ends can't leak onto the next
+  // drawer's canvas.
+  const [drawQueue] = useState(() => createCoalescingQueue(async (ops, ctx) => {
+    const roomDocRef = doc(db, 'DrawRoom', ctx.roomId);
+    await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(roomDocRef);
+      if (!snap.exists()) return;
+      const fresh = snap.data();
+      if (fresh.game_status !== 'playing' || fresh.show_round_summary || !isSameTurn(fresh, ctx.turn)) return;
+      if (getDrawerName(fresh) !== ctx.me) return;
+      const next = ops.reduce((strokes, op) => op(strokes), parseStrokes(fresh.drawing_data));
+      transaction.update(roomDocRef, { drawing_data: next.length > 0 ? JSON.stringify(next) : null });
+    });
+  }, (error) => console.error('❌ Error saving drawing:', error)));
   const pendingStrokesRef = useRef([]);
 
   useEffect(() => {
@@ -737,38 +754,24 @@ export default function DrawRoomScreen({ navigation, route }) {
   };
 
   /**
-   * Update the drawing on the server. Runs in a transaction that checks it's
-   * still this player's turn, so a stroke finished right as the round ends
-   * can't leak onto the next drawer's canvas. Writes are queued so strokes are
-   * stored in the order they were drawn.
+   * Queue a change to the drawing (computeStrokes: strokes -> strokes) for
+   * this player's current turn. Resolves once it has been saved (or failed).
    */
   const queueDrawingWrite = (computeStrokes) => {
     const currentRoom = roomRef.current;
     const me = currentPlayerNameRef.current || currentPlayerName;
     if (!currentRoom?.id || !me) return Promise.resolve();
 
-    const turnAtCall = {
+    const turn = {
       current_turn_index: currentRoom.current_turn_index,
       turn_start_time: currentRoom.turn_start_time
     };
-    const roomDocRef = doc(db, 'DrawRoom', currentRoom.id);
-
-    const run = async () => {
-      await runTransaction(db, async (transaction) => {
-        const snap = await transaction.get(roomDocRef);
-        if (!snap.exists()) return;
-        const fresh = snap.data();
-        if (fresh.game_status !== 'playing' || fresh.show_round_summary || !isSameTurn(fresh, turnAtCall)) return;
-        if (getDrawerName(fresh) !== me) return;
-        const next = computeStrokes(parseStrokes(fresh.drawing_data));
-        transaction.update(roomDocRef, { drawing_data: next.length > 0 ? JSON.stringify(next) : null });
-      });
-    };
-
-    drawQueueRef.current = drawQueueRef.current.then(run).catch(error => {
-      console.error('❌ Error saving drawing:', error);
+    return drawQueue.push(computeStrokes, {
+      key: `${currentRoom.id}|${turn.current_turn_index}|${turn.turn_start_time}|${me}`,
+      roomId: currentRoom.id,
+      turn,
+      me
     });
-    return drawQueueRef.current;
   };
 
   const handleStrokeComplete = (stroke) => {

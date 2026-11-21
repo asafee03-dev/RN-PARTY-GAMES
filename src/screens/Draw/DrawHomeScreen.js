@@ -36,15 +36,23 @@ export default function DrawHomeScreen({ navigation, route }) {
     }
   }, [route?.params?.prefillRoomCode]);
 
-  // Cleanup listener on unmount
+  // Cleanup listener on unmount, and as soon as this screen loses focus (the
+  // player reached the room, which has its own listener). This screen stays
+  // mounted under the room, so the listener used to keep receiving (billed)
+  // room updates for the whole game and after leaving the room.
   useEffect(() => {
-    return () => {
+    const stop = () => {
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
     };
-  }, []);
+    const unsubscribeBlur = navigation.addListener('blur', stop);
+    return () => {
+      unsubscribeBlur();
+      stop();
+    };
+  }, [navigation]);
 
   const generateRoomCode = () => {
     return Math.floor(Math.random() * 10000).toString().padStart(4, '0');

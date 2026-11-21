@@ -464,3 +464,49 @@ export function resetGame(gameState) {
   };
 }
 
+
+/**
+ * Serial write queue that merges operations waiting behind an in-flight
+ * write into ONE write (used for Draw strokes).
+ *
+ * The first operation is written right away, exactly as before. Strokes that
+ * finish while that write is still in flight are applied together, in
+ * order, in the next write, so a fast drawer costs fewer writes while the
+ * other players get the same strokes no later than before.
+ *
+ * push(op, ctx): ctx.key identifies the turn; operations with different keys
+ * are never merged. runBatch(ops, ctx) performs one write for ops (in order).
+ * The returned promise resolves after the op's batch finished (errors go to
+ * onError and don't stop later batches).
+ */
+export function createCoalescingQueue(runBatch, onError = () => {}) {
+  const pending = [];
+  let running = false;
+
+  const pump = async () => {
+    if (running) return;
+    running = true;
+    while (pending.length > 0) {
+      const key = pending[0].ctx.key;
+      let n = 0;
+      while (n < pending.length && pending[n].ctx.key === key) n++;
+      const batch = pending.splice(0, n);
+      try {
+        await runBatch(batch.map(b => b.op), batch[0].ctx);
+      } catch (error) {
+        onError(error);
+      }
+      batch.forEach(b => b.resolve());
+    }
+    running = false;
+  };
+
+  return {
+    push(op, ctx) {
+      return new Promise(resolve => {
+        pending.push({ op, ctx, resolve });
+        pump();
+      });
+    }
+  };
+}

@@ -18,9 +18,10 @@ let offsetMs = 0;
 let synced = false;
 let syncPromise = null;
 
-// Samples per sync. The first one often includes opening the connection
-// (slow and lopsided), so we keep the sample with the shortest round trip.
-const SAMPLES = 3;
+// Samples per sync; we keep the one with the shortest round trip. Two are
+// enough: the connection is already open by then (warm-up read at startup),
+// and each sample costs 1 write + 1 read plus one snapshot read per player.
+const SAMPLES = 2;
 const START_DELAY_MS = 2000;
 
 // Each device writes its own probe field (clock_probes.<id>, a few bytes, left

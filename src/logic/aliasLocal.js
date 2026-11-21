@@ -8,6 +8,8 @@
  * The rules mirror AliasGameScreen's transactions.
  */
 
+import { randomInt, shuffle } from '../utils/random';
+
 export const MAX_POSITION = 59;
 export const ROUND_SECONDS = 60;
 export const TEAM_COLORS = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
@@ -18,7 +20,7 @@ const moveTeam = (teams, teamIndex, delta) =>
 const randomGoldenSquares = () => {
   const squares = [];
   for (let i = 1; i < 59; i++) squares.push(i);
-  return squares.sort(() => Math.random() - 0.5).slice(0, 10);
+  return shuffle(squares).slice(0, 10);
 };
 
 /**
@@ -26,10 +28,19 @@ const randomGoldenSquares = () => {
  * @param {{goldenRounds?: boolean, drinking?: boolean}} options
  */
 export function createLocalGame(teams, { goldenRounds = false, drinking = false } = {}) {
+  // Random starting team, and a random first explainer inside each team
+  const startingTurn = randomInt(teams.length);
   return {
-    teams: teams.map((t) => ({ ...t, position: 0, round_start_position: null, turns_played: 0 })),
+    teams: teams.map((t) => ({
+      ...t,
+      position: 0,
+      round_start_position: null,
+      turns_played: 0,
+      explainer_offset: randomInt(Math.max(1, (t.players || []).length)),
+    })),
     game_status: 'setup',
-    current_turn: 0,
+    current_turn: startingTurn,
+    starting_turn: startingTurn,
     round_active: false,
     current_round_score: 0,
     round_start_time: null,
@@ -51,7 +62,7 @@ export function getExplainer(state) {
   const team = state.teams[state.current_turn];
   const players = (team?.players || []).filter(Boolean);
   if (players.length === 0) return '';
-  return players[(team.turns_played || 0) % players.length];
+  return players[((team.explainer_offset || 0) + (team.turns_played || 0)) % players.length];
 }
 
 export function startRound(state, now = Date.now()) {
@@ -208,7 +219,8 @@ export function finishRound(state) {
     current_word_is_golden: false,
     round_start_position: null,
   };
-  if (nextTurn === 0) {
+  // Full round = back to the team that started
+  if (nextTurn === (state.starting_turn ?? 0)) {
     if (state.drinking_mode) {
       const name = drinkingTeamName(state.teams);
       if (name) next.drinking_popup = { team_name: name };

@@ -8,6 +8,7 @@ import TwoPhonesLobby from '../../components/codenames/TwoPhonesLobby';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction } from 'firebase/firestore';
 import storage from '../../utils/storage';
+import { shuffle } from '../../utils/random';
 import { S } from '../../strings';
 import { colors, radii, spacing, useGameTheme } from '../../theme';
 import { AppText, Badge, Button, Card, Icon, PlayerChip, Screen } from '../../ui';
@@ -351,7 +352,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
         Alert.alert(S.codenames.setup.error, S.codenames.setup.notEnoughWords(validWords.length));
         return;
       }
-      selectedWords = [...validWords].sort(() => Math.random() - 0.5).slice(0, 25);
+      selectedWords = shuffle(validWords).slice(0, 25);
     } catch (error) {
       console.error('❌ Error loading words:', error);
       Alert.alert(S.codenames.setup.error, S.codenames.setup.wordsLoadFailed);
@@ -364,7 +365,8 @@ export default function CodenamesSetupScreen({ navigation, route }) {
     for (let i = 0; i < 8; i++) keyMap.push(startingTeam === 'red' ? 'blue' : 'red');
     for (let i = 0; i < 7; i++) keyMap.push('neutral');
     keyMap.push('black');
-    keyMap.sort(() => Math.random() - 0.5);
+    // Fair shuffle: the old random sort made some tiles likelier to be the assassin
+    keyMap.splice(0, keyMap.length, ...shuffle(keyMap));
 
     try {
       const roomRef = doc(db, 'CodenamesRoom', room.id);

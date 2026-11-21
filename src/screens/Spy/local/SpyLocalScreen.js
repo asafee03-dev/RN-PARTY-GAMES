@@ -8,6 +8,7 @@ import { AppText, Badge, Button, Card, Icon, IconButton, PlayerChip, Screen, Tex
 import { GAME_SECONDS, dealSpyGame, maxSpiesFor } from '../../../logic/spyLocal';
 import { confirmAction } from '../../../utils/gameSync';
 import storage from '../../../utils/storage';
+import { pickFresh, remember } from '../../../utils/random';
 
 /**
  * Single phone Spy. Everything happens on this phone (no room):
@@ -27,6 +28,10 @@ export default function SpyLocalScreen({ navigation }) {
   const [revealed, setRevealed] = useState(false);
   const [remaining, setRemaining] = useState(GAME_SECONDS);
   const startedAtRef = useRef(0);
+  // Same phone, several games in a row: avoid repeating the location/word,
+  // and make last game's spies less likely (not impossible)
+  const recentSecretsRef = useRef([]);
+  const lastSpiesRef = useRef([]);
 
   // Pre-fill the saved nickname as the first player
   useEffect(() => {
@@ -86,7 +91,7 @@ export default function SpyLocalScreen({ navigation }) {
           if (data && data.location && Array.isArray(data.roles) && data.roles.length > 0) valid.push(data);
         });
         if (valid.length === 0) throw new Error(S.spy.room.noLocations);
-        content = { location: valid[Math.floor(Math.random() * valid.length)] };
+        content = { location: pickFresh(valid, recentSecretsRef.current, (l) => l.location) };
       } else {
         const words = [];
         const snapshot = await getDocs(collection(db, 'WordCard'));
@@ -95,9 +100,12 @@ export default function SpyLocalScreen({ navigation }) {
           if (typeof w === 'string' && w.trim()) words.push(w.trim());
         });
         if (words.length === 0) throw new Error(S.spy.room.noWords);
-        content = { word: words[Math.floor(Math.random() * words.length)] };
+        content = { word: pickFresh(words, recentSecretsRef.current) };
       }
-      setDeal(dealSpyGame(names, spies, mode, content));
+      const dealt = dealSpyGame(names, spies, mode, content, lastSpiesRef.current);
+      recentSecretsRef.current = remember(recentSecretsRef.current, dealt.secret);
+      lastSpiesRef.current = dealt.players.filter((p) => p.isSpy).map((p) => p.name);
+      setDeal(dealt);
       setDealIndex(0);
       setRevealed(false);
       setPhase('deal');

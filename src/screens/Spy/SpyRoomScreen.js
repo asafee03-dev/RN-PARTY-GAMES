@@ -16,6 +16,8 @@ import Animated, { FlipInEasyY, useReducedMotion } from 'react-native-reanimated
 import { S } from '../../strings';
 import { colors, motion, radii, spacing, useGameTheme } from '../../theme';
 import { AppText, Badge, Button, Card, Icon, PlayerChip, Screen, TextField, TimerDisplay, feedback } from '../../ui';
+import { REPEAT_SPY_WEIGHT, pickFresh, remember, weightedSample } from '../../utils/random';
+import { dealRoles } from '../../logic/spyLocal';
 import { serverNow, syncServerClock } from '../../utils/serverClock';
 
 const GAME_SECONDS = 360; // 6 minutes
@@ -549,7 +551,7 @@ export default function SpyRoomScreen({ navigation, route }) {
           Alert.alert(S.common.error, S.spy.room.noLocations);
           return;
         }
-        randomLocation = valid[Math.floor(Math.random() * valid.length)];
+        randomLocation = pickFresh(valid, currentRoom.recent_secrets, (l) => l.location);
         allLocationNames = locations.map(loc => loc.location).filter(loc => loc != null);
       } else {
         const words = [];
@@ -562,7 +564,7 @@ export default function SpyRoomScreen({ navigation, route }) {
           Alert.alert(S.common.error, S.spy.room.noWords);
           return;
         }
-        randomWord = words[Math.floor(Math.random() * words.length)];
+        randomWord = pickFresh(words, currentRoom.recent_secrets);
       }
     } catch (error) {
       console.error('❌ Error loading game content:', error);
@@ -587,11 +589,13 @@ export default function SpyRoomScreen({ navigation, route }) {
         // Spies are chosen among active players only; at most half of them
         const maxSpies = Math.max(1, Math.floor(active.length / 2));
         const actualNumSpies = Math.min(fresh.number_of_spies || 1, maxSpies);
-        const spyNames = [...active]
-          .sort(() => Math.random() - 0.5)
-          .slice(0, actualNumSpies)
+        // Fair pick (the old random sort favoured the first players). Last
+        // game's spies are less likely, never excluded.
+        const previousSpies = new Set(fresh.recent_spies || []);
+        const spyNames = weightedSample(active, actualNumSpies, p => (previousSpies.has(p.name) ? REPEAT_SPY_WEIGHT : 1))
           .map(p => p.name);
         const spySet = new Set(spyNames);
+        const roleDeck = currentGameMode === 'locations' ? dealRoles(randomLocation.roles, active.length - spySet.size) : [];
 
         const updatedPlayers = allPlayers.map(player => {
           if (player.active === false) {
@@ -606,7 +610,7 @@ export default function SpyRoomScreen({ navigation, route }) {
               name: player.name,
               is_spy: false,
               location: randomLocation.location,
-              role: roles[Math.floor(Math.random() * roles.length)],
+              role: roleDeck.pop() || roles[0],
               votes: []
             };
           }
@@ -620,6 +624,9 @@ export default function SpyRoomScreen({ navigation, route }) {
           game_start_time: serverNow(),
           spy_name: spyNames.length === 1 ? spyNames[0] : '', // Backward compatibility
           spy_names: spyNames,
+          // Kept across resets to avoid repeats in the next game
+          recent_spies: spyNames,
+          recent_secrets: remember(fresh.recent_secrets, currentGameMode === 'locations' ? randomLocation.location : randomWord),
           chosen_location: currentGameMode === 'locations' ? randomLocation.location : randomWord,
           all_locations: currentGameMode === 'locations' ? allLocationNames : [],
           eliminated_locations: [],

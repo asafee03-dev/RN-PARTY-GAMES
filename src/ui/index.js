@@ -7,6 +7,7 @@ export { default as Dialog } from './Dialog';
 export { default as GameEntryLayout } from './GameEntryLayout';
 export { default as Icon, iconFont, iconNames } from './Icon';
 export { default as IconButton } from './IconButton';
+export { default as PassPhone } from './PassPhone';
 export { default as PlayerChip } from './PlayerChip';
 export { default as ScoreToken } from './ScoreToken';
 export { default as Screen } from './Screen';

@@ -208,6 +208,31 @@ const he = {
       emptyTeam: (n) => `קבוצה ${n} צריכה לפחות שחקן אחד`,
       startFailed: 'לא הצלחנו להתחיל את המשחק',
     },
+    // Single phone mode
+    local: {
+      modeTitle: 'טלפון אחד',
+      modeHint: 'משחקים יחד על טלפון אחד, בלי חדר ובלי להצטרף',
+      setupTitle: 'אליאב – טלפון אחד',
+      setupSubtitle: 'הקימו קבוצות והעבירו את הטלפון בין השחקנים',
+      teamsHeader: 'קבוצות',
+      teamName: 'שם הקבוצה',
+      teamNameDefault: (n) => `קבוצה ${n}`,
+      addTeam: 'הוסף קבוצה',
+      removeTeam: (name) => `מחק את ${name}`,
+      maxTeams: 'אפשר עד 6 קבוצות',
+      playersCount: (n) => `${n} שחקנים`,
+      needPlayers: 'בכל קבוצה צריכים להיות לפחות 2 שחקנים',
+      duplicateTeams: 'לכל קבוצה צריך להיות שם אחר',
+      duplicatePlayer: 'השם כבר קיים במשחק',
+      loadingWords: 'טוען מילים...',
+      passSubtitle: (team) => `התור של ${team}. כשתלחצו על הכפתור הסבב מתחיל והמילים יופיעו`,
+      ready: 'אני מוכן, מתחילים!',
+      exitTitle: 'לצאת מהמשחק?',
+      exitMessage: 'המשחק הנוכחי יימחק',
+      exit: 'יציאה',
+      explainerNow: (name) => `${name} מסביר/ה`,
+      sameTeams: 'משחק חדש עם אותן קבוצות',
+    },
     entry: {
       title: 'אליאב',
       subtitle: 'משחק ההסברות המהיר!',
@@ -636,6 +661,20 @@ const he = {
         'ככל שהניחוש קרוב יותר — מקבלים יותר נקודות.',
       ],
     },
+  },
+
+  // Local play modes (shared)
+  local: {
+    chooseTitle: 'איך משחקים?',
+    regularTitle: 'משחק רגיל',
+    regularHint: 'כל שחקן מצטרף עם הטלפון שלו',
+    passTo: (name) => `העבירו את הטלפון ל${name}`,
+    readyButton: 'אני מוכן/ה',
+    back: 'חזרה',
+    playerNamePlaceholder: 'שם שחקן',
+    addPlayer: 'הוסף שחקן',
+    removePlayer: (name) => `הסר את ${name}`,
+    start: 'התחילו!',
   },
 
   settings: {

@@ -1076,7 +1076,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           ) : null}
 
           <AppText variant="label" color={colors.inkSoft}>
-            {S.frequency.room.playersInRoom(room?.players && Array.isArray(room.players) ? room.players.length : 0)}
+            {S.frequency.room.playersInRoom(getActivePlayers(room).length)}
           </AppText>
           <View style={styles.chips}>
             {room.players && Array.isArray(room.players) && room.players
@@ -1103,7 +1103,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
               title={S.frequency.room.startGame}
               icon="play"
               onPress={startGame}
-              disabled={room.players.length < 2}
+              disabled={getActivePlayers(room).length < 2}
               fullWidth
             />
           )}
@@ -1388,7 +1388,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
             {/* Podium: 2nd - 1st - 3rd */}
             <View style={styles.podium}>
               {(() => {
-                const top = [...room.players].sort((a, b) => b.score - a.score).slice(0, 3);
+                const top = getActivePlayers(room).sort((a, b) => b.score - a.score).slice(0, 3);
                 const order = [top[1], top[0], top[2]].map((p, i) => (p ? { player: p, rank: [2, 1, 3][i] } : null)).filter(Boolean);
                 return order.map(({ player, rank }) => (
                   <View key={player.name} style={styles.podiumItem} accessible accessibilityLabel={`${rank}. ${player.name}, ${S.frequency.room.pointsN(player.score)}`}>
@@ -1410,12 +1410,12 @@ export default function FrequencyRoomScreen({ navigation, route }) {
               })()}
             </View>
 
-            {room.players.length > 3 && (
+            {getActivePlayers(room).length > 3 && (
               <View style={styles.section}>
                 <AppText variant="label" color={colors.inkSoft}>
                   {S.frequency.room.otherPlayers}
                 </AppText>
-                {[...room.players]
+                {getActivePlayers(room)
                   .sort((a, b) => b.score - a.score)
                   .slice(3)
                   .map((player, idx) => (

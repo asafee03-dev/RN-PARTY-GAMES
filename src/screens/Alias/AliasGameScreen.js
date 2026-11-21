@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, Dimensions, Platform } from 'react-native';
+import { View, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import GradientBackground from '../../components/codenames/GradientBackground';
-import GradientButton from '../../components/codenames/GradientButton';
 import AliasTimer from '../../components/alias/AliasTimer';
 import GameBoard from '../../components/alias/GameBoard';
 import TimeUpPopup from '../../components/alias/TimeUpPopup';
@@ -20,6 +18,9 @@ import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 import { serverNow, syncServerClock } from '../../utils/serverClock';
+import { S } from '../../strings';
+import { colors, radii, spacing, useGameTheme } from '../../theme';
+import { AppText, Badge, Button, Card, Icon, Screen, feedback } from '../../ui';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899"];
 
@@ -57,7 +58,7 @@ const buildDrinkingPopup = (teams) => {
   const progress = teams.map((team, index) => {
     const currentPos = team.position || 0;
     const startPos = team.round_start_position ?? currentPos;
-    return { teamIndex: index, teamName: team.name || `קבוצה ${index + 1}`, moved: currentPos - startPos };
+    return { teamIndex: index, teamName: team.name || S.alias.board.teamFallback(index + 1), moved: currentPos - startPos };
   });
   if (progress.length === 0) return null;
   const minMoved = Math.min(...progress.map(t => t.moved));
@@ -112,6 +113,16 @@ export default function AliasGameScreen({ navigation, route }) {
     cardsRef.current = cards;
   }, [cards]);
 
+  const theme = useGameTheme();
+
+  // Haptic cues: time is up / game won (no-op on web)
+  useEffect(() => {
+    if (timeIsUp) feedback.warning();
+  }, [timeIsUp]);
+  useEffect(() => {
+    if (room?.game_status === 'finished') feedback.success();
+  }, [room?.game_status]);
+
   useEffect(() => {
     const loadPlayerName = async () => {
       try {
@@ -132,7 +143,7 @@ export default function AliasGameScreen({ navigation, route }) {
 
   useEffect(() => {
     if (!roomCode) {
-      Alert.alert('שגיאה', 'קוד חדר חסר');
+      Alert.alert(S.alias.game.error, S.alias.game.missingRoomCode);
       navigation.goBack();
       return;
     }
@@ -241,7 +252,7 @@ export default function AliasGameScreen({ navigation, route }) {
       setupRealtimeListener();
     } catch (error) {
       console.error('Error initializing room:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לטעון את החדר');
+      Alert.alert(S.alias.game.error, S.alias.game.loadFailed);
       navigation.goBack();
     } finally {
       setIsLoading(false);
@@ -255,7 +266,7 @@ export default function AliasGameScreen({ navigation, route }) {
 
       if (!roomSnap.exists()) {
         await clearCurrentRoom();
-        Alert.alert('שגיאה', 'החדר לא נמצא');
+        Alert.alert(S.alias.game.error, S.alias.game.roomNotFound);
         navigation.goBack();
         return;
       }
@@ -380,7 +391,7 @@ export default function AliasGameScreen({ navigation, route }) {
           return prevRoom;
         });
       } else {
-        Alert.alert('שגיאה', 'החדר נמחק');
+        Alert.alert(S.alias.game.error, S.alias.game.roomDeletedShort);
         navigation.goBack();
       }
     }, (error) => {
@@ -453,12 +464,12 @@ export default function AliasGameScreen({ navigation, route }) {
 
   const startRound = async () => {
     if (!isMyTurn()) {
-      Alert.alert('שגיאה', 'רק הקבוצה שתורה יכולה להתחיל סבב!');
+      Alert.alert(S.alias.game.error, S.alias.game.onlyPlayingTeam);
       return;
     }
 
     if (!wordCardsDB || wordCardsDB.length < 200) {
-      Alert.alert('שגיאה', '❌ אין מספיק מילים במאגר! נדרשות לפחות 200 מילים.');
+      Alert.alert(S.alias.game.error, S.alias.game.notEnoughWords);
       return;
     }
 
@@ -508,7 +519,7 @@ export default function AliasGameScreen({ navigation, route }) {
       });
 
       if (result.outcome === 'missing') {
-        Alert.alert('שגיאה', 'החדר נמחק. אנא צא מהחדר וחזור.');
+        Alert.alert(S.alias.game.error, S.alias.game.roomDeleted);
         navigation.navigate('AliasHome');
         return;
       }
@@ -525,7 +536,7 @@ export default function AliasGameScreen({ navigation, route }) {
       }
     } catch (error) {
       console.error('❌ Error starting round:', error);
-      Alert.alert('שגיאה', 'שגיאה בהתחלת הסבב. נסה שוב.');
+      Alert.alert(S.alias.game.error, S.alias.game.startRoundFailed);
     } finally {
       isStartingRoundRef.current = false;
     }
@@ -783,7 +794,7 @@ export default function AliasGameScreen({ navigation, route }) {
       });
     } catch (error) {
       console.error('❌ Error resetting game:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+      Alert.alert(S.alias.game.error, S.alias.game.resetFailed);
     }
   };
 
@@ -899,14 +910,38 @@ export default function AliasGameScreen({ navigation, route }) {
   };
 
 
+  // Leave to the main menu (same behavior as before, shared by the top bar)
+  const exitToHome = async () => {
+    // Cleanup listeners
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
+    // Cleanup room state
+    await clearCurrentRoom();
+
+    // Navigate to main menu using reset to clear the stack
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.reset({
+        index: 0,
+        routes: [{ name: 'Home' }]
+      });
+    } else {
+      // Fallback: navigate to Home
+      navigation.navigate('Home');
+    }
+  };
+
   if (isLoading || !room) {
     return (
-      <GradientBackground variant="brightBlue">
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FFFFFF" />
-          <Text style={styles.loadingText}>טוען משחק...</Text>
-        </View>
-      </GradientBackground>
+      <Screen contentStyle={styles.centered}>
+        <ActivityIndicator size="large" color={theme.accent} />
+        <AppText variant="subtitle" align="center" color={colors.inkSoft}>
+          {S.alias.game.loading}
+        </AppText>
+      </Screen>
     );
   }
 
@@ -914,76 +949,55 @@ export default function AliasGameScreen({ navigation, route }) {
   if (room.game_status === 'finished') {
     const isHost = room.host_name === playerName;
     return (
-      <GradientBackground variant="brightBlue">
-        <ScrollView contentContainerStyle={[styles.container, { paddingTop: Math.max(insets.top, 16) }]}>
-          <View style={styles.winnerContainer}>
-            <Text style={styles.winnerEmoji}>🎉</Text>
-            <Text style={styles.winnerTitle}>{room.winner_team} ניצחה!</Text>
-            <Text style={styles.winnerSubtitle}>מזל טוב!</Text>
-            
-            <View style={styles.winnerActions}>
-              <GradientButton
-                title="משחק חדש"
-                onPress={resetGame}
-                variant="primary"
-                style={styles.winnerButton}
-                disabled={!isHost}
-              />
-              {!isHost && (
-                <Text style={styles.hostOnlyText}>רק המארח יכול להתחיל משחק חדש</Text>
-              )}
-              <GradientButton
-                title="חזרה לתפריט הראשי"
-                onPress={async () => {
-                  // Show interstitial ad before navigating to main menu
-                  showInterstitialIfAvailable(async () => {
-                    if (unsubscribeRef.current) {
-                      unsubscribeRef.current();
-                      unsubscribeRef.current = null;
-                    }
-                    await clearCurrentRoom();
-                    
-                    // Navigate to main menu using reset to clear the stack
-                    const parent = navigation.getParent();
-                    if (parent) {
-                      parent.reset({
-                        index: 0,
-                        routes: [{ name: 'Home' }]
-                      });
-                    } else {
-                      // Fallback: navigate to Home
-                      navigation.navigate('Home');
-                    }
-                  });
-                }}
-                variant="outline"
-                style={styles.winnerButton}
-              />
-            </View>
-          </View>
-        </ScrollView>
-      </GradientBackground>
+      <Screen contentStyle={styles.centered}>
+        <View style={[styles.winnerBanner, { backgroundColor: theme.accent, borderColor: theme.accentDeep }]}>
+          <Icon name="trophy" size={56} color={colors.gold} />
+          <AppText variant="heading" align="center" color={theme.onAccent} accessibilityRole="header">
+            {S.alias.game.winnerTitle(room.winner_team)}
+          </AppText>
+          <AppText variant="subtitle" align="center" color={theme.onAccent}>
+            {S.alias.game.congrats}
+          </AppText>
+        </View>
+
+        <Button title={S.alias.game.newGame} icon="dice" onPress={resetGame} disabled={!isHost} fullWidth />
+        {!isHost && (
+          <AppText variant="caption" align="center" color={colors.inkSoft}>
+            {S.alias.game.hostOnlyNewGame}
+          </AppText>
+        )}
+        <Button
+          title={S.alias.game.backToMenu}
+          icon="home"
+          variant="secondary"
+          fullWidth
+          onPress={async () => {
+            // Show interstitial ad before navigating to main menu
+            showInterstitialIfAvailable(async () => {
+              await exitToHome();
+            });
+          }}
+        />
+      </Screen>
     );
   }
 
   // Round summary
   if (room.show_round_summary) {
     const currentTeam = getCurrentTeam();
-    
+
     return (
-      <GradientBackground variant="brightBlue">
-        <ScrollView contentContainerStyle={styles.container}>
-          <RoundSummary
-            room={room}
-            currentTeam={currentTeam}
-            isMyTurn={isMyTurn()}
-            onToggleCardStatus={toggleCardStatus}
-            onChangeLastWordTeam={handleChangeLastWordTeam}
-            onChangeGoldenRoundTeam={handleChangeGoldenRoundTeam}
-            onFinishRound={finishRound}
-          />
-        </ScrollView>
-      </GradientBackground>
+      <Screen>
+        <RoundSummary
+          room={room}
+          currentTeam={currentTeam}
+          isMyTurn={isMyTurn()}
+          onToggleCardStatus={toggleCardStatus}
+          onChangeLastWordTeam={handleChangeLastWordTeam}
+          onChangeGoldenRoundTeam={handleChangeGoldenRoundTeam}
+          onFinishRound={finishRound}
+        />
+      </Screen>
     );
   }
 
@@ -999,86 +1013,100 @@ export default function AliasGameScreen({ navigation, route }) {
     currentWord = wordAt(getRoundCards(room, cards), currentCardIndex);
   }
 
+  const roundStats = (
+    <View style={styles.stats}>
+      <Badge label={S.alias.game.correctAnswers(room.current_round_score)} icon="check" tone="success" />
+      <Badge
+        label={`${S.alias.game.progress(progress.moved)} · ${S.alias.game.positionOf(progress.currentPos + 1)}`}
+        icon={progress.moved >= 0 ? 'plus' : 'minus'}
+        tone={progress.moved >= 0 ? 'accent' : 'danger'}
+      />
+    </View>
+  );
+
   return (
-    <GradientBackground variant="brightBlue">
-      <ScrollView 
-        contentContainerStyle={styles.container}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Unified Top Bar */}
+    <Screen
+      header={
         <UnifiedTopBar
           roomCode={roomCode}
           variant="alias"
           drinkingMode={drinkingMode}
-          onExit={async () => {
-            // Cleanup listeners
-            if (unsubscribeRef.current) {
-              unsubscribeRef.current();
-              unsubscribeRef.current = null;
-            }
-            
-            // Cleanup room state
-            await clearCurrentRoom();
-            
-            // Navigate to main menu using reset to clear the stack
-            const parent = navigation.getParent();
-            if (parent) {
-              parent.reset({
-                index: 0,
-                routes: [{ name: 'Home' }]
-              });
-            } else {
-              // Fallback: navigate to Home
-              navigation.navigate('Home');
-            }
-          }}
+          onExit={exitToHome}
           onRulesPress={() => setShowRulesModal(true)}
         />
+      }
+    >
+      <RulesModal
+        visible={showRulesModal}
+        onClose={() => setShowRulesModal(false)}
+        variant="alias"
+      />
 
-        {/* Score Display */}
-        <View style={styles.scoreDisplay}>
-          <Text style={styles.scoreText}>ניקוד: {room.current_round_score}</Text>
-        </View>
+      {/* Drinking Popup */}
+      <DrinkingPopup
+        visible={showDrinkingPopup}
+        onClose={() => {
+          setShowDrinkingPopup(false);
+          // Clear drinking popup from room data
+          if (room && room.id) {
+            const roomRef = doc(db, 'GameRoom', room.id);
+            updateDoc(roomRef, { drinking_popup: null }).catch(err =>
+              console.error('Error clearing drinking popup:', err)
+            );
+          }
+        }}
+        teamName={drinkingTeamName}
+      />
 
-        {/* Rules Modal */}
-        <RulesModal
-          visible={showRulesModal}
-          onClose={() => setShowRulesModal(false)}
-          variant="alias"
-        />
+      {/* Whose turn */}
+      <Card tone={isMyTurn() ? 'tint' : 'paper'} padding="md" style={styles.turnCard}>
+        <Icon name={isMyTurn() ? 'clue' : 'players'} size={26} color={theme.accentInk} />
+        <AppText variant="title" color={theme.accentInk} style={styles.flexShrink}>
+          {isMyTurn() ? S.alias.game.yourTurn : S.alias.game.turnOf(currentTeam?.name)}
+        </AppText>
+      </Card>
 
-        {/* Drinking Popup */}
-        <DrinkingPopup
-          visible={showDrinkingPopup}
-          onClose={() => {
-            setShowDrinkingPopup(false);
-            // Clear drinking popup from room data
-            if (room && room.id) {
-              const roomRef = doc(db, 'GameRoom', room.id);
-              updateDoc(roomRef, { drinking_popup: null }).catch(err => 
-                console.error('Error clearing drinking popup:', err)
-              );
-            }
-          }}
-          teamName={drinkingTeamName}
-        />
+      {/* Game Board */}
+      <GameBoard teams={room.teams} goldenSquares={room.golden_squares || []} />
 
-        {/* Team Info */}
-        <View style={styles.teamInfo}>
-          <Text style={styles.teamName}>
-            {isMyTurn() ? 'התור שלך!' : `התור של ${currentTeam?.name}`}
-          </Text>
-        </View>
+      {/* Game Content */}
+      {room.round_active ? (
+        <>
+          {/* Timer - only for playing team */}
+          {isMyTurn() && !room.current_word_is_golden && (
+            <AliasTimer
+              key={timerKey}
+              duration={60}
+              startTime={room.round_start_time}
+              onTimeUp={handleTimeUpWrapper}
+              compact={false}
+            />
+          )}
 
-        {/* Game Board */}
-        <GameBoard teams={room.teams} goldenSquares={room.golden_squares || []} />
+          {/* Progress info for the playing team */}
+          {isMyTurn() && roundStats}
 
-        {/* Game Content */}
-        {room.round_active ? (
-          <View style={styles.gameContent}>
-            {/* Timer - only for playing team */}
-            {isMyTurn() && !room.current_word_is_golden && (
-              <View style={styles.timerContainer}>
+          {/* Time Up - only for playing team */}
+          {timeIsUp && isMyTurn() && (
+            <TimeUpPopup
+              isMyTurn={isMyTurn()}
+              room={room}
+              onCorrect={handleCorrect}
+              onSkip={handleSkip}
+            />
+          )}
+
+          {/* Golden Word - GoldenRoundCard for the playing team */}
+          {room.current_word_is_golden && isMyTurn() && !timeIsUp && (
+            <GoldenRoundCard
+              word={currentWord}
+              teams={room.teams}
+              onTeamGuess={handleCorrect}
+              canInteract={true}
+              showWord={true}
+              startTime={room.round_start_time}
+              onTimeUp={handleTimeUpWrapper}
+              timerComponent={
                 <AliasTimer
                   key={timerKey}
                   duration={60}
@@ -1086,571 +1114,158 @@ export default function AliasGameScreen({ navigation, route }) {
                   onTimeUp={handleTimeUpWrapper}
                   compact={false}
                 />
-              </View>
-            )}
+              }
+            />
+          )}
 
-            {/* Progress Info for Playing Team */}
-            {isMyTurn() && (
-              <View style={styles.playingTeamInfo}>
-                <View style={styles.scoreBox}>
-                  <Text style={styles.scoreBoxText}>
-                    תשובות נכונות: {room.current_round_score}
-                  </Text>
-                </View>
-                <View style={styles.progressBox}>
-                  <Text style={styles.progressBoxText}>
-                    התקדמות: {progress.moved >= 0 ? '+' : ''}{progress.moved}
-                  </Text>
-                  <Text style={styles.progressBoxSubtext}>
-                    {progress.currentPos + 1}/60
-                  </Text>
-                </View>
-              </View>
-            )}
+          {/* Golden Word Popup for non-playing players - shown automatically */}
+          {room.current_word_is_golden && !isMyTurn() && !timeIsUp && (
+            <GoldenWordPopup
+              visible={true}
+              onClose={() => setShowGoldenPopup(false)}
+            />
+          )}
 
-            {/* Time Up Popup - only for playing team */}
-            {timeIsUp && isMyTurn() && (
-              <TimeUpPopup
-                isMyTurn={isMyTurn()}
-                room={room}
-                onCorrect={handleCorrect}
-                onSkip={handleSkip}
+          {/* Regular word card - only if not golden word and it's my turn */}
+          {!room.current_word_is_golden && !timeIsUp && isMyTurn() && (
+            <View style={[styles.wordCard, { borderColor: theme.accent }]}>
+              <AppText variant="label" color={colors.inkSoft} align="center">
+                {S.alias.game.wordNumber(currentCardIndex + 1)}
+              </AppText>
+              <AppText variant="display" align="center" maxScale={1.4}>
+                {currentWord}
+              </AppText>
+            </View>
+          )}
+
+          {/* Action buttons - only for regular words (not golden) */}
+          {isMyTurn() && !timeIsUp && !room.current_word_is_golden && (
+            <View style={styles.actions}>
+              <Button
+                title={S.alias.game.correct}
+                icon="check"
+                variant="success"
+                onPress={() => handleCorrect()}
+                style={styles.flex}
               />
-            )}
+              <Button
+                title={S.alias.game.skip}
+                icon="skip"
+                variant="secondary"
+                onPress={handleSkip}
+                style={styles.flex}
+              />
+            </View>
+          )}
 
-            {/* Golden Word - Show GoldenRoundCard for current player */}
-            {room.current_word_is_golden && isMyTurn() && !timeIsUp && (
-              <GoldenRoundCard
-                word={currentWord}
-                teams={room.teams}
-                onTeamGuess={handleCorrect}
-                canInteract={true}
-                showWord={true}
+          {/* Waiting (other teams) */}
+          {!isMyTurn() && !room.current_word_is_golden && !timeIsUp && (
+            <>
+              <AliasTimer
+                duration={60}
                 startTime={room.round_start_time}
-                onTimeUp={handleTimeUpWrapper}
-                timerComponent={
-                  <AliasTimer
-                    key={timerKey}
-                    duration={60}
-                    startTime={room.round_start_time}
-                    onTimeUp={handleTimeUpWrapper}
-                    compact={false}
-                  />
-                }
+                onTimeUp={() => {}}
+                compact={false}
               />
-            )}
+              <Card tone="tint" style={styles.waiting}>
+                <AppText variant="title" align="center">
+                  {S.alias.game.playingNow(currentTeam?.name)}
+                </AppText>
+                <AppText align="center" color={colors.inkSoft}>
+                  {S.alias.game.waitingTurnEnd}
+                </AppText>
+                {roundStats}
+              </Card>
+            </>
+          )}
 
-            {/* Golden Word Popup for non-playing players - show automatically */}
-            {room.current_word_is_golden && !isMyTurn() && !timeIsUp && (
-              <GoldenWordPopup 
-                visible={true} 
-                onClose={() => setShowGoldenPopup(false)} 
-              />
-            )}
-
-            {/* Regular Word Card - only if not golden word and it's my turn */}
-            {!room.current_word_is_golden && !timeIsUp && isMyTurn() && (
-              <View style={styles.wordCard}>
-                <Text style={styles.wordText}>{currentWord}</Text>
-                <Text style={styles.cardNumber}>מילה {currentCardIndex + 1}</Text>
-              </View>
-            )}
-
-            {/* Frozen Word (Time Up) - removed for non-playing teams */}
-
-            {/* Action Buttons - only for regular words (not golden) */}
-            {isMyTurn() && !timeIsUp && !room.current_word_is_golden && (
-              <View style={styles.actionsContainer}>
-                <Pressable
-                  style={[styles.actionButton, styles.correctButton]}
-                  onPress={() => handleCorrect()}
-                >
-                  <Text style={styles.actionButtonText}>נכון ✓</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.actionButton, styles.skipButton]}
-                  onPress={handleSkip}
-                >
-                  <Text style={styles.actionButtonText}>דלג</Text>
-                </Pressable>
-              </View>
-            )}
-
-            {/* Waiting Message - only show timer if not golden word */}
-            {!isMyTurn() && !room.current_word_is_golden && !timeIsUp && (
-              <View style={styles.waitingContainer}>
-                <AliasTimer
-                  duration={60}
-                  startTime={room.round_start_time}
-                  onTimeUp={() => {}}
-                  compact={false}
-                />
-                <Text style={styles.waitingText}>
-                  {currentTeam?.name} משחקת כעת
-                </Text>
-                <Text style={styles.waitingSubtext}>
-                  ממתינים עד שהתור שלהם יסתיים...
-                </Text>
-                
-                {/* ריבוע תשובות נכונות */}
-                <View style={styles.scoreBox}>
-                  <Text style={styles.scoreBoxText}>
-                    תשובות נכונות: {room.current_round_score}
-                  </Text>
-                </View>
-
-                {/* ריבוע התקדמות */}
-                <View style={styles.progressBox}>
-                  <Text style={styles.progressBoxText}>
-                    התקדמות: {progress.moved >= 0 ? '+' : ''}{progress.moved}
-                  </Text>
-                  <Text style={styles.progressBoxSubtext}>
-                    {progress.currentPos + 1}/60
-                  </Text>
-                </View>
-              </View>
-            )}
-            
-            {/* Waiting Message for Golden Word - show info but no timer (popup handles it) */}
-            {!isMyTurn() && room.current_word_is_golden && !timeIsUp && (
-              <View style={styles.waitingContainer}>
-                <Text style={styles.waitingText}>
-                  {currentTeam?.name} משחקת כעת
-                </Text>
-                <Text style={styles.waitingSubtext}>
-                  מילת זהב! גם אתם יכולים לנחש
-                </Text>
-                
-                {/* ריבוע תשובות נכונות */}
-                <View style={styles.scoreBox}>
-                  <Text style={styles.scoreBoxText}>
-                    תשובות נכונות: {room.current_round_score}
-                  </Text>
-                </View>
-
-                {/* ריבוע התקדמות */}
-                <View style={styles.progressBox}>
-                  <Text style={styles.progressBoxText}>
-                    התקדמות: {progress.moved >= 0 ? '+' : ''}{progress.moved}
-                  </Text>
-                  <Text style={styles.progressBoxSubtext}>
-                    {progress.currentPos + 1}/60
-                  </Text>
-                </View>
-              </View>
-            )}
-          </View>
-        ) : (
-          /* Waiting for Round Start */
-          <View style={styles.waitingRoundContainer}>
-            <Text style={styles.waitingRoundTitle}>
-              {isMyTurn() ? 'התור שלך!' : `התור של ${currentTeam?.name}`}
-            </Text>
-            {isMyTurn() ? (
-              <>
-                <Text style={styles.waitingRoundText}>
-                  לחץ על הכפתור להתחיל את הסבב שלך!
-                </Text>
-                <GradientButton
-                  title="צא לדרך!"
-                  onPress={startRound}
-                  variant="alias"
-                  style={styles.startRoundButton}
-                />
-              </>
-            ) : (
-              <Text style={styles.waitingRoundText}>
-                ממתינים ש-{currentTeam?.name} תלחץ להתחיל...
-              </Text>
-            )}
-          </View>
-        )}
-      </ScrollView>
-    </GradientBackground>
+          {/* Waiting for a golden word - info only (the popup explains it) */}
+          {!isMyTurn() && room.current_word_is_golden && !timeIsUp && (
+            <Card tone="tint" style={styles.waiting}>
+              <AppText variant="title" align="center">
+                {S.alias.game.playingNow(currentTeam?.name)}
+              </AppText>
+              <AppText align="center" color={colors.inkSoft}>
+                {S.alias.game.goldenWaiting}
+              </AppText>
+              {roundStats}
+            </Card>
+          )}
+        </>
+      ) : (
+        /* Waiting for round start */
+        <Card style={styles.waiting}>
+          {isMyTurn() ? (
+            <>
+              <AppText align="center" color={colors.inkSoft}>
+                {S.alias.game.pressToStart}
+              </AppText>
+              <Button title={S.alias.game.go} icon="play" onPress={startRound} fullWidth />
+            </>
+          ) : (
+            <View style={styles.waitingRow}>
+              <Icon name="hourglass" size={22} color={colors.inkSoft} />
+              <AppText color={colors.inkSoft} style={styles.flexShrink}>
+                {S.alias.game.waitingStart(currentTeam?.name)}
+              </AppText>
+            </View>
+          )}
+        </Card>
+      )}
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: 20,
-    paddingTop: 50,
-  },
-  loadingContainer: {
+  flex: {
     flex: 1,
+  },
+  flexShrink: {
+    flexShrink: 1,
+  },
+  centered: {
     justifyContent: 'center',
+    gap: spacing.md,
+  },
+  winnerBanner: {
     alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.xl,
+    borderRadius: radii.xl,
+    borderBottomWidth: 7,
+    marginBottom: spacing.md,
   },
-  loadingText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    marginTop: 16,
-  },
-  header: {
+  turnCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-    paddingHorizontal: 4,
+    gap: spacing.sm,
   },
-  backButton: {
-    alignSelf: 'flex-start',
-  },
-  headerInfo: {
-    alignItems: 'flex-end',
-  },
-  scoreDisplay: {
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  roomCodeText: {
-    color: '#4FA8FF', // Alias theme color - כחול בהיר
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  scoreText: {
-    color: '#4FA8FF', // Alias theme color - כחול בהיר
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 4,
-  },
-  teamInfo: {
-    backgroundColor: 'rgba(79, 168, 255, 0.15)', // Alias theme color with transparency - כחול בהיר
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#4FA8FF',
-  },
-  teamName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#4FA8FF', // Alias theme color - כחול בהיר
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  progressBar: {
-    height: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 10,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#4FA8FF', // Alias theme color
-    borderRadius: 10,
-  },
-  progressText: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    textAlign: 'center',
-  },
-  gameContent: {
-    gap: 20,
-  },
-  timerContainer: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  timeUpContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 24,
-    marginBottom: 20,
-  },
-  timeUpTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#4FA8FF', // Alias theme color
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  timeUpText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  teamButtonsContainer: {
-    gap: 12,
-  },
-  teamButton: {
-    width: '100%',
-  },
-  goldenPopup: {
-    backgroundColor: '#FFD700',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-    alignItems: 'center',
-  },
-  goldenText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  goldenSubtext: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    marginTop: 8,
+  stats: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: spacing.sm,
   },
   wordCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: Math.min(Dimensions.get('window').width - 80, 400),
-    height: Math.min(Dimensions.get('window').width - 80, 400),
-    marginVertical: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
-    position: 'relative',
-    alignSelf: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.xl,
+    borderWidth: 3,
+    borderBottomWidth: 7,
+    backgroundColor: colors.card,
   },
-  wordText: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-    textAlign: 'center',
-  },
-  wordTextGolden: {
-    color: '#FFFFFF',
-  },
-  cardNumber: {
-    position: 'absolute',
-    bottom: 16,
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '600',
-  },
-  frozenText: {
-    fontSize: 14,
-    color: '#4FA8FF', // Alias theme color
-    fontWeight: '600',
-    marginTop: 8,
-  },
-  actionsContainer: {
+  actions: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 16,
-    marginTop: 20,
+    gap: spacing.md,
   },
-  actionButton: {
-    flex: 1,
-    minWidth: 120,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
+  waiting: {
+    gap: spacing.md,
   },
-  correctButton: {
-    backgroundColor: '#10B981', // Green
-  },
-  skipButton: {
-    backgroundColor: '#EF4444', // Red
-  },
-  actionButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  playingTeamInfo: {
+  waitingRow: {
     flexDirection: 'row',
-    gap: 12,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  waitingContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 20,
     alignItems: 'center',
-  },
-  waitingText: {
-    fontSize: 18,
-    color: '#FFFFFF',
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  waitingSubtext: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    opacity: 0.8,
-  },
-  waitingRoundContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 32,
-    alignItems: 'center',
-    marginTop: 40,
-  },
-  waitingRoundTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#4FA8FF', // Alias theme color
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  waitingRoundText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  startRoundButton: {
-    width: '100%',
-  },
-  summaryContainer: {
-    flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  summaryTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 32,
-  },
-  summaryCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 32,
-    alignItems: 'center',
-    marginBottom: 32,
-    minWidth: 300,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  summaryTeamName: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-    marginBottom: 16,
-  },
-  summaryScore: {
-    fontSize: 24,
-    color: '#4FA8FF', // Alias theme color
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  summaryPosition: {
-    fontSize: 18,
-    color: '#666',
-    marginBottom: 8,
-  },
-  summaryProgress: {
-    fontSize: 18,
-    color: '#4FA8FF', // Alias theme color
-    fontWeight: '600',
-  },
-  nextButton: {
-    width: '100%',
-    minWidth: 200,
-  },
-  waitingSummaryText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    textAlign: 'center',
-    marginTop: 16,
-  },
-  winnerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  winnerEmoji: {
-    fontSize: 80,
-    marginBottom: 24,
-  },
-  winnerTitle: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  winnerSubtitle: {
-    fontSize: 20,
-    color: '#FFFFFF',
-    opacity: 0.9,
-    marginBottom: 32,
-  },
-  winnerActions: {
-    width: '100%',
-    maxWidth: 300,
-    gap: 12,
-  },
-  winnerButton: {
-    width: '100%',
-  },
-  hostOnlyText: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  goldenPopupTrigger: {
-    backgroundColor: 'rgba(79, 168, 255, 0.15)', // Alias theme color with transparency
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#4FA8FF', // Alias theme color
-  },
-  goldenPopupTriggerText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#4FA8FF', // Alias theme color
-  },
-  scoreBox: {
-    backgroundColor: 'rgba(79, 168, 255, 0.15)', // Alias theme color with transparency
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 12,
-    borderWidth: 2,
-    borderColor: '#4FA8FF', // Alias theme color
-    flex: 1,
-  },
-  scoreBoxText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#4FA8FF', // Alias theme color
-    textAlign: 'center',
-  },
-  progressBox: {
-    backgroundColor: 'rgba(79, 168, 255, 0.15)', // Alias theme color with transparency
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 12,
-    borderWidth: 2,
-    borderColor: '#4FA8FF', // Alias theme color
-    flex: 1,
-  },
-  progressBoxText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#4FA8FF', // Alias theme color
-    textAlign: 'center',
-  },
-  progressBoxSubtext: {
-    fontSize: 14,
-    color: '#4FA8FF', // Alias theme color
-    textAlign: 'center',
-    marginTop: 4,
+    gap: spacing.sm,
   },
 });

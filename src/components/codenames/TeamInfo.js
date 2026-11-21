@@ -1,15 +1,23 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { StyleSheet, View } from 'react-native';
+import { S } from '../../strings';
+import { colors, radii, spacing } from '../../theme';
+import { AppText, Badge, Icon } from '../../ui';
+import { getTeamStyle } from './teamStyle';
 
-export default function TeamInfo({ 
-  redTeam, 
-  blueTeam, 
-  currentTurn, 
-  redWordsLeft, 
+/**
+ * Both teams side by side. Same props as before. A team is identified by its
+ * icon (flame / drop) and its name as well as its color; whose turn it is
+ * shows as a badge with text, not just a border.
+ */
+export default function TeamInfo({
+  redTeam,
+  blueTeam,
+  currentTurn,
+  redWordsLeft,
   blueWordsLeft,
   currentPlayerName,
-  compact = false
+  compact = false // eslint-disable-line no-unused-vars
 }) {
   const getPlayerRole = (team) => {
     if (team.spymaster === currentPlayerName) return 'spymaster';
@@ -17,61 +25,50 @@ export default function TeamInfo({
     return null;
   };
 
-  const TeamCard = ({ team, color, wordsLeft, isCurrentTurn }) => {
+  const renderTeam = (team, color, wordsLeft, isCurrentTurn) => {
+    const t = getTeamStyle(color);
     const role = getPlayerRole(team);
-    const isMyTeam = role !== null;
-    
+    const name = color === 'red' ? S.codenames.teams.red : S.codenames.teams.blue;
+
     return (
-      <View style={[
-        styles.teamCard,
-        isCurrentTurn && styles.currentTurnCard,
-        color === 'red' ? styles.redCard : styles.blueCard
-      ]}>
-        <View style={[
-          styles.teamHeader,
-          color === 'red' ? styles.redTeamHeaderBg : styles.blueTeamHeaderBg
-        ]}>
-          <View style={styles.teamInfo}>
-            <View style={styles.teamNameContainer}>
-              <Text style={[styles.teamName, compact && styles.compactTeamName, styles.teamNameWhite]}>
-                {color === 'red' ? 'אדומה' : 'כחולה'}
-              </Text>
-              <Text style={[styles.wordsRemainingHeader, compact && styles.compactWordsRemainingHeader]}>
-                {wordsLeft} מילים
-              </Text>
-              {isMyTeam && (
-                <View style={styles.youBadge}>
-                  <Text style={styles.youBadgeText}>אתה כאן</Text>
-                </View>
-              )}
-            </View>
+      <View
+        key={color}
+        style={[styles.card, { borderColor: t.fill }, isCurrentTurn && { backgroundColor: t.tint, borderWidth: 3 }]}
+        accessible
+        accessibilityLabel={[name, S.codenames.teams.wordsLeft(wordsLeft), isCurrentTurn && S.codenames.teams.theirTurn, role && S.codenames.teams[role]].filter(Boolean).join(', ')}
+      >
+        <View style={[styles.header, { backgroundColor: t.fill }]}>
+          <Icon name={t.icon} size={22} color={colors.white} />
+          <AppText variant="bodyStrong" color={colors.white} style={styles.flex} numberOfLines={1}>
+            {name}
+          </AppText>
+        </View>
+        <View style={styles.body}>
+          <View style={styles.countRow}>
+            <AppText variant="heading" color={t.ink} maxScale={1.3}>
+              {wordsLeft}
+            </AppText>
+            <AppText variant="caption" color={colors.inkSoft} style={styles.flex}>
+              {S.codenames.teams.wordsUnit}
+            </AppText>
           </View>
-          {role && (
-            <View style={[styles.roleBadge, role === 'spymaster' ? styles.spymasterBadge : styles.guesserBadge]}>
-              <Text style={styles.roleBadgeText}>
-                {role === 'spymaster' ? '👁️ מרגל' : '👥 מנחש'}
-              </Text>
-            </View>
-          )}
+          {isCurrentTurn ? <Badge label={S.codenames.teams.theirTurn} icon="play" tone="neutral" /> : null}
+          {role ? (
+            <Badge
+              label={`${S.codenames.teams[role]} · ${S.codenames.teams.youAreHere}`}
+              icon={role === 'spymaster' ? 'spy' : 'players'}
+              tone="gold"
+            />
+          ) : null}
         </View>
       </View>
     );
   };
 
   return (
-    <View style={[styles.container, compact && styles.compactContainer]}>
-      <TeamCard 
-        team={redTeam} 
-        color="red" 
-        wordsLeft={redWordsLeft}
-        isCurrentTurn={currentTurn === 'red'}
-      />
-      <TeamCard 
-        team={blueTeam} 
-        color="blue" 
-        wordsLeft={blueWordsLeft}
-        isCurrentTurn={currentTurn === 'blue'}
-      />
+    <View style={styles.container}>
+      {renderTeam(redTeam, 'red', redWordsLeft, currentTurn === 'red')}
+      {renderTeam(blueTeam, 'blue', blueWordsLeft, currentTurn === 'blue')}
     </View>
   );
 }
@@ -79,108 +76,32 @@ export default function TeamInfo({
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    gap: 16,
-    marginBottom: 12,
+    gap: spacing.sm,
   },
-  compactContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  teamCard: {
+  flex: {
     flex: 1,
+  },
+  card: {
+    flex: 1,
+    borderRadius: radii.lg,
     borderWidth: 2,
-    borderColor: '#D1D5DB',
-    borderRadius: 16,
+    backgroundColor: colors.card,
     overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
   },
-  compactTeamCard: {
-    padding: 0,
-  },
-  currentTurnCard: {
-    borderWidth: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  redCard: {
-    borderColor: '#EF4444',
-  },
-  blueCard: {
-    borderColor: '#3B82F6',
-  },
-  teamHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-  },
-  redTeamHeaderBg: {
-    backgroundColor: '#EF4444',
-  },
-  blueTeamHeaderBg: {
-    backgroundColor: '#3B82F6',
-  },
-  teamInfo: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    flex: 1,
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
   },
-  teamNameContainer: {
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: 4,
-    flex: 1,
+  body: {
+    gap: spacing.xs,
+    padding: spacing.md,
   },
-  teamName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  teamNameWhite: {
-    color: '#FFFFFF',
-  },
-  compactTeamName: {
-    fontSize: 14,
-  },
-  wordsRemainingHeader: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  compactWordsRemainingHeader: {
-    fontSize: 12,
-  },
-  youBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginTop: 4,
-  },
-  youBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  roleBadge: {
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  spymasterBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  guesserBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  roleBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
+  countRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.xs,
   },
 });
-

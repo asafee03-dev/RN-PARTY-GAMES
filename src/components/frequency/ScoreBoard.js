@@ -1,181 +1,148 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import GradientBackground from '../codenames/GradientBackground';
+import { StyleSheet, View } from 'react-native';
+import { S } from '../../strings';
+import { borders, colors, radii, spacing, useGameTheme } from '../../theme';
+import { AppText, Badge, Card, Icon } from '../../ui';
 
+const WIN_SCORE = 10;
+
+const formatScore = (score) => (Number.isInteger(score) ? String(score) : Number(score || 0).toFixed(1));
+
+/**
+ * Frequency scoreboard: active players by score, the current clue giver
+ * marked with a "their turn" badge (icon + text), and a progress bar to 10.
+ * Same props as before: players, currentTurnIndex.
+ */
 export default function ScoreBoard({ players, currentTurnIndex }) {
-  // Filter to show only active players (active !== false)
-  const activePlayers = (players || []).filter(p => p && p.name && (p.active !== false));
+  const theme = useGameTheme();
+  const activePlayers = (players || []).filter((p) => p && p.name && p.active !== false);
   const sortedPlayers = [...activePlayers].sort((a, b) => b.score - a.score);
 
   return (
-    <View style={styles.container}>
+    <Card style={styles.card}>
       <View style={styles.header}>
-        <Text style={styles.headerIcon}>🏆</Text>
-        <Text style={styles.headerTitle}>לוח תוצאות</Text>
+        <Icon name="trophy" size={22} color={theme.accentInk} />
+        <AppText variant="title" color={theme.accentInk} accessibilityRole="header">
+          {S.frequency.scoreboard.title}
+        </AppText>
       </View>
-      <ScrollView 
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {sortedPlayers.map((player, idx) => {
-          const isCurrentTurn = players[currentTurnIndex]?.name === player.name;
-          
-          return (
-            <View
-              key={player.name}
-              style={[
-                styles.playerCard,
-                isCurrentTurn && styles.playerCardActive
-              ]}
-            >
-              <View style={styles.playerCardContent}>
-                <View style={styles.rankRow}>
-                  <Text style={styles.rankText}>#{idx + 1}</Text>
-                  {idx === 0 && player.score > 0 && (
-                    <Text style={styles.trophyIcon}>🏆</Text>
-                  )}
-                </View>
-                <View style={styles.nameRow}>
-                  <Text style={styles.playerName}>{player.name}</Text>
-                  {isCurrentTurn && (
-                    <View style={styles.turnBadge}>
-                      <Text style={styles.turnBadgeText}>🎮 תורו</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.scoreText}>{player.score}</Text>
-                
-                {/* Progress bar to 10 */}
-                <View style={styles.progressBarContainer}>
-                  <View
-                    style={[
-                      styles.progressBar,
-                      { width: `${Math.min((player.score / 10) * 100, 100)}%` }
-                    ]}
-                  />
-                </View>
+
+      {sortedPlayers.map((player, idx) => {
+        const isCurrentTurn = players[currentTurnIndex]?.name === player.name;
+        const progress = Math.min((player.score || 0) / WIN_SCORE, 1);
+
+        return (
+          <View
+            key={player.name}
+            style={[styles.row, isCurrentTurn && { backgroundColor: theme.tint, borderColor: theme.accent }]}
+            accessible
+            accessibilityLabel={`${idx + 1}. ${player.name}, ${formatScore(player.score)}${isCurrentTurn ? ', ' + S.frequency.scoreboard.theirTurn : ''}`}
+          >
+            <View style={[styles.rank, idx === 0 && (player.score || 0) > 0 && styles.rankLeader]}>
+              <AppText variant="label" color={colors.ink} align="center" maxScale={1.3}>
+                {idx + 1}
+              </AppText>
+            </View>
+
+            <View style={styles.middle}>
+              <View style={styles.nameRow}>
+                <View style={[styles.dot, { backgroundColor: player.color || theme.accent }]} />
+                <AppText variant="bodyStrong" numberOfLines={1} style={styles.name}>
+                  {player.name}
+                </AppText>
+                {isCurrentTurn ? <Badge label={S.frequency.scoreboard.theirTurn} icon="clue" tone="accent" /> : null}
+              </View>
+              <View style={styles.track}>
+                <View style={[styles.fill, { width: `${progress * 100}%`, backgroundColor: theme.accent }]} />
               </View>
             </View>
-          );
-        })}
-      </ScrollView>
-      <Text style={styles.footerText}>🏆 ראשון ל-10 נקודות מנצח!</Text>
-    </View>
+
+            <AppText variant="title" color={theme.accentInk} align="end" maxScale={1.3} style={styles.score}>
+              {formatScore(player.score)}
+            </AppText>
+          </View>
+        );
+      })}
+
+      <View style={styles.footer}>
+        <Icon name="finish" size={18} color={colors.inkSoft} />
+        <AppText variant="caption" color={colors.inkSoft}>
+          {S.frequency.scoreboard.goal}
+        </AppText>
+      </View>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    padding: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    maxHeight: 200,
+  card: {
+    gap: spacing.sm,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: borders.card,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+  },
+  rank: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.pill,
+    alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    marginBottom: 10,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    backgroundColor: colors.cardboard,
   },
-  headerIcon: {
-    fontSize: 16,
+  rankLeader: {
+    backgroundColor: colors.gold,
   },
-  headerTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  scrollContent: {
-    gap: 8,
-    paddingVertical: 4,
-  },
-  playerCard: {
-    width: '100%',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    padding: 10,
-    marginBottom: 6,
-  },
-  playerCardActive: {
-    backgroundColor: '#E0E7FF',
-    borderColor: '#0A1A3A', // Frequency theme color - navy blue
-  },
-  playerCardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  rankRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    minWidth: 40,
-  },
-  rankText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#9CA3AF',
-  },
-  trophyIcon: {
-    fontSize: 14,
+  middle: {
+    flex: 1,
+    gap: spacing.xs,
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    flex: 1,
+    gap: spacing.sm,
   },
-  playerName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1F2937',
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
-  turnBadge: {
-    backgroundColor: '#10B981',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
+  name: {
+    flexShrink: 1,
   },
-  turnBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '600',
+  track: {
+    height: 8,
+    borderRadius: radii.pill,
+    backgroundColor: colors.cardboard,
+    overflow: 'hidden',
+    flexDirection: 'row',
   },
-  scoreText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0A1A3A', // Frequency theme color - navy blue
-    minWidth: 50,
-    textAlign: 'right',
-  },
-  progressBarContainer: {
-    display: 'none', // Hide progress bar in compact vertical layout
-  },
-  progressBar: {
+  fill: {
     height: '100%',
-    backgroundColor: '#0A1A3A', // Frequency theme color - navy blue
-    borderRadius: 4,
+    borderRadius: radii.pill,
   },
-  footerText: {
-    fontSize: 11,
-    textAlign: 'center',
-    color: '#6B7280',
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+  score: {
+    minWidth: 40,
+    fontVariant: ['tabular-nums'],
+  },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
   },
 });
-

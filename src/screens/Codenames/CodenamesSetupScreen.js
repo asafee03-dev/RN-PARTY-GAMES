@@ -1,17 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Switch, Clipboard, Pressable } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { View, StyleSheet, Alert, ActivityIndicator, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction } from 'firebase/firestore';
 import storage from '../../utils/storage';
+import { S } from '../../strings';
+import { colors, radii, spacing, useGameTheme } from '../../theme';
+import { AppText, Badge, Button, Card, Icon, PlayerChip, Screen } from '../../ui';
+import { getTeamStyle } from '../../components/codenames/teamStyle';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 
 export default function CodenamesSetupScreen({ navigation, route }) {
+  const theme = useGameTheme();
   const roomCode = route?.params?.roomCode || '';
   const gameMode = route?.params?.gameMode || 'friends';
   const insets = useSafeAreaInsets();
@@ -145,7 +148,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
         } else {
           // Player not in room and game is active - show error
           console.warn('⚠️ Player tried to join game that is already in progress');
-          Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+          Alert.alert(S.codenames.setup.error, S.codenames.setup.gameStarted);
           navigation.navigate('CodenamesHome');
           return;
         }
@@ -270,14 +273,14 @@ export default function CodenamesSetupScreen({ navigation, route }) {
       });
 
       if (outcome === 'taken') {
-        Alert.alert('התפקיד תפוס', 'שחקן אחר כבר בחר בתפקיד הזה.');
+        Alert.alert(S.codenames.setup.roleTakenTitle, S.codenames.setup.roleTakenBody);
       } else if (outcome === 'missing') {
-        Alert.alert('שגיאה', 'החדר נמחק');
+        Alert.alert(S.codenames.setup.error, S.codenames.setup.roomDeleted);
         navigation.goBack();
       }
     } catch (error) {
       console.error('❌ Error joining team:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו להצטרף לקבוצה. נסה שוב.');
+      Alert.alert(S.codenames.setup.error, S.codenames.setup.joinFailed);
     }
   };
 
@@ -307,29 +310,29 @@ export default function CodenamesSetupScreen({ navigation, route }) {
     if (!room) return [];
     const missing = [];
     
-    if (!room.red_team.spymaster) missing.push('מרגל לקבוצה אדומה');
-    if (!room.blue_team.spymaster) missing.push('מרגל לקבוצה כחולה');
-    if (room.red_team.guessers.length < 1) missing.push('לפחות מנחש אחד לקבוצה אדומה');
-    if (room.blue_team.guessers.length < 1) missing.push('לפחות מנחש אחד לקבוצה כחולה');
+    if (!room.red_team.spymaster) missing.push(S.codenames.setup.reqSpymasterRed);
+    if (!room.blue_team.spymaster) missing.push(S.codenames.setup.reqSpymasterBlue);
+    if (room.red_team.guessers.length < 1) missing.push(S.codenames.setup.reqGuesserRed);
+    if (room.blue_team.guessers.length < 1) missing.push(S.codenames.setup.reqGuesserBlue);
     
     return missing;
   };
 
   const startGame = async () => {
     if (!isHost) {
-      Alert.alert('שגיאה', 'רק המארח יכול להתחיל את המשחק!');
+      Alert.alert(S.codenames.setup.error, S.codenames.setup.hostOnlyStart);
       return;
     }
 
     if (!canStartGame() && gameMode === 'friends') {
       const missing = getMissingRequirements();
-      Alert.alert('לא ניתן להתחיל את המשחק', `חסר:\n${missing.map(m => `• ${m}`).join('\n')}`);
+      Alert.alert(S.codenames.setup.cannotStartTitle, S.codenames.setup.missingList(missing));
       return;
     }
 
     if (!room || !room.id) {
       console.error('❌ Cannot start game: room or room.id is missing');
-      Alert.alert('שגיאה', 'שגיאה: חדר לא נטען כראוי. נסה לרענן את הדף.');
+      Alert.alert(S.codenames.setup.error, S.codenames.setup.roomNotLoaded);
       return;
     }
 
@@ -344,13 +347,13 @@ export default function CodenamesSetupScreen({ navigation, route }) {
       });
 
       if (validWords.length < 25) {
-        Alert.alert('שגיאה', `❌ נמצאו רק ${validWords.length} מילים תקינות במאגר!\n\nנדרשות לפחות 25 מילים.\nאנא פנה למנהל המערכת.`);
+        Alert.alert(S.codenames.setup.error, S.codenames.setup.notEnoughWords(validWords.length));
         return;
       }
       selectedWords = [...validWords].sort(() => Math.random() - 0.5).slice(0, 25);
     } catch (error) {
       console.error('❌ Error loading words:', error);
-      Alert.alert('שגיאה', '❌ שגיאה בטעינת המילים. נסה שוב.');
+      Alert.alert(S.codenames.setup.error, S.codenames.setup.wordsLoadFailed);
       return;
     }
 
@@ -405,7 +408,7 @@ export default function CodenamesSetupScreen({ navigation, route }) {
       navigation.navigate('CodenamesGame', { roomCode });
     } catch (error) {
       console.error('❌ Error starting game:', error);
-      Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');
+      Alert.alert(S.codenames.setup.error, S.codenames.setup.startFailed);
     }
   };
 
@@ -433,10 +436,12 @@ export default function CodenamesSetupScreen({ navigation, route }) {
 
   if (isLoading || !room) {
     return (
-      <LinearGradient colors={['#3B82F6', '#06B6D4', '#14B8A6']} style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#FFFFFF" />
-        <Text style={styles.loadingText}>טוען...</Text>
-      </LinearGradient>
+      <Screen contentStyle={styles.centered}>
+        <ActivityIndicator size="large" color={theme.accent} />
+        <AppText variant="subtitle" align="center" color={colors.inkSoft}>
+          {S.codenames.setup.loading}
+        </AppText>
+      </Screen>
     );
   }
 
@@ -445,10 +450,102 @@ export default function CodenamesSetupScreen({ navigation, route }) {
   const missingRequirements = getMissingRequirements();
   const canStart = canStartGame();
 
+  // One team's card: header (icon + name), then spymaster and guesser sections
+  const renderTeam = (color) => {
+    const t = getTeamStyle(color);
+    const team = color === 'red' ? room.red_team : room.blue_team;
+    const spymasterName = team.spymaster
+      ? (typeof team.spymaster === 'string' ? team.spymaster : String(team.spymaster || ''))
+      : '';
+
+    return (
+      <View key={color} style={[styles.teamCard, { borderColor: t.fill }]}>
+        <View style={[styles.teamHeader, { backgroundColor: t.fill }]}>
+          <Icon name={t.icon} size={26} color={colors.white} />
+          <AppText variant="title" color={colors.white} accessibilityRole="header">
+            {S.codenames.setup.teamTitle(color)}
+          </AppText>
+        </View>
+
+        <View style={styles.teamBody}>
+          {/* Spymaster */}
+          <View style={styles.roleSection}>
+            <View style={styles.roleLabel}>
+              <Icon name="spy" size={20} color={colors.inkSoft} />
+              <AppText variant="label" color={colors.inkSoft}>
+                {S.codenames.setup.spymasterRole}
+              </AppText>
+            </View>
+            {spymasterName ? (
+              <PlayerChip
+                name={spymasterName}
+                color={t.fill}
+                isMe={playerRole?.team === color && playerRole?.role === 'spymaster'}
+                meLabel={S.codenames.teams.youAreHere}
+              />
+            ) : (
+              <AppText color={colors.inkSoft}>{S.codenames.setup.waitingSpymaster}</AppText>
+            )}
+            {(!playerRole || playerRole.team !== color || playerRole.role !== 'spymaster') && (
+              <Button
+                title={S.codenames.setup.joinSpymaster}
+                icon="spy"
+                variant="secondary"
+                size="sm"
+                onPress={() => joinTeam(color, 'spymaster')}
+                disabled={team.spymaster !== '' && team.spymaster !== currentPlayerName}
+                fullWidth
+              />
+            )}
+          </View>
+
+          {/* Guessers */}
+          <View style={styles.roleSection}>
+            <View style={styles.roleLabel}>
+              <Icon name="players" size={20} color={colors.inkSoft} />
+              <AppText variant="label" color={colors.inkSoft}>
+                {S.codenames.setup.guessersRole(team.guessers.length)}
+              </AppText>
+            </View>
+            {team.guessers.length > 0 ? (
+              <View style={styles.chips}>
+                {team.guessers
+                  .filter((player) => player != null)
+                  .map((player, idx) => {
+                    const playerName = typeof player === 'string' ? player : String(player || '');
+                    return (
+                      <PlayerChip
+                        key={`${color}-guesser-${idx}`}
+                        name={playerName}
+                        color={t.fill}
+                        isMe={playerName === currentPlayerName}
+                        meLabel={S.codenames.teams.youAreHere}
+                      />
+                    );
+                  })}
+              </View>
+            ) : (
+              <AppText color={colors.inkSoft}>{S.codenames.setup.waitingGuessers}</AppText>
+            )}
+            {(!playerRole || playerRole.team !== color || playerRole.role !== 'guesser') && (
+              <Button
+                title={S.codenames.setup.joinGuesser}
+                icon="players"
+                variant="secondary"
+                size="sm"
+                onPress={() => joinTeam(color, 'guesser')}
+                fullWidth
+              />
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  };
+
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Unified Top Bar */}
+    <Screen
+      header={
         <UnifiedTopBar
           roomCode={roomCode}
           variant="codenames"
@@ -457,685 +554,199 @@ export default function CodenamesSetupScreen({ navigation, route }) {
           drinkingMode={drinkingMode}
           showRules={true}
         />
+      }
+      footer={<BannerAd />}
+    >
+      {/* Rivals Mode Badge */}
+      {isRivalsMode && <Badge label={S.codenames.setup.rivalsBadge} icon="target" tone="neutral" />}
 
-        {/* Rivals Mode Badge */}
-        {isRivalsMode && (
-          <View style={styles.rivalsBadgeWrapper}>
-            <View style={styles.rivalsBadge}>
-              <Text style={styles.rivalsBadgeText}>⚔️ יריבים</Text>
+      <RulesModal
+        visible={showRulesModal}
+        onClose={() => setShowRulesModal(false)}
+        variant="codenames"
+      />
+
+      <Card style={styles.section}>
+        <View style={styles.titleRow}>
+          <Icon name="players" size={26} color={theme.accentInk} />
+          <AppText variant="title" color={theme.accentInk} accessibilityRole="header">
+            {S.codenames.setup.title}
+          </AppText>
+        </View>
+
+        {isHost && (
+          <Card tone="tint" padding="md" style={styles.section}>
+            <View style={styles.titleRow}>
+              <Icon name="crown" size={22} color={colors.goldDeep} />
+              <AppText variant="bodyStrong" style={styles.flexShrink}>
+                {S.codenames.setup.hello(currentPlayerName)} {S.codenames.setup.hostTag}
+              </AppText>
             </View>
+            <AppText variant="caption" color={colors.inkSoft}>
+              {isRivalsMode ? S.codenames.setup.hostHintRivals : S.codenames.setup.hostHint}
+            </AppText>
+            <View style={styles.toggleRow}>
+              <Icon name="drink" size={22} color={colors.ink} />
+              <AppText variant="bodyStrong" style={styles.flex}>
+                {S.codenames.setup.drinkingToggle}
+              </AppText>
+              <Switch
+                value={drinkingMode}
+                accessibilityLabel={S.codenames.setup.drinkingToggle}
+                trackColor={{ false: colors.line, true: theme.accent }}
+                thumbColor={colors.card}
+                onValueChange={async (checked) => {
+                  setDrinkingMode(checked);
+                  try {
+                    // Save to local storage
+                    await storage.setItem('drinkingMode', checked.toString());
+
+                    // Save to Firestore room data so all players see it
+                    if (room && room.id) {
+                      const roomRef = doc(db, 'CodenamesRoom', room.id);
+                      await updateDoc(roomRef, {
+                        drinking_mode: checked
+                      });
+                      console.log('✅ Drinking mode updated:', checked);
+                    }
+                  } catch (error) {
+                    console.error('Error saving drinking mode:', error);
+                    setDrinkingMode(!checked); // Revert on error
+                    Alert.alert(S.codenames.setup.error, S.codenames.setup.drinkingFailed);
+                  }
+                }}
+              />
+            </View>
+          </Card>
+        )}
+
+        {!isHost && (
+          <View style={styles.section}>
+            <AppText variant="subtitle">{S.codenames.setup.hello(currentPlayerName)}</AppText>
+            {drinkingMode ? <Badge label={S.codenames.setup.drinkingActive} icon="drink" tone="gold" /> : null}
+            <AppText color={colors.inkSoft}>
+              {isRivalsMode ? S.codenames.setup.waitingAuto : S.codenames.setup.chooseRole}
+            </AppText>
           </View>
         )}
 
-        {/* Rules Modal */}
-        <RulesModal
-          visible={showRulesModal}
-          onClose={() => setShowRulesModal(false)}
-          variant="codenames"
-        />
-
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>👥 הגדרת קבוצות</Text>
+        {!isRivalsMode && (
+          <View style={styles.section}>
+            {renderTeam('red')}
+            {renderTeam('blue')}
           </View>
+        )}
 
-          <View style={styles.cardContent}>
-            {isHost && (
-              <View style={styles.hostInfo}>
-                <Text style={styles.hostText}>👑 שלום, {currentPlayerName}! (מארח)</Text>
-                <Text style={styles.hostSubtext}>
-                  {isRivalsMode
-                    ? 'במצב יריבים, השיבוץ יהיה אוטומטי בתחילת המשחק'
-                    : 'כל קבוצה צריכה מרגל אחד ולפחות מנחש אחד'}
-                </Text>
-                <View style={styles.drinkingModeContainer}>
-                  <Text style={styles.drinkingModeLabel}>🔞 מצב משחקי שתייה</Text>
-                  <Switch 
-                    value={drinkingMode} 
-                    onValueChange={async (checked) => {
-                      setDrinkingMode(checked);
-                      try {
-                        // Save to local storage
-                        await storage.setItem('drinkingMode', checked.toString());
-                        
-                        // Save to Firestore room data so all players see it
-                        if (room && room.id) {
-                          const roomRef = doc(db, 'CodenamesRoom', room.id);
-                          await updateDoc(roomRef, {
-                            drinking_mode: checked
-                          });
-                          console.log('✅ Drinking mode updated:', checked);
-                        }
-                      } catch (error) {
-                        console.error('Error saving drinking mode:', error);
-                        setDrinkingMode(!checked); // Revert on error
-                        Alert.alert('שגיאה', 'לא הצלחנו לעדכן את מצב השתייה');
-                      }
-                    }} 
-                  />
-                  <Text style={styles.drinkingModeLabel}>🍺</Text>
+        {isRivalsMode && (
+          <Card tone="tint" style={styles.section}>
+            <View style={styles.titleRow}>
+              <Icon name="hourglass" size={24} color={colors.inkSoft} />
+              <AppText variant="title">{S.codenames.setup.rivalsWaitingTitle}</AppText>
+            </View>
+            <AppText color={colors.inkSoft}>{S.codenames.setup.rivalsWaitingSub}</AppText>
+          </Card>
+        )}
+
+        {isHost && (
+          <View style={styles.section}>
+            <Button
+              title={S.codenames.setup.startGame}
+              icon="play"
+              onPress={startGame}
+              disabled={!canStart && !isRivalsMode}
+              fullWidth
+            />
+            {canStart && !isRivalsMode && (
+              <Badge label={S.codenames.setup.ready} icon="checkCircle" tone="success" />
+            )}
+            {!canStart && !isRivalsMode && missingRequirements.length > 0 && (
+              <View style={styles.warning}>
+                <View style={styles.titleRow}>
+                  <Icon name="alert" size={22} color={colors.dangerDeep} />
+                  <AppText variant="bodyStrong" color={colors.dangerDeep}>
+                    {S.codenames.setup.cannotStart}
+                  </AppText>
                 </View>
+                <AppText variant="caption" color={colors.inkSoft}>{S.codenames.setup.missingLabel}</AppText>
+                {missingRequirements.map((req, idx) => (
+                  <AppText key={idx} color={colors.ink}>
+                    • {req}
+                  </AppText>
+                ))}
               </View>
             )}
-
-            {!isHost && drinkingMode && (
-              <View style={styles.drinkingModeBadge}>
-                <Text style={styles.drinkingModeBadgeText}>🍺 מצב שתייה פעיל</Text>
-              </View>
-            )}
-
-            {!isHost && !drinkingMode && (
-              <View style={styles.guestInfo}>
-                <Text style={styles.guestText}>שלום, {currentPlayerName}!</Text>
-                <Text style={styles.guestSubtext}>
-                  {isRivalsMode ? 'ממתין לשיבוץ אוטומטי...' : 'בחר קבוצה ותפקיד'}
-                </Text>
-              </View>
-            )}
-
-            {!isRivalsMode && (
-              <View style={styles.teamsContainerSideBySide}>
-                {/* Red Team */}
-                <View style={styles.teamCardShrunk}>
-                  <View style={[styles.teamHeader, styles.redTeamHeader]}>
-                    <Text style={styles.teamTitle}>קבוצה אדומה 🔴</Text>
-                  </View>
-                  <View style={styles.teamContent}>
-                    <View style={styles.roleSection}>
-                      <Text style={styles.roleLabel}>👁️ מרגל (נותן רמזים)</Text>
-                      <View style={styles.roleDisplay}>
-                        {room.red_team.spymaster ? (
-                          <View style={styles.playerRow}>
-                            <Text style={styles.playerName}>{typeof room.red_team.spymaster === 'string' ? room.red_team.spymaster : String(room.red_team.spymaster || '')}</Text>
-                            {playerRole?.team === 'red' && playerRole?.role === 'spymaster' && (
-                              <View style={styles.youBadge}>
-                                <Text style={styles.youBadgeText}>אתה כאן</Text>
-                              </View>
-                            )}
-                          </View>
-                        ) : (
-                          <Text style={styles.waitingText}>ממתין למרגל...</Text>
-                        )}
-                      </View>
-                      {(!playerRole || playerRole.team !== 'red' || playerRole.role !== 'spymaster') && (
-                        <TouchableOpacity
-                          style={[styles.joinButton, styles.joinButtonOutline]}
-                          onPress={() => joinTeam('red', 'spymaster')}
-                          disabled={room.red_team.spymaster !== '' && room.red_team.spymaster !== currentPlayerName}
-                        >
-                          <Text style={styles.joinButtonText}>הצטרף כמרגל</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-
-                    <View style={styles.roleSection}>
-                      <Text style={styles.roleLabel}>👥 מנחשים ({room.red_team.guessers.length})</Text>
-                      <View style={styles.roleDisplay}>
-                        {room.red_team.guessers.length > 0 ? (
-                          room.red_team.guessers
-                            .filter((player) => player != null)
-                            .map((player, idx) => {
-                              const playerName = typeof player === 'string' ? player : String(player || '');
-                              return (
-                                <View key={`red-guesser-${idx}`} style={styles.playerRow}>
-                                  <Text style={styles.playerName}>{playerName}</Text>
-                                  {playerName === currentPlayerName && (
-                                    <View style={styles.youBadge}>
-                                      <Text style={styles.youBadgeText}>אתה כאן</Text>
-                                    </View>
-                                  )}
-                                </View>
-                              );
-                            })
-                        ) : (
-                          <Text style={styles.waitingText}>ממתין למנחשים...</Text>
-                        )}
-                      </View>
-                      {(!playerRole || playerRole.team !== 'red' || playerRole.role !== 'guesser') && (
-                        <TouchableOpacity
-                          style={[styles.joinButton, styles.joinButtonOutline]}
-                          onPress={() => joinTeam('red', 'guesser')}
-                        >
-                          <Text style={styles.joinButtonText}>הצטרף כמנחש</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  </View>
-                </View>
-
-                {/* Blue Team */}
-                <View style={styles.teamCardShrunk}>
-                  <View style={[styles.teamHeader, styles.blueTeamHeader]}>
-                    <Text style={styles.teamTitle}>קבוצה כחולה 🔵</Text>
-                  </View>
-                  <View style={styles.teamContent}>
-                    <View style={styles.roleSection}>
-                      <Text style={styles.roleLabel}>👁️ מרגל (נותן רמזים)</Text>
-                      <View style={styles.roleDisplay}>
-                        {room.blue_team.spymaster ? (
-                          <View style={styles.playerRow}>
-                            <Text style={styles.playerName}>{typeof room.blue_team.spymaster === 'string' ? room.blue_team.spymaster : String(room.blue_team.spymaster || '')}</Text>
-                            {playerRole?.team === 'blue' && playerRole?.role === 'spymaster' && (
-                              <View style={styles.youBadge}>
-                                <Text style={styles.youBadgeText}>אתה כאן</Text>
-                              </View>
-                            )}
-                          </View>
-                        ) : (
-                          <Text style={styles.waitingText}>ממתין למרגל...</Text>
-                        )}
-                      </View>
-                      {(!playerRole || playerRole.team !== 'blue' || playerRole.role !== 'spymaster') && (
-                        <TouchableOpacity
-                          style={[styles.joinButton, styles.joinButtonOutline]}
-                          onPress={() => joinTeam('blue', 'spymaster')}
-                          disabled={room.blue_team.spymaster !== '' && room.blue_team.spymaster !== currentPlayerName}
-                        >
-                          <Text style={styles.joinButtonText}>הצטרף כמרגל</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-
-                    <View style={styles.roleSection}>
-                      <Text style={styles.roleLabel}>👥 מנחשים ({room.blue_team.guessers.length})</Text>
-                      <View style={styles.roleDisplay}>
-                        {room.blue_team.guessers.length > 0 ? (
-                          room.blue_team.guessers
-                            .filter((player) => player != null)
-                            .map((player, idx) => {
-                              const playerName = typeof player === 'string' ? player : String(player || '');
-                              return (
-                                <View key={`blue-guesser-${idx}`} style={styles.playerRow}>
-                                  <Text style={styles.playerName}>{playerName}</Text>
-                                  {playerName === currentPlayerName && (
-                                    <View style={styles.youBadge}>
-                                      <Text style={styles.youBadgeText}>אתה כאן</Text>
-                                    </View>
-                                  )}
-                                </View>
-                              );
-                            })
-                        ) : (
-                          <Text style={styles.waitingText}>ממתין למנחשים...</Text>
-                        )}
-                      </View>
-                      {(!playerRole || playerRole.team !== 'blue' || playerRole.role !== 'guesser') && (
-                        <TouchableOpacity
-                          style={[styles.joinButton, styles.joinButtonOutline]}
-                          onPress={() => joinTeam('blue', 'guesser')}
-                        >
-                          <Text style={styles.joinButtonText}>הצטרף כמנחש</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  </View>
-                </View>
-              </View>
-            )}
-
             {isRivalsMode && (
-              <View style={styles.rivalsWaiting}>
-                <Text style={styles.rivalsIcon}>⚔️</Text>
-                <Text style={styles.rivalsTitle}>ממתין לשחקנים...</Text>
-                <Text style={styles.rivalsSubtext}>
-                  השיבוץ לקבוצות יקרה אוטומטית ברגע שיהיו מספיק שחקנים
-                </Text>
-              </View>
-            )}
-
-            {isHost && (
-              <View style={styles.startSection}>
-                <TouchableOpacity
-                  style={[styles.startButton, !canStart && !isRivalsMode && styles.startButtonDisabled]}
-                  onPress={startGame}
-                  disabled={!canStart && !isRivalsMode}
-                >
-                  <Text style={styles.startButtonIcon}>▶️</Text>
-                  <Text style={styles.startButtonText}>התחל משחק!</Text>
-                </TouchableOpacity>
-
-                {canStart && !isRivalsMode && (
-                  <View style={styles.readyBadge}>
-                    <View style={styles.readyDot} />
-                    <Text style={styles.readyText}>✅ כל התנאים מתקיימים - מוכן להתחלה!</Text>
-                  </View>
-                )}
-
-                {!canStart && !isRivalsMode && missingRequirements.length > 0 && (
-                  <View style={styles.warningBadge}>
-                    <Text style={styles.warningIcon}>⚠️</Text>
-                    <View style={styles.warningContent}>
-                      <Text style={styles.warningTitle}>לא ניתן להתחיל עדיין</Text>
-                      <Text style={styles.warningSubtext}>חסר:</Text>
-                      {missingRequirements.map((req, idx) => (
-                        <Text key={idx} style={styles.warningItem}>• {req}</Text>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-                {isRivalsMode && (
-                  <View style={styles.rivalsInfoBadge}>
-                    <Text style={styles.rivalsInfoText}>🎮 במצב יריבים - השיבוץ יקרה אוטומטית</Text>
-                  </View>
-                )}
-              </View>
+              <Badge label={S.codenames.setup.rivalsInfo} icon="info" tone="neutral" />
             )}
           </View>
-        </View>
-      </ScrollView>
-      <BannerAd />
-    </View>
+        )}
+      </Card>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  flex: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
   },
-  loadingContainer: {
-    flex: 1,
+  flexShrink: {
+    flexShrink: 1,
+  },
+  centered: {
     justifyContent: 'center',
     alignItems: 'center',
+    gap: spacing.md,
   },
-  loadingText: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    marginTop: 16,
+  section: {
+    gap: spacing.md,
   },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 16,
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-    marginBottom: 16,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    paddingHorizontal: 4,
-    position: 'relative',
-  },
-  headerCenter: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 1,
-    gap: 4,
-  },
-  headerRight: {
+  titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginLeft: 'auto',
-    zIndex: 2,
+    gap: spacing.sm,
   },
-  copyLinkButtonCompact: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  copyLinkIcon: {
-    fontSize: 14,
-  },
-  exitButtonHeader: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    minWidth: 60,
-  },
-  roomCodeContainer: {
+  toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 8,
-  },
-  roomCodeLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  roomCodeBadge: {
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  roomCodeText: {
-    color: '#2563EB',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  copyIcon: {
-    fontSize: 16,
-    color: '#6B7280',
-  },
-  copyButton: {
-    padding: 4,
-  },
-  copyButtonText: {
-    fontSize: 18,
-  },
-  rivalsBadgeWrapper: {
-    alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: 8,
-  },
-  rivalsBadge: {
-    backgroundColor: '#F97316',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  rivalsBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 4,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  cardHeader: {
-    backgroundColor: '#D9C3A5', // Codenames theme color - חום בהיר
-    padding: 16,
-  },
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    textAlign: 'center',
-  },
-  cardContent: {
-    padding: 16,
-    gap: 16,
-  },
-  hostInfo: {
-    backgroundColor: '#F5F0E8',
-    borderWidth: 1,
-    borderColor: '#D9C3A5', // Codenames theme color
-    borderRadius: 16,
-    padding: 16,
-    alignItems: 'center',
-    gap: 8,
-  },
-  hostText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2C3E50',
-  },
-  hostSubtext: {
-    fontSize: 14,
-    color: '#374151',
-    textAlign: 'center',
-  },
-  drinkingModeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  drinkingModeLabel: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#374151',
-  },
-  drinkingModeBadge: {
-    backgroundColor: '#F97316',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    alignSelf: 'center',
-  },
-  drinkingModeBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  guestInfo: {
-    backgroundColor: '#F5F0E8',
-    borderWidth: 1,
-    borderColor: '#D9C3A5', // Codenames theme color
-    borderRadius: 16,
-    padding: 16,
-    alignItems: 'center',
-  },
-  guestText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2C3E50',
-  },
-  guestSubtext: {
-    fontSize: 14,
-    color: '#374151',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  teamsContainer: {
-    gap: 16,
-  },
-  teamsContainerSideBySide: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'flex-start',
-  },
-  teamCardShrunk: {
-    flex: 1,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderRadius: 20,
-    overflow: 'hidden',
-    maxWidth: '48%',
+    gap: spacing.sm,
+    minHeight: 48,
   },
   teamCard: {
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderRadius: 20,
+    borderRadius: radii.lg,
+    borderWidth: 3,
+    borderBottomWidth: 6,
+    backgroundColor: colors.card,
     overflow: 'hidden',
   },
   teamHeader: {
-    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
   },
-  redTeamHeader: {
-    backgroundColor: '#EF4444',
-  },
-  blueTeamHeader: {
-    backgroundColor: '#3B82F6',
-  },
-  teamTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    textAlign: 'center',
-  },
-  teamContent: {
-    backgroundColor: '#F9FAFB',
-    padding: 16,
-    gap: 16,
+  teamBody: {
+    gap: spacing.lg,
+    padding: spacing.md,
   },
   roleSection: {
-    gap: 8,
+    gap: spacing.sm,
   },
   roleLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 4,
-  },
-  roleDisplay: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 12,
-    minHeight: 60,
-    gap: 8,
-  },
-  playerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  playerName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  youBadge: {
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  youBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  waitingText: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    fontStyle: 'italic',
-  },
-  joinButton: {
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-  },
-  joinButtonOutline: {
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    backgroundColor: 'transparent',
-  },
-  joinButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  rivalsWaiting: {
-    alignItems: 'center',
-    padding: 32,
-    gap: 16,
-    backgroundColor: '#F5F0E8',
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#D9C3A5', // Codenames theme color
-  },
-  rivalsIcon: {
-    fontSize: 64,
-  },
-  rivalsTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-  },
-  rivalsSubtext: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  startSection: {
-    gap: 12,
-  },
-  startButton: {
-    backgroundColor: '#D9C3A5', // Codenames theme color - חום בהיר
-    borderRadius: 16,
-    padding: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+    gap: spacing.xs,
   },
-  startButtonDisabled: {
-    opacity: 0.5,
-  },
-  startButtonIcon: {
-    fontSize: 24,
-  },
-  startButtonText: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  readyBadge: {
+  chips: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F5F0E8',
-    borderWidth: 2,
-    borderColor: '#D9C3A5', // Codenames theme color
-    borderRadius: 16,
-    padding: 12,
-    gap: 8,
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
-  readyDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#D9C3A5', // Codenames theme color
-  },
-  readyText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2C3E50',
-  },
-  warningBadge: {
-    flexDirection: 'row',
-    backgroundColor: '#FEF3C7',
-    borderWidth: 2,
-    borderColor: '#D9C3A5', // Codenames theme color
-    borderRadius: 16,
-    padding: 12,
-    gap: 12,
-  },
-  warningIcon: {
-    fontSize: 24,
-  },
-  warningContent: {
-    flex: 1,
-    gap: 4,
-  },
-  warningTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2C3E50',
-    marginBottom: 4,
-  },
-  warningSubtext: {
-    fontSize: 12,
-    color: '#374151',
-  },
-  warningItem: {
-    fontSize: 14,
-    color: '#374151',
-  },
-  rivalsInfoBadge: {
-    backgroundColor: '#F5F0E8',
-    borderWidth: 2,
-    borderColor: '#D9C3A5', // Codenames theme color
-    borderRadius: 16,
-    padding: 12,
-    alignItems: 'center',
-  },
-  rivalsInfoText: {
-    fontSize: 14,
-    color: '#2C3E50',
+  warning: {
+    gap: spacing.xs,
+    padding: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerTint,
   },
 });

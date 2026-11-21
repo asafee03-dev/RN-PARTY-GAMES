@@ -1,34 +1,16 @@
 import { collection, doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import GradientBackground from '../../components/codenames/GradientBackground';
-import GradientButton from '../../components/codenames/GradientButton';
+import { Alert } from 'react-native';
 import BannerAd from '../../components/shared/BannerAd';
 import { db } from '../../firebase';
 import { generateUniqueRoomCode } from '../../utils/roomManagement';
 import storage from '../../utils/storage';
+import { S } from '../../strings';
+import { GameEntryLayout } from '../../ui';
 
 const TEAM_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
 
-// Custom icon component for speech bubble
-const SpeechBubbleWithQuestion = () => (
-  <View style={customIconStyles.speechBubbleContainer}>
-    <Text style={customIconStyles.speechBubble}>💬</Text>
-  </View>
-);
 
-const customIconStyles = StyleSheet.create({
-  speechBubbleContainer: {
-    width: 48,
-    height: 48,
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  speechBubble: {
-    fontSize: 48,
-  },
-});
 
 const BASE_TEAMS = [
   { name: "קבוצה אדומה", position: 0, color: TEAM_COLORS[0], players: [] },
@@ -72,7 +54,7 @@ export default function AliasHomeScreen({ navigation, route }) {
     }
 
     if (!playerName.trim()) {
-      setError('אנא הכנס שם שחקן');
+      setError(S.entry.errors.nameRequired);
       return;
     }
 
@@ -97,7 +79,7 @@ export default function AliasHomeScreen({ navigation, route }) {
       const newRoomCode = await generateUniqueRoomCode('GameRoom', generateRoomCode);
       
       if (!newRoomCode) {
-        setError('שגיאה ביצירת קוד חדר ייחודי. נסה שוב.');
+        setError(S.entry.errors.uniqueCodeFailed);
         isCreatingRoomRef.current = false;
         setIsCreating(false);
         return;
@@ -146,17 +128,17 @@ export default function AliasHomeScreen({ navigation, route }) {
       isCreatingRoomRef.current = false;
       setIsCreating(false);
 
-      let errorMessage = 'שגיאה ביצירת החדר. נסה שוב.';
+      let errorMessage = S.entry.errors.createFailed;
       if (error.code === 'unavailable' || error.code === 'failed-precondition' || error.message?.includes('offline')) {
-        errorMessage = 'Firestore לא מחובר. אנא ודא ש:\n1. Firestore מופעל ב-Firebase Console\n2. Firestore Rules מאפשרים כתיבה\n3. יש חיבור לאינטרנט';
+        errorMessage = S.entry.errors.notConnected;
       } else if (error.code === 'permission-denied') {
-        errorMessage = 'אין הרשאה לכתוב ל-Firestore. אנא בדוק את ה-Rules ב-Firebase Console.';
+        errorMessage = S.entry.errors.permissionWrite;
       } else if (error.code === 'not-found') {
-        errorMessage = 'Firestore לא נמצא. אנא ודא ש-Firestore מופעל בפרויקט.';
+        errorMessage = S.entry.errors.notFound;
       }
 
       setError(errorMessage);
-      Alert.alert('שגיאה', errorMessage + '\n\nפרטי השגיאה:\n' + error.message);
+      Alert.alert(S.common.error, errorMessage + S.entry.errors.detailsPrefix + error.message);
     } finally {
       setTimeout(() => {
         isCreatingRoomRef.current = false;
@@ -167,11 +149,11 @@ export default function AliasHomeScreen({ navigation, route }) {
 
   const joinRoom = async () => {
     if (!playerName.trim()) {
-      setError('אנא הכנס שם שחקן');
+      setError(S.entry.errors.nameRequired);
       return;
     }
     if (!roomCode.trim()) {
-      setError('אנא הכנס קוד חדר');
+      setError(S.entry.errors.codeRequired);
       return;
     }
 
@@ -192,7 +174,7 @@ export default function AliasHomeScreen({ navigation, route }) {
         
         // If game is playing or finished and player is not in room, show error
         if ((roomData.game_status === 'playing' || roomData.game_status === 'waiting' || roomData.game_status === 'finished') && !playerInRoom) {
-          setError('המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+          setError(S.entry.errors.gameStarted);
           return;
         }
       }
@@ -228,280 +210,28 @@ export default function AliasHomeScreen({ navigation, route }) {
   };
 
   return (
-    <GradientBackground variant="brightBlue">
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.container}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.header}>
-            <GradientButton
-              title="← חזרה"
-              onPress={goBack}
-              variant="alias"
-              style={styles.backButton}
-            />
-          </View>
-
-          <View style={styles.cardContainer}>
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <View style={styles.iconContainer}>
-                  <SpeechBubbleWithQuestion />
-                </View>
-                <Text style={styles.cardTitle}>אליאב</Text>
-                <Text style={styles.cardSubtitle}>משחק ההסברות המהיר!</Text>
-              </View>
-
-              <View style={styles.cardContent}>
-                {error ? (
-                  <View style={styles.errorContainer}>
-                    <Text style={styles.errorText}>{error}</Text>
-                  </View>
-                ) : null}
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>השם שלך</Text>
-                  <TextInput
-                    value={playerName}
-                    onChangeText={(text) => {
-                      setPlayerName(text);
-                      setError('');
-                    }}
-                    placeholder="הכנס שם..."
-                    placeholderTextColor="#999"
-                    style={styles.input}
-                    autoCapitalize="none"
-                  />
-                </View>
-
-                <GradientButton
-                  title={isCreating ? 'יוצר חדר...' : 'צור משחק חדש'}
-                  onPress={createRoom}
-                  variant="alias"
-                  style={styles.createButton}
-                  disabled={isCreating}
-                >
-                  {isCreating && <ActivityIndicator color="#FFFFFF" style={{ marginLeft: 8 }} />}
-                </GradientButton>
-
-                <View style={styles.divider}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>או</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>קוד חדר</Text>
-                  <TextInput
-                    value={roomCode}
-                    onChangeText={(text) => {
-                      setRoomCode(text.toUpperCase());
-                      setError('');
-                    }}
-                    placeholder="הכנס קוד..."
-                    placeholderTextColor="#999"
-                    style={styles.input}
-                    autoCapitalize="characters"
-                    maxLength={4}
-                  />
-                </View>
-
-                <GradientButton
-                  title="הצטרף למשחק"
-                  onPress={joinRoom}
-                  variant="alias"
-                  style={styles.joinButton}
-                />
-
-                <View style={styles.instructionsContainer}>
-                  <Text style={styles.instructionsTitle}>📋 איך משחקים?</Text>
-                  <View style={styles.instructionsList}>
-                    <Text style={styles.instructionItem}>
-                      <Text style={styles.instructionNumber}>1. </Text>
-                      חלקו לקבוצות והתחילו סבב
-                    </Text>
-                    <Text style={styles.instructionItem}>
-                      <Text style={styles.instructionNumber}>2. </Text>
-                      הסבירו מילים בלי להשתמש במילה עצמה
-                    </Text>
-                    <Text style={styles.instructionItem}>
-                      <Text style={styles.instructionNumber}>3. </Text>
-                      יש לכם 45 שניות לכל סבב!
-                    </Text>
-                    <Text style={styles.instructionItem}>
-                      <Text style={styles.instructionNumber}>4. </Text>
-                      הקבוצה הראשונה שמגיעה לסוף הלוח מנצחת!
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-          </View>
-        </ScrollView>
-        <BannerAd />
-      </KeyboardAvoidingView>
-    </GradientBackground>
+    <GameEntryLayout
+      icon="alias"
+      title={S.alias.entry.title}
+      subtitle={S.alias.entry.subtitle}
+      playerName={playerName}
+      onChangePlayerName={(text) => {
+        setPlayerName(text);
+        setError('');
+      }}
+      roomCode={roomCode}
+      onChangeRoomCode={(text) => {
+        setRoomCode(text.toUpperCase());
+        setError('');
+      }}
+      roomCodeMaxLength={4}
+      error={error}
+      isCreating={isCreating}
+      onCreate={createRoom}
+      onJoin={joinRoom}
+      onBack={goBack}
+      steps={S.alias.entry.steps}
+      footer={<BannerAd />}
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 20,
-    paddingTop: 50,
-    paddingBottom: 20,
-  },
-  header: {
-    marginBottom: 20,
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-  },
-  cardContainer: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  card: {
-    width: '100%',
-    maxWidth: 500,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  cardHeader: {
-    backgroundColor: '#4FA8FF', // Alias theme color - כחול בהיר
-    padding: 24,
-    paddingBottom: 60,
-    alignItems: 'center',
-    position: 'relative',
-  },
-  iconContainer: {
-    position: 'absolute',
-    bottom: -30,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 50,
-    width: 80,
-    height: 80,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  iconEmoji: {
-    fontSize: 48,
-  },
-  cardTitle: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  cardSubtitle: {
-    fontSize: 18,
-    color: '#FFFFFF',
-    opacity: 0.9,
-  },
-  cardContent: {
-    padding: 24,
-    paddingTop: 32,
-    gap: 16,
-  },
-  errorContainer: {
-    backgroundColor: '#FFEBEE',
-    borderWidth: 2,
-    borderColor: '#F44336',
-    borderRadius: 16,
-    padding: 16,
-  },
-  errorText: {
-    color: '#C62828',
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  inputGroup: {
-    gap: 8,
-  },
-  label: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#2C3E50',
-    textAlign: 'right',
-  },
-  input: {
-    backgroundColor: '#F5F5F5',
-    borderRadius: 16,
-    padding: 16,
-    fontSize: 18,
-    textAlign: 'right',
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-  },
-  createButton: {
-    width: '100%',
-    marginTop: 8,
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 8,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E0E0E0',
-  },
-  dividerText: {
-    marginHorizontal: 16,
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '600',
-  },
-  joinButton: {
-    width: '100%',
-  },
-  instructionsContainer: {
-    backgroundColor: '#F3E5F5',
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 8,
-    borderWidth: 2,
-    borderColor: '#E1BEE7',
-  },
-  instructionsTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#2C3E50',
-    marginBottom: 12,
-    textAlign: 'right',
-  },
-  instructionsList: {
-    gap: 8,
-  },
-  instructionItem: {
-    fontSize: 16,
-    color: '#424242',
-    textAlign: 'right',
-    lineHeight: 24,
-  },
-  instructionNumber: {
-    fontWeight: '700',
-    color: '#9C27B0',
-  },
-});

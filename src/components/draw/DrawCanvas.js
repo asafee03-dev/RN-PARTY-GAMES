@@ -51,7 +51,9 @@ const DrawCanvas = forwardRef(({
   });
 
   const [currentPath, setCurrentPath] = useState(null);
-  const [currentPoints, setCurrentPoints] = useState([]);
+  const currentPointsRef = useRef([]); // points of the stroke being drawn (not rendered, so no state)
+  const pathsRef = useRef([]); // latest completed paths, for callbacks outside state updaters
+  const latestPropsRef = useRef({}); // latest callbacks/flags - the PanResponder is created once
   const isDrawingRef = useRef(false);
   const justCompletedStrokeRef = useRef(false);
   const svgRef = useRef(null);
@@ -62,11 +64,16 @@ const DrawCanvas = forwardRef(({
   
   // Update refs when props change
   useEffect(() => {
+    latestPropsRef.current = { useViteAPI, onStrokeComplete, onDrawingChange };
     disabledRef.current = isDisabled;
     currentColorRef.current = color;
     currentBrushSizeRef.current = brushSize;
     currentToolTypeRef.current = toolType;
-  }, [isDisabled, color, brushSize, toolType]);
+  }, [isDisabled, color, brushSize, toolType, useViteAPI, onStrokeComplete, onDrawingChange]);
+
+  useEffect(() => {
+    pathsRef.current = paths;
+  }, [paths]);
 
   // Update paths when strokes prop changes (Vite API)
   // Only update if we're not currently drawing to prevent erasing strokes
@@ -193,7 +200,7 @@ const DrawCanvas = forwardRef(({
           });
         }
         
-        setCurrentPoints([point]);
+        currentPointsRef.current = [point];
         
         const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
         const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
@@ -212,92 +219,59 @@ const DrawCanvas = forwardRef(({
         const { locationX, locationY } = evt.nativeEvent;
         const point = { x: locationX, y: locationY };
         
-        setCurrentPoints(prev => {
-          const newPoints = [...prev, point];
-          // Don't limit points - allow full line drawing
-          
-          const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
-          const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
-          
-          const pathString = pointsToSmoothPath(newPoints);
-          setCurrentPath({
-            pathString,
-            color: strokeColor,
-            width: strokeWidth,
-          });
-          
-          return newPoints;
+        const newPoints = [...currentPointsRef.current, point];
+        currentPointsRef.current = newPoints;
+
+        const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
+        const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
+
+        setCurrentPath({
+          pathString: pointsToSmoothPath(newPoints),
+          color: strokeColor,
+          width: strokeWidth,
         });
       },
       onPanResponderRelease: () => {
         if (disabledRef.current || !isDrawingRef.current) return;
-        
-        setCurrentPoints(prevPoints => {
-          if (prevPoints.length === 0) {
-            isDrawingRef.current = false;
-            setCurrentPath(null);
-            return [];
-          }
-          
-          const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
-          const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
-          
-          const finalPathString = pointsToSmoothPath(prevPoints);
-          const newPath = {
-            pathString: finalPathString,
-            color: strokeColor,
-            width: strokeWidth,
-            // Save as path string only to save space, not points
-            points: [],
-          };
-          
-          // Update paths state - append new path to existing paths
-          // Always use prev (current paths state) as base to preserve all existing strokes
-          setPaths(prev => {
-            // Simply append the new path to existing paths
-            const updatedPaths = [...prev, newPath];
-            
-            // Set flag to prevent useEffect from overwriting this update
-            justCompletedStrokeRef.current = true;
-            // Reset flag after a short delay to allow useEffect to see it once
-            setTimeout(() => {
-              justCompletedStrokeRef.current = false;
-            }, 100);
-            
-            // Vite API: call onStrokeComplete with single stroke
-            if (useViteAPI && onStrokeComplete) {
-              onStrokeComplete({
-                path: finalPathString,
-                color: strokeColor,
-                width: strokeWidth,
-                // Save as path string only to save space
-                points: [],
-              });
-            }
-            
-            // Legacy API: call onDrawingChange with all strokes
-            if (!useViteAPI && onDrawingChange) {
-              const strokeData = updatedPaths.map(p => ({
-                path: p.pathString,
-                color: p.color,
-                width: p.width,
-                // Save as path string only to save space
-                points: [],
-              }));
-              onDrawingChange(strokeData);
-            }
-            
-            return updatedPaths;
-          });
-          
-          setCurrentPath(null);
-          isDrawingRef.current = false;
-          return [];
-        });
+
+        // Everything with side effects (Firestore callbacks, refs, timers) runs
+        // here, NOT inside a state updater: React may call updaters twice, which
+        // would send the same stroke twice.
+        const points = currentPointsRef.current;
+        currentPointsRef.current = [];
+        isDrawingRef.current = false;
+        setCurrentPath(null);
+        if (points.length === 0) return;
+
+        const strokeColor = currentToolTypeRef.current === 'eraser' ? '#FFFFFF' : currentColorRef.current;
+        const strokeWidth = currentToolTypeRef.current === 'eraser' ? currentBrushSizeRef.current * 2 : currentBrushSizeRef.current;
+        const finalPathString = pointsToSmoothPath(points);
+        // Save as path string only to save space, not points
+        const newPath = { pathString: finalPathString, color: strokeColor, width: strokeWidth, points: [] };
+
+        const updatedPaths = [...pathsRef.current, newPath];
+        pathsRef.current = updatedPaths;
+        setPaths(updatedPaths);
+
+        // Prevent the strokes-prop effect from overwriting this local update
+        justCompletedStrokeRef.current = true;
+        setTimeout(() => {
+          justCompletedStrokeRef.current = false;
+        }, 100);
+
+        const { useViteAPI: viteApi, onStrokeComplete: strokeDone, onDrawingChange: drawingChanged } = latestPropsRef.current;
+        if (viteApi && strokeDone) {
+          // Vite API: one stroke at a time
+          strokeDone({ path: finalPathString, color: strokeColor, width: strokeWidth, points: [] });
+        }
+        if (!viteApi && drawingChanged) {
+          // Legacy API: all strokes
+          drawingChanged(updatedPaths.map((p) => ({ path: p.pathString, color: p.color, width: p.width, points: [] })));
+        }
       },
       onPanResponderTerminate: () => {
         setCurrentPath(null);
-        setCurrentPoints([]);
+        currentPointsRef.current = [];
         isDrawingRef.current = false;
       },
     })
@@ -343,7 +317,8 @@ const DrawCanvas = forwardRef(({
     clearCanvas: () => {
       setPaths([]);
       setCurrentPath(null);
-      setCurrentPoints([]);
+      currentPointsRef.current = [];
+      pathsRef.current = [];
       isDrawingRef.current = false;
       if (!useViteAPI && onDrawingChange) {
         onDrawingChange([]);

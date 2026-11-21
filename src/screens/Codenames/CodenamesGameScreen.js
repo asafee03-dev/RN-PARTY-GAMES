@@ -1,21 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Modal, Clipboard, Platform } from 'react-native';
+import { View, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { db, waitForFirestoreReady } from '../../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot, query, collection, where, getDocs, runTransaction, arrayRemove } from 'firebase/firestore';
 import CodenamesBoard from '../../components/codenames/CodenamesBoard';
 import ClueInput from '../../components/codenames/ClueInput';
 import TeamInfo from '../../components/codenames/TeamInfo';
 import RivalsTimer from '../../components/codenames/RivalsTimer';
 import TeamWordsPanel from '../../components/codenames/TeamWordsPanel';
-import GradientButton from '../../components/codenames/GradientButton';
 import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import RulesModal from '../../components/shared/RulesModal';
 import storage from '../../utils/storage';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
+import { S } from '../../strings';
+import { colors, radii, spacing, useGameTheme } from '../../theme';
+import { AppText, Badge, Button, Card, Dialog, Icon, Screen, feedback } from '../../ui';
+import { getTeamStyle } from '../../components/codenames/teamStyle';
 
 // ---------------------------------------------------------------------------
 // Pure helpers used inside transactions, so every decision is made from the
@@ -97,6 +99,13 @@ export default function CodenamesGameScreen({ navigation, route }) {
   useEffect(() => {
     currentPlayerNameRef.current = currentPlayerName;
   }, [currentPlayerName]);
+
+  const theme = useGameTheme();
+
+  // Haptic cue when the game ends (no-op on web)
+  useEffect(() => {
+    if (room?.game_status === 'finished') feedback.success();
+  }, [room?.game_status]);
 
   useEffect(() => {
     const initializeRoom = async () => {
@@ -555,6 +564,58 @@ export default function CodenamesGameScreen({ navigation, route }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  /**
+   * Called when a player leaves a running game. Without this a spymaster who
+   * leaves keeps the role forever and their team can never get a clue.
+   * - guesser leaves: removed from the team (only that array changes).
+   * - spymaster leaves: the first guesser is promoted to spymaster.
+   * - the team would be left without a guesser (or spymaster): it forfeits and
+   *   the other team wins, so the game never hangs.
+   * Runs in a transaction and writes only the changed fields. Rivals mode is
+   * deliberately not touched.
+   */
+  const leaveGameRole = async () => {
+    if (!room || !room.id || !currentPlayerName) return;
+    try {
+      const roomRef = doc(db, 'CodenamesRoom', room.id);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(roomRef);
+        if (!snap.exists()) return;
+        const fresh = snap.data();
+        if (fresh.game_status !== 'playing' || fresh.game_mode === 'rivals') return;
+
+        const role = getRoleIn(fresh, currentPlayerName);
+        if (!role) return;
+        const teamKey = role.team + '_team';
+        const otherTeam = role.team === 'red' ? 'blue' : 'red';
+        const guessers = (fresh[teamKey]?.guessers || []).filter((n) => n && n !== currentPlayerName);
+
+        const forfeit = () =>
+          transaction.update(roomRef, { game_status: 'finished', winner_team: otherTeam, guesses_remaining: 0 });
+
+        if (role.role === 'guesser') {
+          if (guessers.length === 0) {
+            forfeit();
+          } else {
+            transaction.update(roomRef, { [teamKey + '.guessers']: arrayRemove(currentPlayerName) });
+          }
+        } else if (guessers.length < 2) {
+          // Promoting the only guesser would leave the team with nobody to guess
+          forfeit();
+        } else {
+          const promoted = guessers[0];
+          transaction.update(roomRef, {
+            [teamKey + '.spymaster']: promoted,
+            [teamKey + '.guessers']: arrayRemove(promoted, currentPlayerName),
+          });
+        }
+      });
+      console.log('✅ Left Codenames team role');
+    } catch (error) {
+      console.error('❌ Error leaving team role:', error);
+    }
+  };
+
   const goBack = async () => {
     // Show interstitial ad before navigating to main menu
     showInterstitialIfAvailable(async () => {
@@ -564,6 +625,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
         unsubscribeRef.current = null;
       }
       
+      await leaveGameRole();
       await clearCurrentRoom();
       
       // Navigate to main menu using reset to clear the stack
@@ -644,7 +706,7 @@ export default function CodenamesGameScreen({ navigation, route }) {
       });
     } catch (error) {
       console.error('❌ Error resetting game:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+      Alert.alert(S.codenames.game.error, S.codenames.game.resetFailed);
       setForceCloseModal(false);
     }
   };
@@ -659,36 +721,46 @@ export default function CodenamesGameScreen({ navigation, route }) {
     }
   };
 
-  const THEME_COLOR = '#D9C3A5'; // חום בהיר - Codenames theme color
-
   if (error) {
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorTitle}>שגיאה בטעינת המשחק</Text>
-        <Text style={styles.errorMessage}>לא הצלחנו לטעון את משחק שם טוב</Text>
-        <TouchableOpacity style={[styles.errorButton, { backgroundColor: THEME_COLOR }]} onPress={() => {
-          const parent = navigation.getParent();
-          if (parent) {
-            parent.reset({
-              index: 0,
-              routes: [{ name: 'Home' }]
-            });
-          } else {
-            navigation.navigate('Home');
-          }
-        }}>
-          <Text style={styles.errorButtonText}>חזרה למסך הבית</Text>
-        </TouchableOpacity>
-      </View>
+      <Screen contentStyle={styles.centered}>
+        <Card style={styles.stateCard}>
+          <Icon name="alert" size={40} color={colors.danger} />
+          <AppText variant="title" align="center">
+            {S.codenames.game.loadErrorTitle}
+          </AppText>
+          <AppText align="center" color={colors.inkSoft}>
+            {S.codenames.game.loadErrorMessage}
+          </AppText>
+          <Button
+            title={S.codenames.game.backHome}
+            icon="home"
+            fullWidth
+            onPress={() => {
+              const parent = navigation.getParent();
+              if (parent) {
+                parent.reset({
+                  index: 0,
+                  routes: [{ name: 'Home' }]
+                });
+              } else {
+                navigation.navigate('Home');
+              }
+            }}
+          />
+        </Card>
+      </Screen>
     );
   }
 
   if (isLoading || !room) {
     return (
-      <LinearGradient colors={['#3B82F6', '#06B6D4', '#14B8A6']} style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#FFFFFF" />
-        <Text style={styles.loadingText}>טוען משחק שם טוב...</Text>
-      </LinearGradient>
+      <Screen contentStyle={styles.centered}>
+        <ActivityIndicator size="large" color={theme.accent} />
+        <AppText variant="subtitle" align="center" color={colors.inkSoft}>
+          {S.codenames.game.loading}
+        </AppText>
+      </Screen>
     );
   }
 
@@ -698,18 +770,19 @@ export default function CodenamesGameScreen({ navigation, route }) {
   const isRivalsMode = room.game_mode === 'rivals';
   const isHost = room.host_name === currentPlayerName;
 
-  const timerDuration = isRivalsMode 
-    ? (room.turn_phase === 'clue' ? 90 : 120) 
+  const timerDuration = isRivalsMode
+    ? (room.turn_phase === 'clue' ? 90 : 120)
     : null;
-  
+
   const myTeamColor = playerRole?.team;
   const redWordsLeft = countWordsLeft('red');
   const blueWordsLeft = countWordsLeft('blue');
+  const turnTeam = getTeamStyle(room.current_turn);
+  const showWinner = !!(room && room.game_status === 'finished' && !forceCloseModal && room.winner_team);
 
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Unified Top Bar */}
+    <Screen
+      header={
         <UnifiedTopBar
           roomCode={roomCode}
           variant="codenames"
@@ -717,555 +790,252 @@ export default function CodenamesGameScreen({ navigation, route }) {
           onRulesPress={() => setShowRulesModal(true)}
           drinkingMode={drinkingMode}
         />
+      }
+    >
+      {drinkingMode && <Badge label={S.common.drinkingMode} icon="drink" tone="gold" />}
 
-        {/* Drinking Mode Badge */}
-        {drinkingMode && (
-          <View style={styles.drinkingBadgeWrapper}>
-            <View style={styles.drinkingBadge}>
-              <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה</Text>
+      <RulesModal
+        visible={showRulesModal}
+        onClose={() => setShowRulesModal(false)}
+        variant="codenames"
+      />
+
+      {/* Drinking Mode Popup */}
+      <Dialog
+        visible={!!room.drinking_popup}
+        icon="drink"
+        title={S.codenames.game.drinkingTitle}
+        onRequestClose={clearDrinkingPopup}
+        actions={<Button title={S.common.continue} onPress={clearDrinkingPopup} fullWidth />}
+      >
+        {room.drinking_popup ? (
+          <>
+            <View style={styles.centerRow}>
+              <Icon name={getTeamStyle(room.drinking_popup.team).icon} size={28} color={getTeamStyle(room.drinking_popup.team).ink} />
+              <AppText variant="title" align="center" style={styles.flexShrink}>
+                {room.drinking_popup.team_name
+                  ? S.codenames.game.drinkingTeamName(room.drinking_popup.team_name)
+                  : S.codenames.game.drinkingTeamColor(room.drinking_popup.team)}
+              </AppText>
             </View>
-          </View>
-        )}
+            <AppText align="center" color={colors.inkSoft}>
+              {S.codenames.game.drinkingSub}
+            </AppText>
+          </>
+        ) : null}
+      </Dialog>
 
-        {/* Rules Modal */}
-        <RulesModal
-          visible={showRulesModal}
-          onClose={() => setShowRulesModal(false)}
-          variant="codenames"
-        />
-
-        {/* Drinking Mode Popup */}
-        {room.drinking_popup && (
-          <Modal
-            visible={true}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={clearDrinkingPopup}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <Text style={styles.modalIcon}>🍺</Text>
-                <Text style={styles.modalTitle}>זמן שתייה!</Text>
-                <Text style={styles.modalMessage}>
-                  {room.drinking_popup.team_name 
-                    ? `הקבוצה של ${room.drinking_popup.team_name} חייבת לשתות 🍺`
-                    : `הקבוצה ה${room.drinking_popup.team === 'red' ? 'אדומה' : 'כחולה'} חייבת לשתות 🍺`}
-                </Text>
-                <Text style={styles.modalSubtext}>
-                  הקבוצה שהצליחה לחשוף פחות מילים בסבב הזה
-                </Text>
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={clearDrinkingPopup}
-                >
-                  <Text style={styles.modalButtonText}>המשך</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Modal>
-        )}
-
-        {/* Winner Modal */}
-        {room && room.game_status === 'finished' && !forceCloseModal && room.winner_team && (
-          <Modal
-            visible={room.game_status === 'finished' && !forceCloseModal && !!room.winner_team}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={() => {}}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <Text style={styles.winnerIcon}>🏆</Text>
-                <Text style={styles.winnerTitle}>
-                  {room.winner_team === 'red' ? '🔴 הקבוצה האדומה' : '🔵 הקבוצה הכחולה'}
-                </Text>
-                <Text style={styles.winnerSubtitle}>ניצחה! 🎉</Text>
-                <View style={styles.winnerButtons}>
-                  <TouchableOpacity
-                    style={[styles.winnerButton, (!room.host_name || room.host_name !== currentPlayerName) && styles.winnerButtonDisabled]}
-                    onPress={resetGame}
-                    disabled={!room.host_name || room.host_name !== currentPlayerName}
-                  >
-                    <Text style={[styles.winnerButtonText, (!room.host_name || room.host_name !== currentPlayerName) && styles.winnerButtonTextDisabled]}>משחק חדש</Text>
-                  </TouchableOpacity>
-                  {(!room.host_name || room.host_name !== currentPlayerName) && (
-                    <Text style={styles.hostOnlyText}>רק המארח יכול להתחיל משחק חדש</Text>
-                  )}
-                  <TouchableOpacity
-                    style={[styles.winnerButton, styles.winnerButtonOutline]}
-                    onPress={async () => {
-                      // Show interstitial ad before navigating to main menu
-                      showInterstitialIfAvailable(async () => {
-                        if (unsubscribeRef.current) {
-                          unsubscribeRef.current();
-                          unsubscribeRef.current = null;
-                        }
-                        await clearCurrentRoom();
-                        
-                        // Navigate to main menu using reset to clear the stack
-                        const parent = navigation.getParent();
-                        if (parent) {
-                          parent.reset({
-                            index: 0,
-                            routes: [{ name: 'Home' }]
-                          });
-                        } else {
-                          // Fallback: navigate to Home
-                          navigation.navigate('Home');
-                        }
-                      });
-                    }}
-                  >
-                    <Text style={[styles.winnerButtonText, styles.winnerButtonTextOutline]}>חזרה לתפריט הראשי</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          </Modal>
-        )}
-
-        {/* Rivals Timer */}
-        {isRivalsMode && room.turn_start_time && (
-          <RivalsTimer
-            startTime={room.turn_start_time}
-            duration={timerDuration}
-            onTimeUp={handleRivalsTimeUp}
-            phase={room.turn_phase}
-          />
-        )}
-
-        {/* Team Info */}
-        <TeamInfo
-          redTeam={room.red_team}
-          blueTeam={room.blue_team}
-          currentTurn={room.current_turn}
-          redWordsLeft={redWordsLeft}
-          blueWordsLeft={blueWordsLeft}
-          currentPlayerName={currentPlayerName}
-          compact={true}
-        />
-
-        {/* Collapsible Team Words Panel for Spymaster */}
-        {isSpymaster && (
-          <View style={styles.teamWordsSection}>
-            <TouchableOpacity
-              style={styles.toggleButton}
-              onPress={() => setShowTeamWords(!showTeamWords)}
-            >
-              <Text style={styles.toggleButtonText}>
-                {showTeamWords ? '▲ סגור רשימת מילות הקבוצה' : '▼ הצג רשימת מילות הקבוצה'}
-              </Text>
-            </TouchableOpacity>
-
-            {showTeamWords && (
-              <TeamWordsPanel
-                words={room.board_words}
-                keyMap={room.key_map}
-                revealedIndices={getRevealedIndices()}
-                teamColor={playerRole.team}
-                compact={true}
-              />
+      {/* Winner */}
+      <Dialog
+        visible={showWinner}
+        icon="trophy"
+        actions={
+          <>
+            <Button
+              title={S.codenames.game.newGame}
+              icon="dice"
+              onPress={resetGame}
+              disabled={!room.host_name || room.host_name !== currentPlayerName}
+              fullWidth
+            />
+            {(!room.host_name || room.host_name !== currentPlayerName) && (
+              <AppText variant="caption" align="center" color={colors.inkSoft}>
+                {S.codenames.game.hostOnlyNewGame}
+              </AppText>
             )}
-          </View>
-        )}
+            <Button
+              title={S.codenames.game.backToMenu}
+              icon="home"
+              variant="secondary"
+              fullWidth
+              onPress={async () => {
+                // Show interstitial ad before navigating to main menu
+                showInterstitialIfAvailable(async () => {
+                  if (unsubscribeRef.current) {
+                    unsubscribeRef.current();
+                    unsubscribeRef.current = null;
+                  }
+                  await clearCurrentRoom();
 
-        {/* Status Card */}
-        <View style={styles.statusCard}>
-          {isMyTurn() ? (
-            <View style={styles.statusContent}>
-              <View style={styles.myTurnBadge}>
-                <Text style={styles.myTurnText}>🎮 התור שלך!</Text>
-              </View>
-              <Text style={styles.statusText}>
-                {isSpymaster ? 'תן רמז לקבוצה' : room.current_clue?.number ? 'נחש מילים' : 'ממתין לרמז'}
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.statusContent}>
-              <View style={[styles.turnDot, { backgroundColor: room.current_turn === 'red' ? '#EF4444' : '#3B82F6' }]} />
-              <Text style={styles.statusText}>
-                התור של הקבוצה ה{room.current_turn === 'red' ? 'אדומה' : 'כחולה'}
-              </Text>
-            </View>
+                  // Navigate to main menu using reset to clear the stack
+                  const parent = navigation.getParent();
+                  if (parent) {
+                    parent.reset({
+                      index: 0,
+                      routes: [{ name: 'Home' }]
+                    });
+                  } else {
+                    // Fallback: navigate to Home
+                    navigation.navigate('Home');
+                  }
+                });
+              }}
+            />
+          </>
+        }
+      >
+        {showWinner ? (
+          <View style={[styles.winnerBox, { backgroundColor: getTeamStyle(room.winner_team).fill, borderColor: getTeamStyle(room.winner_team).deep }]}>
+            <Icon name={getTeamStyle(room.winner_team).icon} size={36} color={colors.white} />
+            <AppText variant="heading" align="center" color={colors.white} accessibilityRole="header">
+              {S.codenames.game.winnerTeam(room.winner_team)} {S.codenames.game.won}
+            </AppText>
+          </View>
+        ) : null}
+      </Dialog>
+
+      {/* Rivals Timer */}
+      {isRivalsMode && room.turn_start_time && (
+        <RivalsTimer
+          startTime={room.turn_start_time}
+          duration={timerDuration}
+          onTimeUp={handleRivalsTimeUp}
+          phase={room.turn_phase}
+        />
+      )}
+
+      {/* Team Info */}
+      <TeamInfo
+        redTeam={room.red_team}
+        blueTeam={room.blue_team}
+        currentTurn={room.current_turn}
+        redWordsLeft={redWordsLeft}
+        blueWordsLeft={blueWordsLeft}
+        currentPlayerName={currentPlayerName}
+        compact={true}
+      />
+
+      {/* Collapsible Team Words Panel for Spymaster */}
+      {isSpymaster && (
+        <View style={styles.section}>
+          <Button
+            title={showTeamWords ? S.codenames.game.hideWords : S.codenames.game.showWords}
+            icon={showTeamWords ? 'minus' : 'plus'}
+            variant="secondary"
+            size="sm"
+            onPress={() => setShowTeamWords(!showTeamWords)}
+            fullWidth
+          />
+
+          {showTeamWords && (
+            <TeamWordsPanel
+              words={room.board_words}
+              keyMap={room.key_map}
+              revealedIndices={getRevealedIndices()}
+              teamColor={playerRole.team}
+              compact={true}
+            />
           )}
         </View>
+      )}
 
-        {/* Clue Input */}
-        <ClueInput
-          currentClue={room.current_clue}
-          isMyTurn={isMyTurn()}
-          isSpymaster={isSpymaster}
-          room={room}
-          onClueSubmit={handleClueSubmit}
-          compact={true}
-          maxClueNumber={myTeamColor ? countWordsLeft(myTeamColor) : 9}
-        />
-
-        {/* Guess Instructions */}
-        {canGuess && (
-          <View style={styles.guessCard}>
-            <Text style={styles.guessText}>
-              👆 לחץ על מילה כדי לגלות את הצבע האמיתי שלה
-            </Text>
-            <Text style={styles.guessSubtext}>
-              נשארו {room.guesses_remaining} ניחושים | ⚠️ ניחוש שגוי = מעבר תור
-            </Text>
-            <TouchableOpacity
-              style={styles.endTurnButton}
-              onPress={handleEndTurn}
-            >
-              <Text style={styles.endTurnButtonText}>סיימתי את התור</Text>
-            </TouchableOpacity>
-          </View>
+      {/* Status Card */}
+      <Card tone={isMyTurn() ? 'tint' : 'paper'} padding="md" style={styles.statusCard}>
+        {isMyTurn() ? (
+          <>
+            <Badge label={S.codenames.game.yourTurn} icon="clue" tone="accent" />
+            <AppText variant="bodyStrong" style={styles.flexShrink}>
+              {isSpymaster ? S.codenames.game.giveClue : room.current_clue?.number ? S.codenames.game.guessWords : S.codenames.game.waitingClue}
+            </AppText>
+          </>
+        ) : (
+          <>
+            <Icon name={turnTeam.icon} size={26} color={turnTeam.ink} />
+            <AppText variant="bodyStrong" style={styles.flexShrink}>
+              {S.codenames.game.turnOfTeam(room.current_turn)}
+            </AppText>
+          </>
         )}
+      </Card>
 
-        {/* Board */}
-        <View style={styles.boardContainer}>
-          <CodenamesBoard
-            words={room.board_words}
-            keyMap={room.key_map}
-            revealedIndices={getRevealedIndices()}
-            isSpymaster={isSpymaster}
-            onWordClick={handleWordClick}
-            canGuess={canGuess}
-            currentTeam={room.current_turn}
-          />
-        </View>
-      </ScrollView>
-    </View>
+      {/* Clue Input */}
+      <ClueInput
+        currentClue={room.current_clue}
+        isMyTurn={isMyTurn()}
+        isSpymaster={isSpymaster}
+        room={room}
+        onClueSubmit={handleClueSubmit}
+        compact={true}
+        maxClueNumber={myTeamColor ? countWordsLeft(myTeamColor) : 9}
+      />
+
+      {/* Guess Instructions */}
+      {canGuess && (
+        <Card padding="md" style={styles.section}>
+          <View style={styles.tipRow}>
+            <Icon name="gesture" size={22} color={theme.accentInk} />
+            <AppText variant="bodyStrong" style={styles.flexShrink}>
+              {S.codenames.game.tapWord}
+            </AppText>
+          </View>
+          <View style={styles.statRow}>
+            <Badge label={S.codenames.game.guessesLeft(room.guesses_remaining)} icon="target" tone="tint" />
+            <Badge label={S.codenames.game.wrongPass} icon="alert" tone="danger" />
+          </View>
+          <Button title={S.codenames.game.endTurn} icon="skip" variant="secondary" onPress={handleEndTurn} fullWidth />
+        </Card>
+      )}
+
+      {/* Board */}
+      <CodenamesBoard
+        words={room.board_words}
+        keyMap={room.key_map}
+        revealedIndices={getRevealedIndices()}
+        isSpymaster={isSpymaster}
+        onWordClick={handleWordClick}
+        canGuess={canGuess}
+        currentTeam={room.current_turn}
+      />
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  flex: {
     flex: 1,
-    backgroundColor: '#FFFFFF', // White background
   },
-  loadingContainer: {
-    flex: 1,
+  flexShrink: {
+    flexShrink: 1,
+  },
+  centered: {
     justifyContent: 'center',
     alignItems: 'center',
+    gap: spacing.md,
   },
-  loadingText: {
-    color: '#374151', // Dark gray for white background
-    fontSize: 20,
-    marginTop: 16,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  errorTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#374151', // Dark gray for white background
-    marginBottom: 12,
-  },
-  errorMessage: {
-    fontSize: 16,
-    color: '#6B7280', // Gray for white background
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  errorButton: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-  },
-  errorButtonText: {
-    color: '#FFFFFF', // White text on theme color background
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 10,
-    paddingBottom: 16,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    paddingHorizontal: 4,
-    position: 'relative',
-  },
-  headerCenter: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 1,
-    gap: 4,
-  },
-  backButton: {
-    padding: 8,
-  },
-  backButtonText: {
-    color: '#374151', // Dark gray for white background
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginLeft: 'auto',
-    zIndex: 2,
-  },
-  exitButtonHeader: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    minWidth: 60,
-  },
-  drinkingBadgeWrapper: {
-    alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: 8,
-  },
-  drinkingBadge: {
-    backgroundColor: '#D9C3A5', // Codenames theme color
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  drinkingBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  roomCodeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 12,
-    padding: 8,
-    gap: 6,
-  },
-  roomCodeLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  roomCodeBadge: {
-    backgroundColor: '#2563EB',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  roomCodeText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  copyButton: {
-    padding: 4,
-  },
-  copyButtonText: {
-    fontSize: 14,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-  },
-  modalContent: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 32,
+  stateCard: {
     width: '100%',
-    maxWidth: 500,
     alignItems: 'center',
-    gap: 16,
+    gap: spacing.md,
   },
-  modalIcon: {
-    fontSize: 64,
-  },
-  modalTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#D9C3A5', // Codenames theme color
-  },
-  modalMessage: {
-    fontSize: 20,
-    color: '#374151',
-    textAlign: 'center',
-  },
-  modalSubtext: {
-    fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 24,
-  },
-  modalSubtitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#D9C3A5', // Codenames theme color
-  },
-  modalButton: {
-    backgroundColor: '#D9C3A5', // Codenames theme color
-    borderRadius: 12,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    width: '100%',
-  },
-  modalButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  winnerIcon: {
-    fontSize: 96,
-  },
-  winnerTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  winnerSubtitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#374151',
-    marginBottom: 24,
-  },
-  winnerButtons: {
-    flexDirection: 'column',
-    gap: 12,
-    width: '100%',
-    alignItems: 'stretch',
-  },
-  winnerButton: {
-    width: '100%',
-    backgroundColor: '#D9C3A5', // Codenames theme color
-    borderRadius: 12,
-    padding: 16,
-    minHeight: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  winnerButtonOutline: {
-    backgroundColor: 'transparent',
-    borderWidth: 2,
-    borderColor: '#D9C3A5', // Codenames theme color
-  },
-  winnerButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  winnerButtonTextOutline: {
-    color: '#D9C3A5', // Codenames theme color
-  },
-  winnerButtonDisabled: {
-    opacity: 0.5,
-    backgroundColor: '#9CA3AF',
-  },
-  winnerButtonTextDisabled: {
-    color: '#FFFFFF',
-  },
-  hostOnlyText: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginTop: 4,
-    width: '100%',
-  },
-  teamWordsSection: {
-    marginBottom: 12,
-    gap: 8,
-  },
-  toggleButton: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#D9C3A5', // Codenames theme color
-    borderRadius: 12,
-    padding: 12,
-  },
-  toggleButtonText: {
-    fontSize: 14,
-    color: '#8B6F47', // Darker brown for text
-    textAlign: 'center',
+  section: {
+    gap: spacing.md,
   },
   statusCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
   },
-  statusContent: {
+  centerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: spacing.sm,
   },
-  myTurnBadge: {
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+  winnerBox: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.xl,
+    borderRadius: radii.lg,
+    borderBottomWidth: 6,
   },
-  myTurnText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
+  tipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
-  turnDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-  },
-  statusText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  guessCard: {
-    backgroundColor: '#DBEAFE',
-    borderWidth: 2,
-    borderColor: '#3B82F6',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
-    gap: 8,
-  },
-  guessText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1E40AF',
-  },
-  guessSubtext: {
-    fontSize: 12,
-    color: '#2563EB',
-  },
-  endTurnButton: {
-    backgroundColor: '#D9C3A5', // Codenames theme color
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 4,
-  },
-  endTurnButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  boardContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 8,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 6,
+  statRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
 });

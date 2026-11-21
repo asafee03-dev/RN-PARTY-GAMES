@@ -1,123 +1,127 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import Animated, { ZoomIn, useReducedMotion } from 'react-native-reanimated';
+import { S } from '../../strings';
+import { colors, motion, radii, spacing } from '../../theme';
+import { AppText, Icon, feedback } from '../../ui';
+import { ASSASSIN, NEUTRAL, getTeamStyle } from './teamStyle';
 
-// Fixed size for 5x5 grid - same on all devices
-const CARD_SIZE = 60; // Fixed card size in pixels
-const GAP = 4; // Gap between cards
 const GRID_SIZE = 5; // 5x5 grid
-const GRID_WIDTH = GRID_SIZE * CARD_SIZE + (GRID_SIZE - 1) * GAP; // 5 * 60 + 4 * 4 = 300 + 16 = 316
-const GRID_HEIGHT = GRID_SIZE * CARD_SIZE + (GRID_SIZE - 1) * GAP; // Same as width for square grid
+const GAP = 6;
 
-export default function CodenamesBoard({ 
-  words, 
-  keyMap, 
-  revealedIndices, 
-  isSpymaster, 
+/**
+ * The 5x5 word board. Same props as before.
+ *
+ * Every word type carries a second cue besides its color, shown on revealed
+ * tiles (and, for the spymaster, on unrevealed ones too):
+ *   red = flame, blue = drop, neutral = dash (dashed border), assassin = skull.
+ * Guessers see unrevealed tiles as plain paper cards.
+ * The grid is a flex layout, so in RTL it reads from the right like Hebrew
+ * text (every player sees the same order).
+ */
+export default function CodenamesBoard({
+  words,
+  keyMap,
+  revealedIndices,
+  isSpymaster,
   onWordClick,
   canGuess,
-  currentTeam
+  currentTeam // eslint-disable-line no-unused-vars
 }) {
-  const getCardColor = (index) => {
+  const reducedMotion = useReducedMotion();
+  const { width } = useWindowDimensions();
+  const available = Math.min(width, 560) - 2 * spacing.lg - 2 * spacing.sm;
+  const size = Math.max(56, Math.min(96, Math.floor((available - (GRID_SIZE - 1) * GAP) / GRID_SIZE)));
+
+  const describe = (color) => {
+    if (color === 'red') return S.codenames.board.redWord;
+    if (color === 'blue') return S.codenames.board.blueWord;
+    if (color === 'black') return S.codenames.board.assassinWord;
+    return S.codenames.board.neutralWord;
+  };
+
+  const look = (index) => {
     const color = keyMap[index];
     const isRevealed = revealedIndices.includes(index);
 
-    // If word is revealed - show with thick border and shadow
-    if (isRevealed) {
-      if (color === 'red') return { bg: '#EF4444', text: '#FFFFFF', border: '#B91C1C' };
-      if (color === 'blue') return { bg: '#3B82F6', text: '#FFFFFF', border: '#1E40AF' };
-      if (color === 'neutral') return { bg: '#9CA3AF', text: '#FFFFFF', border: '#6B7280' };
-      if (color === 'black') return { bg: '#000000', text: '#FFFFFF', border: '#DC2626' };
+    if (color === 'red' || color === 'blue') {
+      const t = getTeamStyle(color);
+      if (isRevealed) return { bg: t.fill, edge: t.deep, text: colors.white, icon: t.icon, iconColor: colors.white, big: true };
+      if (isSpymaster) return { bg: t.tint, edge: t.fill, text: colors.ink, icon: t.icon, iconColor: t.ink, border: t.fill };
+    } else if (color === 'black') {
+      if (isRevealed) return { bg: ASSASSIN.fill, edge: ASSASSIN.deep, text: colors.white, icon: ASSASSIN.icon, iconColor: colors.white, big: true };
+      if (isSpymaster) return { bg: ASSASSIN.fill, edge: ASSASSIN.deep, text: colors.white, icon: ASSASSIN.icon, iconColor: colors.white };
+    } else {
+      if (isRevealed) return { bg: NEUTRAL.fill, edge: NEUTRAL.deep, text: colors.ink, icon: NEUTRAL.icon, iconColor: colors.inkSoft, big: true, dashed: true };
+      if (isSpymaster) return { bg: colors.card, edge: NEUTRAL.deep, text: colors.ink, icon: NEUTRAL.icon, iconColor: colors.inkSoft, dashed: true };
     }
-
-    // If word is not revealed and you're spymaster - show color lightly
-    if (isSpymaster && !isRevealed) {
-      if (color === 'red') return { bg: '#FEE2E2', text: '#991B1B', border: '#EF4444' };
-      if (color === 'blue') return { bg: '#DBEAFE', text: '#1E40AF', border: '#3B82F6' };
-      if (color === 'neutral') return { bg: '#F3F4F6', text: '#374151', border: '#D1D5DB' };
-      if (color === 'black') return { bg: '#374151', text: '#FFFFFF', border: '#1F2937' };
-    }
-
-    // If you're a guesser and word is not revealed - show neutral color
-    return { bg: '#FEF3C7', text: '#92400E', border: '#FCD34D' };
+    // Guesser, not revealed: a plain paper card
+    return { bg: colors.card, edge: colors.cardboardDeep, text: colors.ink };
   };
 
-  const getCardIcon = (index) => {
-    const color = keyMap[index];
-    const isRevealed = revealedIndices.includes(index);
-
-    // Icons only for revealed black words (removed eye emoji for spymaster)
-    if (isRevealed) {
-      if (color === 'black') return '💀';
-      return null;
-    }
-    
-    return null;
-  };
-
-  const isClickable = (index) => {
-    return canGuess && !revealedIndices.includes(index) && !isSpymaster;
-  };
-
-  // Calculate row and column for each card (0-24 index in 5x5 grid)
-  const getCardPosition = (index) => {
-    const row = Math.floor(index / GRID_SIZE);
-    const col = index % GRID_SIZE;
-    return { row, col };
-  };
+  const isClickable = (index) => canGuess && !revealedIndices.includes(index) && !isSpymaster;
 
   return (
     <View style={styles.container}>
-      <View style={styles.grid}>
+      <View style={[styles.grid, { width: GRID_SIZE * size + (GRID_SIZE - 1) * GAP, gap: GAP }]}>
         {words.map((word, index) => {
           const isRevealed = revealedIndices.includes(index);
-          const colors = getCardColor(index);
-          const icon = getCardIcon(index);
+          const l = look(index);
           const clickable = isClickable(index);
-          const { row, col } = getCardPosition(index);
-          
-          // Calculate absolute position
-          const left = col * (CARD_SIZE + GAP);
-          const top = row * (CARD_SIZE + GAP);
-          
+          const status = isRevealed
+            ? `${S.codenames.board.revealed}, ${describe(keyMap[index])}`
+            : isSpymaster
+              ? describe(keyMap[index])
+              : '';
+
           return (
-            <TouchableOpacity
+            <Pressable
               key={index}
-              style={[
-                styles.card,
-                {
-                  backgroundColor: colors.bg,
-                  borderColor: colors.border,
-                  borderWidth: isRevealed ? 4 : 2,
-                  position: 'absolute',
-                  left: left,
-                  top: top,
-                },
-                clickable && styles.clickableCard,
-              ]}
-              onPress={() => clickable && onWordClick(index)}
               disabled={!clickable}
-              activeOpacity={clickable ? 0.7 : 1}
+              onPress={() => {
+                if (!clickable) return;
+                feedback.reveal();
+                onWordClick(index);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={status ? `${word}, ${status}` : word}
+              accessibilityState={{ disabled: !clickable }}
+              style={({ pressed }) => [
+                styles.tile,
+                {
+                  width: size,
+                  height: size,
+                  backgroundColor: l.bg,
+                  borderColor: l.border || l.edge,
+                  borderBottomColor: l.edge,
+                  borderStyle: l.dashed ? 'dashed' : 'solid',
+                },
+                clickable && styles.clickable,
+                pressed && clickable && styles.pressed,
+              ]}
             >
-              {/* Icon for spymaster or revealed black word */}
-              {icon && (
-                <View style={styles.iconContainer}>
-                  <Text style={styles.icon}>{icon}</Text>
-                </View>
-              )}
-
-              {/* Word text */}
-              <View style={styles.wordContainer}>
-                <Text style={[styles.wordText, { color: colors.text }]} numberOfLines={2}>
-                  {word}
-                </Text>
-              </View>
-
-              {/* Revealed effect - blinking border */}
-              {isRevealed && (
-                <View style={[styles.revealedBorder, { borderColor: '#FFFFFF' }]} />
-              )}
-            </TouchableOpacity>
+              {l.icon ? (
+                <Animated.View
+                  key={isRevealed ? 'revealed' : 'hint'}
+                  entering={isRevealed && !reducedMotion ? ZoomIn.duration(motion.base) : undefined}
+                  style={l.big ? styles.iconBig : styles.iconCorner}
+                >
+                  <Icon name={l.icon} size={l.big ? 22 : 15} color={l.iconColor} />
+                </Animated.View>
+              ) : null}
+              <AppText
+                variant="label"
+                color={l.text}
+                align="center"
+                numberOfLines={3}
+                maxScale={1.25}
+                adjustsFontSizeToFit
+                minimumFontScale={0.7}
+                style={styles.word}
+              >
+                {word}
+              </AppText>
+            </Pressable>
           );
         })}
       </View>
@@ -127,62 +131,41 @@ export default function CodenamesBoard({
 
 const styles = StyleSheet.create({
   container: {
-    padding: 8,
+    padding: spacing.sm,
     alignItems: 'center',
   },
   grid: {
-    width: GRID_WIDTH,
-    height: GRID_HEIGHT,
-    position: 'relative',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
   },
-  card: {
-    width: CARD_SIZE,
-    height: CARD_SIZE,
-    borderRadius: 8,
-    justifyContent: 'center',
+  tile: {
+    borderRadius: radii.md,
+    borderWidth: 2,
+    borderBottomWidth: 5,
     alignItems: 'center',
-    position: 'absolute',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  clickableCard: {
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 5,
-  },
-  iconContainer: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    zIndex: 10,
-  },
-  icon: {
-    fontSize: 16,
-  },
-  wordContainer: {
-    flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
-    padding: 4,
+    paddingHorizontal: 2,
+    paddingTop: 2,
   },
-  wordText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    lineHeight: 14,
+  clickable: {
+    borderColor: colors.cardboardDeep,
   },
-  revealedBorder: {
+  pressed: {
+    transform: [{ translateY: 2 }],
+    borderBottomWidth: 3,
+  },
+  word: {
+    fontSize: 13,
+    lineHeight: 15,
+    fontFamily: 'Rubik-Medium',
+  },
+  iconBig: {
+    marginBottom: 1,
+  },
+  iconCorner: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 8,
-    borderWidth: 4,
-    opacity: 0.5,
+    top: 2,
+    end: 4,
+    opacity: 0.9,
   },
 });
-

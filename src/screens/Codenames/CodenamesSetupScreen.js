@@ -342,11 +342,14 @@ export default function CodenamesSetupScreen({ navigation, route }) {
     let selectedWords;
     try {
       const wordDocs = await loadContent('WordCard');
-      const validWords = [];
+      // A Set: the word list has some duplicate entries, and the same word
+      // must never appear on two tiles of one board
+      const unique = new Set();
       wordDocs.forEach((d) => {
         const w = d?.word;
-        if (typeof w === 'string' && w.trim().length > 0) validWords.push(w.trim());
+        if (typeof w === 'string' && w.trim().length > 0) unique.add(w.trim());
       });
+      const validWords = [...unique];
 
       if (validWords.length < 25) {
         Alert.alert(S.codenames.setup.error, S.codenames.setup.notEnoughWords(validWords.length));

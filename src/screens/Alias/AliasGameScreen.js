@@ -18,6 +18,7 @@ import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 import { serverNow, syncServerClock } from '../../utils/serverClock';
+import { shuffle } from '../../utils/random';
 import { S } from '../../strings';
 import { colors, radii, spacing, useGameTheme } from '../../theme';
 import { AppText, Badge, Button, Card, Icon, Screen, feedback } from '../../ui';
@@ -227,7 +228,7 @@ export default function AliasGameScreen({ navigation, route }) {
   useEffect(() => {
     if (room?.round_active && !room?.round_cards && cards.length === 0 && wordCardsDB.length >= 200) {
       console.log('🔵 [RESTORE] Round is active but cards are missing - regenerating');
-      const shuffled = [...wordCardsDB].sort(() => Math.random() - 0.5);
+      const shuffled = shuffle(wordCardsDB);
       const selectedWords = shuffled.slice(0, 200);
       setCards(selectedWords);
       console.log('✅ [RESTORE] Cards restored for active round');
@@ -722,8 +723,8 @@ export default function AliasGameScreen({ navigation, route }) {
           round_start_position: null
         };
 
-        // Full round = every team has played (back to team 0)
-        if (nextTurn === 0) {
+        // Full round = every team has played (back to the team that started)
+        if (nextTurn === (fresh.starting_turn ?? 0)) {
           if (fresh.drinking_mode) {
             const popup = buildDrinkingPopup(teams);
             if (popup) update.drinking_popup = popup;

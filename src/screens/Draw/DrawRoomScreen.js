@@ -17,6 +17,7 @@ import { colors, radii, spacing, useGameTheme } from '../../theme';
 import { AppText, Badge, Button, Card, Dialog, Icon, IconButton, PlayerChip, Screen, TextField, feedback } from '../../ui';
 import { getActingHostName, getFirstActiveIndex, getNextActiveIndex, markPlayerInactive } from '../../utils/gameSync';
 import { serverNow, syncServerClock } from '../../utils/serverClock';
+import { pickFresh, pickRandom, remember } from '../../utils/random';
 
 const WINNING_SCORE = 12;
 const TURN_SECONDS = 60;
@@ -132,7 +133,8 @@ const buildRoundEnd = (roomData, guesses) => {
   return update;
 };
 
-const pickRandomWord = async (avoidWord) => {
+// Avoids the last words played in this room (recent_words) so words do not repeat
+const pickRandomWord = async (recentWords) => {
   const wordsSnapshot = await getDocs(collection(db, 'DrawWord'));
   const words = [];
   wordsSnapshot.forEach((d) => {
@@ -140,8 +142,7 @@ const pickRandomWord = async (avoidWord) => {
     if (w) words.push(w);
   });
   if (words.length === 0) return null;
-  const candidates = words.length > 1 ? words.filter(w => w !== avoidWord) : words;
-  return candidates[Math.floor(Math.random() * candidates.length)];
+  return pickFresh(words, recentWords);
 };
 
 export default function DrawRoomScreen({ navigation, route }) {
@@ -676,7 +677,7 @@ export default function DrawRoomScreen({ navigation, route }) {
     }
 
     try {
-      const word = await pickRandomWord(null);
+      const word = await pickRandomWord(currentRoom.recent_words);
       if (!word) {
         Alert.alert(S.common.error, S.draw.room.noWords);
         return;
@@ -691,11 +692,14 @@ export default function DrawRoomScreen({ navigation, route }) {
         if (fresh.game_status !== 'lobby') return false;
 
         const players = fresh.players || [];
-        const firstActive = getFirstActiveIndex(players);
+        // Random first drawer among active players (it used to be the host every game)
+        const activeIndexes = players.map((p, i) => (p && p.name && p.active !== false ? i : -1)).filter(i => i !== -1);
+        const firstDrawer = activeIndexes.length ? pickRandom(activeIndexes) : Math.max(0, getFirstActiveIndex(players));
         transaction.update(roomDocRef, {
           game_status: 'playing',
-          current_turn_index: firstActive === -1 ? 0 : firstActive,
+          current_turn_index: firstDrawer,
           current_word: word,
+          recent_words: remember(fresh.recent_words, word, 20),
           drawing_data: null,
           players: players.map(p => (p ? { ...p, current_guess: '', has_submitted: false } : p)),
           final_draw_image: null,
@@ -853,7 +857,7 @@ export default function DrawRoomScreen({ navigation, route }) {
 
     try {
       // Word list is a query, which can't run inside a transaction - pick it first
-      const word = await pickRandomWord(currentRoom.current_word);
+      const word = await pickRandomWord([currentRoom.current_word, ...(currentRoom.recent_words || [])]);
       if (!word) {
         Alert.alert(S.common.error, S.draw.room.noWords);
         return;
@@ -879,6 +883,7 @@ export default function DrawRoomScreen({ navigation, route }) {
         transaction.update(roomDocRef, {
           current_turn_index: nextTurnIndex,
           current_word: word,
+          recent_words: remember(fresh.recent_words, word, 20),
           drawing_data: null,
           show_round_summary: false,
           round_winner: null,

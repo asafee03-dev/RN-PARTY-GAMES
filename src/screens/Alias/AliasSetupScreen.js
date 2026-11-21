@@ -7,6 +7,7 @@ import UnifiedTopBar from '../../components/shared/UnifiedTopBar';
 import { db } from '../../firebase';
 import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
 import storage from '../../utils/storage';
+import { randomInt, shuffle } from '../../utils/random';
 import { S } from '../../strings';
 import { colors, radii, spacing, touch, useGameTheme } from '../../theme';
 import { AppText, Button, Card, Icon, IconButton, PlayerChip, Screen, accessibleSurface, readableOn } from '../../ui';
@@ -395,7 +396,7 @@ export default function AliasSetupScreen({ navigation, route }) {
     // Golden squares: 10 random positions 1-58 (avoiding start and end)
     const squares = [];
     for (let i = 1; i < 59; i++) squares.push(i);
-    const randomGoldenSquares = squares.sort(() => Math.random() - 0.5).slice(0, 10);
+    const randomGoldenSquares = shuffle(squares).slice(0, 10);
 
     try {
       const result = await updateTeamsTx((teams, fresh) => {
@@ -407,6 +408,8 @@ export default function AliasSetupScreen({ navigation, route }) {
         const emptyIndex = teams.findIndex(t => t.players.length === 0);
         if (emptyIndex !== -1) return { error: 'empty_team', index: emptyIndex };
 
+        // Random starting team (it used to be team 1 every game)
+        const startingTurn = randomInt(teams.length);
         return {
           teams: teams.map(team => ({
             ...team,
@@ -416,7 +419,8 @@ export default function AliasSetupScreen({ navigation, route }) {
           extra: {
             game_status: 'waiting',
             golden_squares: fresh.golden_rounds_enabled ? randomGoldenSquares : [],
-            current_turn: 0,
+            current_turn: startingTurn,
+            starting_turn: startingTurn,
             round_active: false
           }
         };

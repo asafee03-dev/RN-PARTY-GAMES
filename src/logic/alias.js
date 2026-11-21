@@ -4,6 +4,8 @@
  * No JSX, DOM, CSS, window, or document dependencies
  */
 
+import { shuffle } from '../utils/random';
+
 /**
  * Initialize a new game
  * @param {Array} teams - Array of team objects with { name, players: [], position: 0 }
@@ -51,7 +53,7 @@ export function generateCards(words, cardsCount = 200, wordsPerCard = 1) {
     throw new Error(`Not enough words. Need at least ${cardsCount} words`);
   }
 
-  const shuffled = [...words].sort(() => Math.random() - 0.5);
+  const shuffled = shuffle(words);
   const selectedWords = shuffled.slice(0, cardsCount);
   
   // Return array of single words (each word is a card)

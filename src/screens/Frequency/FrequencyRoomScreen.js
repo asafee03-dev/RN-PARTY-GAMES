@@ -10,6 +10,7 @@ import { db, waitForFirestoreReady } from '../../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, collection, getDocs, runTransaction } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import storage from '../../utils/storage';
+import { pickFresh, pickRandom, remember } from '../../utils/random';
 import { saveCurrentRoom, loadCurrentRoom, clearCurrentRoom } from '../../utils/navigationState';
 import { setupGameEndDeletion, setupAllAutoDeletions } from '../../utils/roomManagement';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
@@ -167,7 +168,10 @@ const buildRoundSummary = (roomData) => {
   };
 };
 
-const pickRandomTopic = async () => {
+const topicKey = (t) => (t.left_side || t.left || '') + '|' + (t.right_side || t.right || '');
+
+// Avoids the last topics of this room (recent_topics) so topics do not repeat
+const pickRandomTopic = async (recentTopics) => {
   const topicsSnapshot = await getDocs(collection(db, 'FrequencyTopic'));
   const valid = [];
   topicsSnapshot.forEach((d) => {
@@ -177,7 +181,7 @@ const pickRandomTopic = async () => {
     }
   });
   if (valid.length === 0) return null;
-  const topic = valid[Math.floor(Math.random() * valid.length)];
+  const topic = pickFresh(valid, recentTopics, topicKey);
   return { left_side: topic.left, right_side: topic.right };
 };
 
@@ -573,7 +577,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
     }
 
     try {
-      const topic = await pickRandomTopic();
+      const topic = await pickRandomTopic(room.recent_topics);
       if (!topic) {
         Alert.alert(S.common.error, S.frequency.room.noTopics);
         return;
@@ -588,13 +592,15 @@ export default function FrequencyRoomScreen({ navigation, route }) {
         if (fresh.game_status !== 'lobby') return false;
 
         const players = fresh.players || [];
-        const firstActiveIndex = players.findIndex(p => p && p.name && p.active !== false);
-        const startIndex = firstActiveIndex === -1 ? 0 : firstActiveIndex;
+        // Random first clue-giver among active players (it used to be the host)
+        const activeIndexes = players.map((p, i) => (p && p.name && p.active !== false ? i : -1)).filter(i => i !== -1);
+        const startIndex = activeIndexes.length ? pickRandom(activeIndexes) : 0;
 
         transaction.update(roomRef, {
           game_status: 'playing',
           current_turn_index: startIndex,
           current_topic: topic,
+          recent_topics: remember(fresh.recent_topics, topicKey(topic)),
           target_position: Math.floor(Math.random() * 180),
           current_round_sectors: calculateSectors(),
           turn_phase: 'guessing',
@@ -729,7 +735,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
 
     try {
       // Topic list is a query, which can't run inside a transaction - pick it first
-      const newTopic = await pickRandomTopic();
+      const newTopic = await pickRandomTopic([topicKey(room.current_topic || {}), ...(room.recent_topics || [])]);
       if (!newTopic) {
         Alert.alert(S.common.error, S.frequency.room.noTopics);
         return;
@@ -800,6 +806,7 @@ export default function FrequencyRoomScreen({ navigation, route }) {
           players: updatedPlayers,
           current_turn_index: nextTurnIndex,
           current_topic: newTopic,
+          recent_topics: remember(fresh.recent_topics, topicKey(newTopic)),
           target_position: Math.floor(Math.random() * 180),
           current_round_sectors: calculateSectors(),
           needle_positions: {},

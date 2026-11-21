@@ -1,10 +1,8 @@
 import { collection, doc, getDocs, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
 import { atomicPlayerJoin } from '../../utils/playerJoin';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, Pressable, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import GradientBackground from '../../components/codenames/GradientBackground';
-import GradientButton from '../../components/codenames/GradientButton';
 import BannerAd from '../../components/shared/BannerAd';
 import DrawCanvas from '../../components/draw/DrawCanvas';
 import Timer from '../../components/game/Timer';
@@ -14,6 +12,9 @@ import { db, waitForFirestoreReady } from '../../firebase';
 import { clearCurrentRoom, loadCurrentRoom, saveCurrentRoom } from '../../utils/navigationState';
 import { showInterstitialIfAvailable } from '../../utils/interstitialAd';
 import storage from '../../utils/storage';
+import { S } from '../../strings';
+import { colors, radii, spacing, useGameTheme } from '../../theme';
+import { AppText, Badge, Button, Card, Dialog, Icon, IconButton, PlayerChip, Screen, TextField, feedback } from '../../ui';
 import { getActingHostName, getFirstActiveIndex, getNextActiveIndex, markPlayerInactive } from '../../utils/gameSync';
 import { serverNow, syncServerClock } from '../../utils/serverClock';
 
@@ -187,6 +188,16 @@ export default function DrawRoomScreen({ navigation, route }) {
     currentPlayerNameRef.current = currentPlayerName;
   }, [currentPlayerName]);
 
+  const theme = useGameTheme();
+
+  // Haptic cues: round summary / game over (no-op on web)
+  useEffect(() => {
+    if (room?.show_round_summary) feedback.reveal();
+  }, [room?.show_round_summary]);
+  useEffect(() => {
+    if (room?.game_status === 'finished') feedback.success();
+  }, [room?.game_status]);
+
   // Load player name on mount (like Alias does)
   useEffect(() => {
     const loadPlayerName = async () => {
@@ -232,14 +243,14 @@ export default function DrawRoomScreen({ navigation, route }) {
             return;
           } else {
             await clearCurrentRoom();
-            Alert.alert('שגיאה', 'קוד חדר חסר');
+            Alert.alert(S.common.error, S.draw.room.missingRoomCode);
             navigation.goBack();
             return;
           }
         } catch (error) {
           console.warn('⚠️ Error restoring room:', error);
           await clearCurrentRoom();
-          Alert.alert('שגיאה', 'קוד חדר חסר');
+          Alert.alert(S.common.error, S.draw.room.missingRoomCode);
           navigation.goBack();
           return;
         }
@@ -541,7 +552,7 @@ export default function DrawRoomScreen({ navigation, route }) {
       if (querySnapshot.empty) {
         console.warn('❌ Room not found with code:', roomCode);
         await clearCurrentRoom();
-        Alert.alert('שגיאה', 'החדר לא נמצא');
+        Alert.alert(S.common.error, S.draw.room.roomNotFound);
         navigation.goBack();
         return;
       }
@@ -620,14 +631,14 @@ export default function DrawRoomScreen({ navigation, route }) {
               return;
             } else {
               console.error('❌ Failed to join Draw room:', result.error);
-              Alert.alert('שגיאה', 'לא הצלחנו להצטרף לחדר. נסה שוב.');
+              Alert.alert(S.common.error, S.draw.room.joinFailed);
               navigation.goBack();
               return;
             }
           } else if (roomData.game_status === 'playing') {
             // Game in progress - new players cannot join
             console.warn('⚠️ New player tried to join game that is already in progress');
-            Alert.alert('שגיאה', 'המשחק כבר התחיל. לא ניתן להצטרף כעת.');
+            Alert.alert(S.common.error, S.draw.room.gameStarted);
             navigation.goBack();
             return;
           }
@@ -643,7 +654,7 @@ export default function DrawRoomScreen({ navigation, route }) {
       }
     } catch (error) {
       console.error('❌ Error loading room:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לטעון את החדר');
+      Alert.alert(S.common.error, S.draw.room.loadFailed);
       navigation.goBack();
     } finally {
       setIsLoading(false);
@@ -656,14 +667,14 @@ export default function DrawRoomScreen({ navigation, route }) {
 
     const validPlayers = (currentRoom.players || []).filter(p => p && p.name && p.active !== false);
     if (validPlayers.length < 2) {
-      Alert.alert('שגיאה', 'צריך לפחות 2 שחקנים פעילים כדי להתחיל!');
+      Alert.alert(S.common.error, S.draw.room.needTwoActive);
       return;
     }
 
     try {
       const word = await pickRandomWord(null);
       if (!word) {
-        Alert.alert('שגיאה', 'אין מילים זמינות במערכת!');
+        Alert.alert(S.common.error, S.draw.room.noWords);
         return;
       }
 
@@ -701,7 +712,7 @@ export default function DrawRoomScreen({ navigation, route }) {
       }
     } catch (error) {
       console.error('❌ Error starting game:', error);
-      Alert.alert('שגיאה', 'שגיאה בהתחלת המשחק. נסה שוב.');
+      Alert.alert(S.common.error, S.draw.room.startFailed);
     }
   };
 
@@ -813,7 +824,7 @@ export default function DrawRoomScreen({ navigation, route }) {
       }
     } catch (error) {
       console.error('❌ Error submitting guess:', error);
-      Alert.alert('שגיאה', 'שגיאה בשליחת הניחוש. נסה שוב.');
+      Alert.alert(S.common.error, S.draw.room.guessFailed);
     } finally {
       isSubmittingGuessRef.current = false;
     }
@@ -840,7 +851,7 @@ export default function DrawRoomScreen({ navigation, route }) {
       // Word list is a query, which can't run inside a transaction - pick it first
       const word = await pickRandomWord(currentRoom.current_word);
       if (!word) {
-        Alert.alert('שגיאה', 'אין מילים זמינות במערכת!');
+        Alert.alert(S.common.error, S.draw.room.noWords);
         return;
       }
 
@@ -876,7 +887,7 @@ export default function DrawRoomScreen({ navigation, route }) {
       });
     } catch (error) {
       console.error('❌ Error moving to next turn:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לעבור לסבב הבא. נסה שוב.');
+      Alert.alert(S.common.error, S.draw.room.advanceFailed);
     } finally {
       isContinuingRoundRef.current = false;
       setIsContinuingRound(false);
@@ -938,7 +949,7 @@ export default function DrawRoomScreen({ navigation, route }) {
       });
     } catch (error) {
       console.error('Error resetting game:', error);
-      Alert.alert('שגיאה', 'לא הצלחנו לאפס את המשחק. נסה שוב.');
+      Alert.alert(S.common.error, S.draw.room.resetFailed);
       setForceCloseModal(false);
     }
   };
@@ -1032,42 +1043,47 @@ export default function DrawRoomScreen({ navigation, route }) {
 
   if (error) {
     return (
-      <GradientBackground variant="draw">
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorTitle}>שגיאה בטעינת החדר</Text>
-          <Text style={styles.errorMessage}>לא הצלחנו לטעון את חדר המשחק</Text>
-          <GradientButton
-            title="חזרה"
+      <Screen contentStyle={styles.centered}>
+        <Card style={styles.stateCard}>
+          <Icon name="alert" size={40} color={colors.danger} />
+          <AppText variant="title" align="center">
+            {S.draw.room.loadErrorTitle}
+          </AppText>
+          <AppText align="center" color={colors.inkSoft}>
+            {S.draw.room.loadErrorMessage}
+          </AppText>
+          <Button
+            title={S.common.back}
+            icon="back"
+            fullWidth
             onPress={() => {
               setError(null);
               setIsLoading(true);
               navigation.navigate('DrawHome');
             }}
-            variant="draw"
-            style={styles.errorButton}
           />
-        </View>
-      </GradientBackground>
+        </Card>
+      </Screen>
     );
   }
 
   if (isLoading || !room) {
     return (
-      <GradientBackground variant="draw">
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FFFFFF" />
-          <Text style={styles.loadingText}>טוען משחק ציור...</Text>
-        </View>
-      </GradientBackground>
+      <Screen contentStyle={styles.centered}>
+        <ActivityIndicator size="large" color={theme.accent} />
+        <AppText variant="subtitle" align="center" color={colors.inkSoft}>
+          {S.draw.room.loading}
+        </AppText>
+      </Screen>
     );
   }
 
   const isHost = room.host_name === currentPlayerName;
   const currentDrawerName = getCurrentPlayerName();
   const allGuesses = getAllGuesses(room);
-  
+
   const isActingHost = !!currentPlayerName && getActingHostName(room) === currentPlayerName;
-  
+
   // Create map of correct guessers with their points
   const correctGuessersMap = new Map();
   allGuesses.forEach(g => {
@@ -1079,7 +1095,7 @@ export default function DrawRoomScreen({ navigation, route }) {
       }
     }
   });
-  
+
   // Convert to array with points information
   const correctGuessers = Array.from(correctGuessersMap.entries())
     .map(([name, points]) => {
@@ -1088,16 +1104,37 @@ export default function DrawRoomScreen({ navigation, route }) {
     })
     .filter(Boolean);
 
+  const iAmDrawing = isMyTurn();
+  const summaryStrokes = (() => {
+    // Use room.drawing_data as source of truth for summary
+    if (room?.drawing_data) {
+      try {
+        const strokes = typeof room.drawing_data === 'string'
+          ? JSON.parse(room.drawing_data)
+          : room.drawing_data;
+        return Array.isArray(strokes) ? strokes : [];
+      } catch (error) {
+        console.error('Error parsing strokes for summary:', error);
+        return localStrokes;
+      }
+    }
+    return localStrokes;
+  })();
+  const showSummary = !!(room && room.show_round_summary && !room.drinking_players && !forceCloseModal &&
+    room.game_status !== 'finished' &&
+    room.players && Array.isArray(room.players) &&
+    room.players.some(p => p && p.name === currentPlayerName) &&
+    currentPlayerName);
+  const showDrinking = !!(room.drinking_players && room.drinking_players.length > 0 &&
+    room.players && Array.isArray(room.players) &&
+    room.players.some(p => p && p.name === currentPlayerName));
+  const showFinished = !!(room.game_status === 'finished' && !forceCloseModal &&
+    room.players && Array.isArray(room.players) &&
+    room.players.some(p => p && p.name === currentPlayerName));
+
   return (
-    <GradientBackground variant="draw">
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        nestedScrollEnabled={true}
-        keyboardShouldPersistTaps="handled"
-        scrollEnabled={!isMyTurn() || !room || room.show_round_summary}
-      >
-        {/* Unified Top Bar */}
+    <Screen
+      header={
         <UnifiedTopBar
           roomCode={roomCode}
           variant="draw"
@@ -1105,1920 +1142,795 @@ export default function DrawRoomScreen({ navigation, route }) {
           onRulesPress={handleRulesPress}
           drinkingMode={drinkingMode}
         />
+      }
+      footer={<BannerAd />}
+      scrollEnabled={!iAmDrawing || !room || room.show_round_summary}
+    >
+      <RulesModal
+        visible={showRulesModal}
+        onClose={() => setShowRulesModal(false)}
+        variant="draw"
+      />
 
-        {/* Rules Modal */}
-        <RulesModal
-          visible={showRulesModal}
-          onClose={() => setShowRulesModal(false)}
-          variant="draw"
-        />
-
-        {/* Lobby State */}
-        {room.game_status === 'lobby' && (
-          <View style={styles.lobbyCard}>
-            <View style={styles.lobbyHeader}>
-              <Text style={styles.lobbyTitle}>לובי - ממתינים לשחקנים</Text>
-            </View>
-            <View style={styles.lobbyContent}>
-              {isHost && (
-                <View style={styles.hostCard}>
-                  <View style={styles.hostRow}>
-                    <Text style={styles.crownIcon}>👑</Text>
-                    <Text style={styles.hostText}>אתה המארח</Text>
-                  </View>
-                  <View style={styles.drinkingToggleContainer}>
-                    <Text style={styles.drinkingToggleLabel}>🔞 מצב משחקי שתייה</Text>
-                    <Switch
-                      value={drinkingMode}
-                      onValueChange={async (checked) => {
-                        setDrinkingMode(checked);
-                        try {
-                          // Save to local storage
-                          await storage.setItem('drinkingMode', checked.toString());
-                          
-                          // Save to Firestore room data so all players see it
-                          if (room && room.id) {
-                            const roomRef = doc(db, 'DrawRoom', room.id);
-                            await updateDoc(roomRef, {
-                              drinking_mode: checked
-                            });
-                            console.log('✅ Drinking mode updated:', checked);
-                          }
-                        } catch (error) {
-                          console.error('Error saving drinking mode:', error);
-                          setDrinkingMode(!checked); // Revert on error
-                          Alert.alert('שגיאה', 'לא הצלחנו לעדכן את מצב השתייה');
-                        }
-                      }}
-                      trackColor={{ false: '#D1D5DB', true: '#F97316' }}
-                      thumbColor={drinkingMode ? '#FFFFFF' : '#9CA3AF'}
-                    />
-                    <Text style={styles.drinkingToggleLabel}>🍺</Text>
-                  </View>
-                </View>
-              )}
-
-              {!isHost && drinkingMode && (
-                <View style={styles.drinkingBadge}>
-                  <Text style={styles.drinkingBadgeText}>🍺 מצב שתייה פעיל</Text>
-                </View>
-              )}
-
-              <View style={styles.playersSection}>
-                <Text style={styles.playersTitle}>שחקנים בחדר ({room?.players && Array.isArray(room.players) ? room.players.length : 0}):</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.playersList}>
-                  {room.players && Array.isArray(room.players) && room.players
-                    .filter((player) => player != null && player.name != null)
-                    .map((player, idx) => {
-                      const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
-                      return (
-                        <View key={`player-${idx}`} style={styles.playerCard}>
-                          <Text style={styles.playerCardName}>{playerName}</Text>
-                          {playerName === room.host_name && (
-                            <Text style={styles.crownIconSmall}>👑</Text>
-                          )}
-                        </View>
-                      );
-                    })}
-                </ScrollView>
-              </View>
-
-              {isHost && (
-                <GradientButton
-                  title="▶ התחל משחק!"
-                  onPress={startGame}
-                  variant="draw"
-                  style={styles.startButton}
-                  disabled={room.players.length < 2}
-                />
-              )}
-
-              {!isHost && (
-                <Text style={styles.waitingText}>ממתין למארח להתחיל את המשחק...</Text>
-              )}
-            </View>
+      {/* Lobby State */}
+      {room.game_status === 'lobby' && (
+        <Card style={styles.section}>
+          <View style={styles.titleRow}>
+            <Icon name="players" size={26} color={theme.accentInk} />
+            <AppText variant="title" color={theme.accentInk} accessibilityRole="header" style={styles.flexShrink}>
+              {S.draw.room.lobbyTitle}
+            </AppText>
           </View>
-        )}
 
-        {/* Playing State */}
-        {room.game_status === 'playing' && (
-          <View style={styles.gameContainer}>
-            {/* Top Bar - Word (Centered) */}
-            <View style={styles.topBarCentered}>
-              {isMyTurn() && room.current_word ? (
-                <View style={styles.wordCardCentered}>
-                  <Text style={styles.wordTextCentered}>{room.current_word}</Text>
-                </View>
-              ) : (
-                <View style={styles.drawerInfoCentered}>
-                  <Text style={styles.drawerTextCentered}>{currentDrawerName || 'ממתין...'} מצייר...</Text>
-                </View>
-              )}
-            </View>
-
-            {/* Timer Bar (Below Word, Centered) */}
-            {room.game_status === 'playing' && room.turn_start_time && !room.show_round_summary && (
-              <View style={styles.timerBarCentered}>
-                <Timer
-                  duration={60}
-                  startTime={room.turn_start_time}
-                  onTimeUp={handleTimerExpiration}
-                  compact={true}
-                />
-              </View>
-            )}
-
-              {/* Canvas - CENTER (full width) */}
-            <View 
-              style={styles.canvasWrapper}
-              onStartShouldSetResponder={() => isMyTurn() && !room?.show_round_summary}
-              onMoveShouldSetResponder={() => isMyTurn() && !room?.show_round_summary}
-              onResponderTerminationRequest={() => false}
-              onTouchStart={(e) => {
-                if (isMyTurn() && !room?.show_round_summary) {
-                  e.stopPropagation();
-                }
-              }}
-              onTouchMove={(e) => {
-                if (isMyTurn() && !room?.show_round_summary) {
-                  e.stopPropagation();
-                }
-              }}
-            >
-                <View 
-                  style={styles.canvasContainer} 
-                  collapsable={false}
-                >
-                  <DrawCanvas
-                    strokes={localStrokes}
-                    onStrokeComplete={handleStrokeComplete}
-                    canDraw={isMyTurn()}
-                    color={selectedColor}
-                    brushSize={brushSize}
-                    toolType={toolType}
-                  />
-                </View>
-
-                {/* Bottom Tools - Only for drawer */}
-                {isMyTurn() && (
-                  <View style={styles.bottomToolsContainer}>
-                    {/* Top Row: Left (Tool Toggle), Center (Brush Sizes), Right (Undo + Clear) */}
-                    <View style={styles.toolsTopRow}>
-                      {/* Left Side: Tool Toggle */}
-                      <View style={styles.toolToggleContainer}>
-                        <Pressable
-                          onPress={() => setToolType('pencil')}
-                          style={[
-                            styles.toolToggleButton,
-                            toolType === 'pencil' && styles.toolToggleButtonActive
-                          ]}
-                        >
-                          <Text style={[
-                            styles.toolToggleText,
-                            toolType === 'pencil' && styles.toolToggleTextActive
-                          ]}>✏️</Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => setToolType('eraser')}
-                          style={[
-                            styles.toolToggleButton,
-                            toolType === 'eraser' && styles.toolToggleButtonActive
-                          ]}
-                        >
-                          <Text style={[
-                            styles.toolToggleText,
-                            toolType === 'eraser' && styles.toolToggleTextActive
-                          ]}>🧹</Text>
-                        </Pressable>
-                      </View>
-
-                      {/* Center: Brush Sizes */}
-                      <View style={styles.brushSizesRow}>
-                        {[3, 6, 9].map((size) => (
-                          <Pressable
-                            key={size}
-                            onPress={() => setBrushSize(size)}
-                            style={[
-                              styles.brushSizeButton,
-                              brushSize === size && styles.brushSizeButtonActive
-                            ]}
-                          >
-                            <View
-                              style={[
-                                styles.brushSizeIndicator,
-                                { width: size * 2, height: size * 2, borderRadius: size },
-                                brushSize === size && styles.brushSizeIndicatorActive,
-                                toolType === 'eraser' && styles.brushSizeIndicatorEraser
-                              ]}
-                            />
-                          </Pressable>
-                        ))}
-                      </View>
-
-                      {/* Right Side: Undo + Clear All */}
-                      <View style={styles.actionButtonsContainer}>
-                        <GradientButton
-                          title="↶ בטל"
-                          onPress={handleUndo}
-                          variant="draw"
-                          style={styles.actionButton}
-                          disabled={localStrokes.length === 0}
-                        />
-                        <GradientButton
-                          title="🧹 נקה"
-                          onPress={handleClearAll}
-                          variant="draw"
-                          style={styles.actionButton}
-                          disabled={localStrokes.length === 0}
-                        />
-                      </View>
-                    </View>
-
-                    {/* Bottom Row: All Colors (only when pencil is selected) */}
-                    {toolType === 'pencil' && (
-                      <View style={styles.colorsRow}>
-                        {['#000000', '#EF4444', '#F59E0B', '#FCD34D', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#6B7280'].map((color) => (
-                          <Pressable
-                            key={color}
-                            onPress={() => setSelectedColor(color)}
-                            style={[
-                              styles.colorButtonCompact,
-                              { backgroundColor: color },
-                              color === '#FFFFFF' && styles.colorButtonWhite,
-                              selectedColor === color && styles.colorButtonSelected
-                            ]}
-                          >
-                            {selectedColor === color && (
-                              <View style={styles.colorCheckmark}>
-                                <View style={styles.colorCheckmarkInner} />
-                              </View>
-                            )}
-                          </Pressable>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                )}
-
-                {/* Guess Input - For non-drawers */}
-                {!isMyTurn() && (
-                  <View style={styles.guessInputRow}>
-                    <TextInput
-                      style={styles.guessInputCompact}
-                      value={guessInput}
-                      onChangeText={setGuessInput}
-                      placeholder="כתוב את הניחוש שלך..."
-                      placeholderTextColor="#999"
-                      editable={!room.show_round_summary}
-                      onSubmitEditing={handleGuessSubmit}
-                      autoComplete="off"
-                      textContentType="none"
-                      autoCorrect={false}
-                    />
-                    <Pressable
-                      onPress={handleGuessSubmit}
-                      disabled={!guessInput.trim() || room.show_round_summary}
-                      style={[
-                        styles.sendButtonCompact,
-                        (!guessInput.trim() || room.show_round_summary) && styles.sendButtonDisabled
-                      ]}
-                    >
-                      <Text style={styles.sendButtonText}>📤</Text>
-                    </Pressable>
-                  </View>
-                )}
-              </View>
-
-            {/* Bottom Section - Players and Guesses */}
-            {room.game_status === 'playing' && !room.show_round_summary && (
-              <View style={styles.bottomSection}>
-                {/* Shared Guesses Box */}
-                <View style={styles.guessesCardBottom}>
-                  <View style={styles.guessesHeader}>
-                    <Text style={styles.guessesTitle}>📤 ניחושים</Text>
-                  </View>
-                  <ScrollView 
-                    style={styles.guessesListBottom} 
-                    nestedScrollEnabled
-                    horizontal={true}
-                    showsHorizontalScrollIndicator={false}
-                  >
-                    {allGuesses.length === 0 ? (
-                      <Text style={styles.noGuessesText}>עדיין אין ניחושים...</Text>
-                    ) : (
-                      <View style={styles.guessesHorizontalContainer}>
-                        {[...allGuesses].reverse().map((guess, idx) => {
-                          const normalizedWord = room.current_word?.toLowerCase().trim();
-                          const normalizedGuess = guess.guess?.toLowerCase().trim();
-                          const isCorrect = normalizedWord && normalizedGuess === normalizedWord;
-                          return (
-                            <View
-                              key={idx}
-                              style={[styles.guessItemBottom, isCorrect && styles.guessItemCorrect]}
-                            >
-                              <View style={styles.guessItemContent}>
-                                <Text style={styles.guessPlayerName}>{guess.playerName}:</Text>
-                                <Text style={[styles.guessText, isCorrect && styles.guessTextCorrect]}>
-                                  {guess.guess}
-                                </Text>
-                              </View>
-                              {isCorrect && (
-                                <Text style={styles.checkmark}>✓</Text>
-                              )}
-                            </View>
-                          );
-                        })}
-                      </View>
-                    )}
-                  </ScrollView>
-                </View>
-
-                {/* Players Scoreboard */}
-                <View style={styles.scoreboardCardBottom}>
-                  <View style={styles.scoreboardHeader}>
-                    <Text style={styles.scoreboardTitle}>🏆 שחקנים</Text>
-                  </View>
-                  <ScrollView 
-                    style={styles.scoreboardListBottom}
-                    showsVerticalScrollIndicator={false}
-                    nestedScrollEnabled
-                    horizontal={true}
-                    showsHorizontalScrollIndicator={false}
-                  >
-                    <View style={styles.scoreboardHorizontalContainer}>
-                      {[...room.players].filter(p => p && p.name && (p.active !== false)).sort((a, b) => b.score - a.score).map((player, idx) => {
-                        const isCurrentTurn = room.players[room.current_turn_index]?.name === player.name;
-                        
-                        return (
-                          <View
-                            key={player.name}
-                            style={[styles.scoreboardPlayerCardBottom, isCurrentTurn && styles.scoreboardPlayerCardActive]}
-                          >
-                            <View style={styles.scoreboardPlayerContent}>
-                              <View style={styles.scoreboardRankRow}>
-                                <Text style={styles.scoreboardRank}>#{idx + 1}</Text>
-                                {idx === 0 && player.score > 0 && (
-                                  <Text style={styles.trophyIcon}>🏆</Text>
-                                )}
-                              </View>
-                              <Text style={styles.scoreboardPlayerName} numberOfLines={1}>{player.name}</Text>
-                              <Text style={styles.scoreboardScore}>{player.score} נקודות</Text>
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  </ScrollView>
-                </View>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Drinking Mode Modal */}
-        {room.drinking_players && room.drinking_players.length > 0 && 
-         room.players && Array.isArray(room.players) && 
-         room.players.some(p => p && p.name === currentPlayerName) && (
-          <Modal
-            visible={true}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={() => {}}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <Text style={styles.drinkingIcon}>🍺</Text>
-                <Text style={styles.drinkingTitle}>זמן שתייה!</Text>
-                <Text style={styles.drinkingMessage}>
-                  {(() => {
-                    const currentDrawer = room.players[room.current_turn_index]?.name;
-                    const isDrawerDrinking = room.drinking_players.includes(currentDrawer);
-                    
-                    if (isDrawerDrinking) {
-                      return `אף אחד לא ניחש נכון – ${currentDrawer} חייבת לשתות!`;
-                    } else if (room.drinking_players.length === 1) {
-                      return 'לא ניחשת נכון!';
-                    } else {
-                      return 'לא ניחשתם נכון!';
-                    }
-                  })()}
-                </Text>
-                <View style={styles.drinkingPlayersList}>
-                  {room.drinking_players && Array.isArray(room.drinking_players) && room.drinking_players
-                    .filter((name) => name != null)
-                    .map((name, idx) => {
-                      const playerName = typeof name === 'string' ? name : String(name || '');
-                      return (
-                        <View key={`drinking-${idx}`} style={styles.drinkingPlayerBadge}>
-                          <Text style={styles.drinkingPlayerName}>{playerName}</Text>
-                        </View>
-                      );
-                    })}
-                </View>
-                <Text style={styles.drinkingEmoji}>🍻</Text>
-                <Text style={styles.drinkingAction}>
-                  {room.drinking_players.length === 1 ? 'קח שוט! 🥃' : 'קחו שוט! 🥃'}
-                </Text>
-                <GradientButton
-                  title="המשך"
-                  onPress={async () => {
+          {isHost && (
+            <Card tone="tint" padding="md" style={styles.section}>
+              <Badge label={S.draw.room.youAreHost} icon="crown" tone="gold" />
+              <View style={styles.toggleRow}>
+                <Icon name="drink" size={22} color={colors.ink} />
+                <AppText variant="bodyStrong" style={styles.flex}>
+                  {S.draw.room.drinkingToggle}
+                </AppText>
+                <Switch
+                  value={drinkingMode}
+                  accessibilityLabel={S.draw.room.drinkingToggle}
+                  onValueChange={async (checked) => {
+                    setDrinkingMode(checked);
                     try {
-                      const roomRef = doc(db, 'DrawRoom', room.id);
-                      await updateDoc(roomRef, {
-                        drinking_players: null
-                      });
+                      // Save to local storage
+                      await storage.setItem('drinkingMode', checked.toString());
+
+                      // Save to Firestore room data so all players see it
+                      if (room && room.id) {
+                        const roomRef = doc(db, 'DrawRoom', room.id);
+                        await updateDoc(roomRef, {
+                          drinking_mode: checked
+                        });
+                        console.log('✅ Drinking mode updated:', checked);
+                      }
                     } catch (error) {
-                      console.error('Error clearing drinking players:', error);
+                      console.error('Error saving drinking mode:', error);
+                      setDrinkingMode(!checked); // Revert on error
+                      Alert.alert(S.common.error, S.draw.room.drinkingUpdateFailed);
                     }
                   }}
-                  variant="orange"
-                  style={styles.continueButton}
+                  trackColor={{ false: colors.line, true: theme.accent }}
+                  thumbColor={colors.card}
+                />
+              </View>
+            </Card>
+          )}
+
+          {!isHost && drinkingMode && (
+            <Badge label={S.draw.room.drinkingActive} icon="drink" tone="gold" />
+          )}
+
+          <AppText variant="label" color={colors.inkSoft}>
+            {S.draw.room.playersInRoom(room?.players && Array.isArray(room.players) ? room.players.length : 0)}
+          </AppText>
+          <View style={styles.chips}>
+            {room.players && Array.isArray(room.players) && room.players
+              .filter((player) => player != null && player.name != null)
+              .map((player, idx) => {
+                const playerName = typeof player.name === 'string' ? player.name : String(player.name || '');
+                return (
+                  <PlayerChip
+                    key={`player-${idx}`}
+                    name={playerName}
+                    color={PLAYER_TOKEN_COLORS[idx % PLAYER_TOKEN_COLORS.length]}
+                    isHost={playerName === room.host_name}
+                    isMe={playerName === currentPlayerName}
+                    hostLabel={S.common.host}
+                    meLabel={S.common.you}
+                    dimmed={player.active === false}
+                  />
+                );
+              })}
+          </View>
+
+          {isHost && (
+            <Button
+              title={S.draw.room.startGame}
+              icon="play"
+              onPress={startGame}
+              disabled={room.players.length < 2}
+              fullWidth
+            />
+          )}
+
+          {!isHost && (
+            <View style={styles.waitingRow}>
+              <Icon name="hourglass" size={22} color={colors.inkSoft} />
+              <AppText color={colors.inkSoft}>{S.draw.room.waitingForHostStart}</AppText>
+            </View>
+          )}
+        </Card>
+      )}
+
+      {/* Playing State */}
+      {room.game_status === 'playing' && (
+        <>
+          {/* Word (drawer) or who's drawing (guessers) */}
+          {iAmDrawing && room.current_word ? (
+            <View style={[styles.wordCard, { backgroundColor: theme.accent, borderColor: theme.accentDeep }]}>
+              <AppText variant="label" color={theme.onAccent} align="center">
+                {S.draw.room.yourWord}
+              </AppText>
+              <AppText variant="heading" color={theme.onAccent} align="center">
+                {room.current_word}
+              </AppText>
+            </View>
+          ) : (
+            <View style={styles.drawerRow}>
+              <Icon name="pencil" size={22} color={theme.accentInk} />
+              <AppText variant="title" color={theme.accentInk}>
+                {S.draw.room.drawing(currentDrawerName)}
+              </AppText>
+            </View>
+          )}
+
+          {room.turn_start_time && !room.show_round_summary && (
+            <Timer
+              duration={60}
+              startTime={room.turn_start_time}
+              onTimeUp={handleTimerExpiration}
+              compact={true}
+            />
+          )}
+
+          {/* Canvas - a sheet of paper in a cardboard frame */}
+          <View
+            style={[styles.canvasFrame, { borderColor: iAmDrawing ? theme.accent : colors.cardboardDeep }]}
+            onStartShouldSetResponder={() => iAmDrawing && !room?.show_round_summary}
+            onMoveShouldSetResponder={() => iAmDrawing && !room?.show_round_summary}
+            onResponderTerminationRequest={() => false}
+            onTouchStart={(e) => {
+              if (iAmDrawing && !room?.show_round_summary) {
+                e.stopPropagation();
+              }
+            }}
+            onTouchMove={(e) => {
+              if (iAmDrawing && !room?.show_round_summary) {
+                e.stopPropagation();
+              }
+            }}
+          >
+            <View collapsable={false}>
+              <DrawCanvas
+                strokes={localStrokes}
+                onStrokeComplete={handleStrokeComplete}
+                canDraw={iAmDrawing}
+                color={selectedColor}
+                brushSize={brushSize}
+                toolType={toolType}
+              />
+            </View>
+          </View>
+
+          {/* Drawing tools - drawer only */}
+          {iAmDrawing && (
+            <Card padding="md" style={styles.section}>
+              <View style={styles.toolsRow}>
+                {/* Tool toggle */}
+                <View style={styles.toolGroup} accessibilityRole="radiogroup">
+                  {[
+                    { value: 'pencil', icon: 'pencil', label: S.draw.room.pencil },
+                    { value: 'eraser', icon: 'eraser', label: S.draw.room.eraser },
+                  ].map((tool) => {
+                    const active = toolType === tool.value;
+                    return (
+                      <Pressable
+                        key={tool.value}
+                        onPress={() => {
+                          feedback.select();
+                          setToolType(tool.value);
+                        }}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={tool.label}
+                        style={[styles.toolButton, active && { backgroundColor: theme.accent, borderColor: theme.accentDeep }]}
+                      >
+                        <Icon name={tool.icon} size={24} color={active ? theme.onAccent : theme.accentInk} />
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {/* Brush sizes */}
+                <View style={styles.toolGroup} accessibilityRole="radiogroup">
+                  {[3, 6, 9].map((size) => {
+                    const active = brushSize === size;
+                    return (
+                      <Pressable
+                        key={size}
+                        onPress={() => {
+                          feedback.select();
+                          setBrushSize(size);
+                        }}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={S.draw.room.brushSize(size)}
+                        style={[styles.toolButton, active && { borderColor: theme.accent, backgroundColor: theme.tint }]}
+                      >
+                        <View
+                          style={{
+                            width: size * 2,
+                            height: size * 2,
+                            borderRadius: size,
+                            backgroundColor: toolType === 'eraser' ? colors.inkFaint : selectedColor,
+                          }}
+                        />
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Crayon colors (pencil only): selected one gets a check mark, not just a ring */}
+              {toolType === 'pencil' && (
+                <View style={styles.crayons} accessibilityRole="radiogroup">
+                  {CRAYONS.map(({ color, name }) => {
+                    const active = selectedColor === color;
+                    return (
+                      <Pressable
+                        key={color}
+                        onPress={() => {
+                          feedback.select();
+                          setSelectedColor(color);
+                        }}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={`${S.draw.room.color} ${S.draw.colorNames[name]}`}
+                        style={[styles.crayon, { backgroundColor: color }, active && styles.crayonActive]}
+                      >
+                        {active ? <Icon name="check" size={18} color={name === 'yellow' ? colors.ink : colors.white} /> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+
+              <View style={styles.actionsRow}>
+                <Button
+                  title={S.draw.room.undo}
+                  icon="undo"
+                  size="sm"
+                  variant="secondary"
+                  onPress={handleUndo}
+                  disabled={localStrokes.length === 0}
+                  style={styles.flex}
+                />
+                <Button
+                  title={S.draw.room.clear}
+                  icon="trash"
+                  size="sm"
+                  variant="secondary"
+                  onPress={handleClearAll}
+                  disabled={localStrokes.length === 0}
+                  style={styles.flex}
+                />
+              </View>
+            </Card>
+          )}
+
+          {/* Guess input - guessers only */}
+          {!iAmDrawing && (
+            <View style={styles.guessRow}>
+              <TextField
+                value={guessInput}
+                onChangeText={setGuessInput}
+                placeholder={S.draw.room.guessPlaceholder}
+                accessibilityLabel={S.draw.room.guessPlaceholder}
+                editable={!room.show_round_summary}
+                onSubmitEditing={handleGuessSubmit}
+                autoComplete="off"
+                textContentType="none"
+                autoCorrect={false}
+                returnKeyType="send"
+                style={styles.flex}
+              />
+              <IconButton
+                icon="forward"
+                variant="accent"
+                label={S.draw.room.sendGuess}
+                onPress={handleGuessSubmit}
+                disabled={!guessInput.trim() || room.show_round_summary}
+                size={52}
+              />
+            </View>
+          )}
+
+          {/* Guesses feed + players */}
+          {!room.show_round_summary && (
+            <>
+              <Card padding="md" style={styles.section}>
+                <View style={styles.titleRow}>
+                  <Icon name="clue" size={22} color={theme.accentInk} />
+                  <AppText variant="subtitle" color={theme.accentInk}>{S.draw.room.guessesTitle}</AppText>
+                </View>
+                {allGuesses.length === 0 ? (
+                  <AppText color={colors.inkSoft}>{S.draw.room.noGuessesYet}</AppText>
+                ) : (
+                  <View style={styles.chips}>
+                    {[...allGuesses].reverse().map((guess, idx) => {
+                      const normalizedWord = room.current_word?.toLowerCase().trim();
+                      const normalizedGuess = guess.guess?.toLowerCase().trim();
+                      const isCorrect = normalizedWord && normalizedGuess === normalizedWord;
+                      return (
+                        <Badge
+                          key={idx}
+                          label={`${guess.playerName}: ${guess.guess}`}
+                          icon={isCorrect ? 'check' : undefined}
+                          tone={isCorrect ? 'success' : 'neutral'}
+                        />
+                      );
+                    })}
+                  </View>
+                )}
+              </Card>
+
+              <Card padding="md" style={styles.section}>
+                <View style={styles.titleRow}>
+                  <Icon name="trophy" size={22} color={theme.accentInk} />
+                  <AppText variant="subtitle" color={theme.accentInk}>{S.draw.room.playersTitle}</AppText>
+                </View>
+                <View style={styles.chips}>
+                  {[...room.players].filter(p => p && p.name && (p.active !== false)).sort((a, b) => b.score - a.score).map((player, idx) => {
+                    const isCurrentTurn = room.players[room.current_turn_index]?.name === player.name;
+                    return (
+                      <PlayerChip
+                        key={player.name}
+                        name={player.name}
+                        color={idx === 0 && player.score > 0 ? colors.gold : PLAYER_TOKEN_COLORS[room.players.findIndex(p => p.name === player.name) % PLAYER_TOKEN_COLORS.length]}
+                        isMe={player.name === currentPlayerName}
+                        meLabel={S.common.you}
+                        status={{
+                          label: isCurrentTurn ? `${S.draw.room.pointsN(player.score)} · ${S.draw.room.drawerTag}` : S.draw.room.pointsN(player.score),
+                          icon: isCurrentTurn ? 'pencil' : 'star',
+                          tone: isCurrentTurn ? 'accent' : 'muted',
+                        }}
+                      />
+                    );
+                  })}
+                </View>
+              </Card>
+            </>
+          )}
+        </>
+      )}
+
+      {/* Drinking */}
+      <Dialog
+        visible={showDrinking}
+        icon="drink"
+        title={S.draw.room.drinkingTitle}
+        actions={
+          <Button
+            title={S.common.continue}
+            fullWidth
+            onPress={async () => {
+              try {
+                const roomRef = doc(db, 'DrawRoom', room.id);
+                await updateDoc(roomRef, {
+                  drinking_players: null
+                });
+              } catch (error) {
+                console.error('Error clearing drinking players:', error);
+              }
+            }}
+          />
+        }
+      >
+        {showDrinking ? (
+          <>
+            <AppText align="center" variant="bodyStrong">
+              {(() => {
+                const currentDrawer = room.players[room.current_turn_index]?.name;
+                const isDrawerDrinking = room.drinking_players.includes(currentDrawer);
+
+                if (isDrawerDrinking) {
+                  return S.draw.room.drinkDrawer(currentDrawer);
+                } else if (room.drinking_players.length === 1) {
+                  return S.draw.room.drinkOne;
+                } else {
+                  return S.draw.room.drinkMany;
+                }
+              })()}
+            </AppText>
+            <View style={[styles.chips, styles.centerChips]}>
+              {room.drinking_players
+                .filter((name) => name != null)
+                .map((name, idx) => (
+                  <Badge key={`drinking-${idx}`} label={typeof name === 'string' ? name : String(name || '')} icon="player" tone="gold" />
+                ))}
+            </View>
+            <AppText variant="title" align="center" color={theme.accentInk}>
+              {room.drinking_players.length === 1 ? S.draw.room.shotOne : S.draw.room.shotMany}
+            </AppText>
+          </>
+        ) : null}
+      </Dialog>
+
+      {/* Round Summary - must be answered (no close) */}
+      <Dialog
+        visible={showSummary}
+        icon={correctGuessers.length > 0 ? 'trophy' : 'eye'}
+        title={S.draw.room.summaryTitle}
+        actions={
+          // Only one player advances, so two devices can't each pick a different word
+          isActingHost ? (
+            <Button
+              title={isContinuingRound ? S.draw.room.advancing : S.draw.room.nextRound}
+              icon="forward"
+              iconPosition="end"
+              onPress={continueToNextRound}
+              loading={isContinuingRound}
+              fullWidth
+            />
+          ) : (
+            <View style={styles.waitingRow}>
+              <Icon name="hourglass" size={22} color={colors.inkSoft} />
+              <AppText color={colors.inkSoft} style={styles.flexShrink}>
+                {S.draw.room.waitingForNext(getActingHostName(room))}
+              </AppText>
+            </View>
+          )
+        }
+      >
+        {showSummary ? (
+          <>
+            {correctGuessers.length > 0 ? (
+              <>
+                <AppText variant="title" align="center" color={theme.accentInk}>
+                  {correctGuessers.length === 1
+                    ? S.draw.room.oneGuessed(correctGuessers[0].name)
+                    : S.draw.room.manyGuessed}
+                </AppText>
+                <View style={[styles.chips, styles.centerChips]}>
+                  {correctGuessers.map((player) => (
+                    <Badge key={player.name} label={S.draw.room.guesserPoints(player.name, player.pointsEarned)} icon="check" tone="success" />
+                  ))}
+                  {/* Drawer point when someone guessed correctly */}
+                  {currentDrawerName && room.players.find(p => p.name === currentDrawerName) && (
+                    <Badge key={`drawer-${currentDrawerName}`} label={S.draw.room.drawerPoint(currentDrawerName)} icon="pencil" tone="accent" />
+                  )}
+                </View>
+              </>
+            ) : (
+              <AppText variant="title" align="center" color={colors.inkSoft}>
+                {S.draw.room.nobodyGuessed}
+              </AppText>
+            )}
+
+            <View style={[styles.reveal, { backgroundColor: theme.tint }]}>
+              <AppText variant="label" color={colors.inkSoft} align="center">
+                {S.draw.room.wordWas}
+              </AppText>
+              <AppText variant="heading" align="center" color={theme.accentInk}>
+                {room.current_word}
+              </AppText>
+            </View>
+
+            {/* The drawing, scaled to fit the dialog */}
+            <AppText variant="label" color={colors.inkSoft}>{S.draw.room.drawingTitle}</AppText>
+            <View style={[styles.summaryCanvasBox, { width: SUMMARY_CANVAS, height: SUMMARY_CANVAS }]}>
+              <View style={{ transform: [{ scale: SUMMARY_SCALE }] }}>
+                <DrawCanvas
+                  strokes={summaryStrokes}
+                  onStrokeComplete={() => {}}
+                  canDraw={false}
+                  color={selectedColor}
+                  brushSize={brushSize}
+                  toolType={toolType}
                 />
               </View>
             </View>
-          </Modal>
-        )}
 
-        {/* Round Summary Modal */}
-        {room && room.show_round_summary && !room.drinking_players && !forceCloseModal &&
-         room.game_status !== 'finished' &&
-         room.players && Array.isArray(room.players) && 
-         room.players.some(p => p && p.name === currentPlayerName) &&
-         currentPlayerName && (
-          <Modal
-            visible={true}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={() => {}}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContentSummary}>
-                <ScrollView 
-                  style={styles.summaryScrollContent}
-                  contentContainerStyle={styles.summaryScrollContainer}
-                  showsVerticalScrollIndicator={true}
-                  nestedScrollEnabled={true}
-                >
-                  <View style={styles.summaryHeader}>
-                    <Text style={styles.summaryTitle}>סיכום הסבב</Text>
-                  </View>
-
-                  {/* Winner announcement */}
-                  <View style={styles.winnerCard}>
-                    {correctGuessers.length > 0 ? (
-                      <>
-                        <Text style={styles.trophyIconLarge}>🏆</Text>
-                        <Text style={styles.winnerTitle}>
-                          {correctGuessers.length === 1
-                            ? `${correctGuessers[0].name} ניחש נכון!`
-                            : 'כל הכבוד למנחשים המהירים!'}
-                        </Text>
-                        <View style={styles.winnersList}>
-                          {correctGuessers.map((player) => (
-                            <View key={player.name} style={styles.winnerBadge}>
-                              <Text style={styles.winnerBadgeText}>
-                                {player.name} +{player.pointsEarned} נקודות
-                              </Text>
-                            </View>
-                          ))}
-                          {/* Show drawer points if someone guessed correctly */}
-                          {currentDrawerName && room.players.find(p => p.name === currentDrawerName) && (
-                            <View key={`drawer-${currentDrawerName}`} style={styles.winnerBadge}>
-                              <Text style={styles.winnerBadgeText}>
-                                {currentDrawerName} (הצייר) +1 נקודה
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                      </>
-                    ) : (
-                      <>
-                        <Text style={styles.eyeIconLarge}>👁️</Text>
-                        <Text style={styles.noWinnerTitle}>אף אחד לא ניחש נכון הפעם...</Text>
-                      </>
-                    )}
-                    <Text style={styles.wordReveal}>
-                      המילה הייתה: <Text style={styles.wordRevealBold}>{room.current_word}</Text>
-                    </Text>
-                  </View>
-
-                  {/* Drawing - Full Display */}
-                  <View style={styles.drawingSection}>
-                    <Text style={styles.drawingSectionTitle}>הציור:</Text>
-                    <View style={styles.drawingDisplay}>
-                      <DrawCanvas
-                        strokes={(() => {
-                          // Use room.drawing_data as source of truth for summary
-                          if (room?.drawing_data) {
-                            try {
-                              const strokes = typeof room.drawing_data === 'string' 
-                                ? JSON.parse(room.drawing_data) 
-                                : room.drawing_data;
-                              return Array.isArray(strokes) ? strokes : [];
-                            } catch (error) {
-                              console.error('Error parsing strokes for summary:', error);
-                              return localStrokes;
-                            }
-                          }
-                          return localStrokes;
-                        })()}
-                        onStrokeComplete={() => {}}
-                        canDraw={false}
-                        color={selectedColor}
-                        brushSize={brushSize}
-                        toolType={toolType}
-                      />
-                    </View>
-                  </View>
-
-                  {/* Guesses - Scrollable list */}
-                  <View style={styles.guessesSection}>
-                    <Text style={styles.guessesSectionTitle}>ניחושים:</Text>
-                    <View style={styles.summaryGuessesList}>
-                      {allGuesses.length === 0 ? (
-                        <Text style={styles.noGuessesTextSummary}>לא היו ניחושים בסבב זה</Text>
-                      ) : (
-                        [...allGuesses].reverse().map((guess, idx) => {
-                          const isCorrect = guess.isCorrect;
-                          return (
-                            <View
-                              key={idx}
-                              style={[styles.summaryGuessItem, isCorrect && styles.summaryGuessItemCorrect]}
-                            >
-                              <View style={styles.summaryGuessContent}>
-                                <Text style={styles.summaryGuessPlayerName}>{guess.playerName}</Text>
-                                <Text style={styles.summaryGuessLabel}>ניחש:</Text>
-                                <Text style={[styles.summaryGuessText, isCorrect && styles.summaryGuessTextCorrect]}>
-                                  {guess.guess}
-                                </Text>
-                              </View>
-                              {isCorrect && (
-                                <Text style={styles.summaryCheckmark}>✓</Text>
-                              )}
-                            </View>
-                          );
-                        })
-                      )}
-                    </View>
-                  </View>
-
-                  {/* Updated Scores - Compact */}
-                  <View style={styles.scoresSection}>
-                    <Text style={styles.scoresSectionTitle}>לוח תוצאות:</Text>
-                    <View style={styles.scoresGrid}>
-                      {[...room.players].sort((a, b) => b.score - a.score).slice(0, 4).map((player) => {
-                        const earnedPointThisRound = correctGuessers.some(
-                          (winner) => winner.name === player.name
-                        );
-                        return (
-                          <View
-                            key={player.name}
-                            style={[styles.scoreItem, earnedPointThisRound && styles.scoreItemEarned]}
-                          >
-                            <Text style={styles.scoreItemName}>{player.name}</Text>
-                            <View style={styles.scoreItemBadge}>
-                              <Text style={styles.scoreItemBadgeText}>{player.score}</Text>
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  </View>
-                </ScrollView>
-
-                {/* Fixed button at bottom */}
-                <View style={styles.summaryButtonContainer}>
-                  {/* Only one player advances, so two devices can't each pick a different word */}
-                  {isActingHost ? (
-                    <GradientButton
-                      title={isContinuingRound ? 'עובר לסבב הבא...' : 'המשך לסבב הבא'}
-                      onPress={continueToNextRound}
-                      variant="draw"
-                      style={styles.continueButton}
-                      disabled={isContinuingRound}
-                    />
-                  ) : (
-                    <Text style={styles.waitingForHostText}>
-                      ממתין ל{getActingHostName(room)} להמשיך לסבב הבא...
-                    </Text>
-                  )}
+            <AppText variant="label" color={colors.inkSoft}>{S.draw.room.guessesSectionTitle}</AppText>
+            {allGuesses.length === 0 ? (
+              <AppText color={colors.inkSoft}>{S.draw.room.noGuessesThisRound}</AppText>
+            ) : (
+              [...allGuesses].reverse().map((guess, idx) => (
+                <View key={idx} style={[styles.resultRow, guess.isCorrect && { borderColor: colors.success, backgroundColor: colors.successTint }]}>
+                  <AppText variant="bodyStrong">{guess.playerName}</AppText>
+                  <AppText color={colors.inkSoft}>{S.draw.room.guessedLabel}</AppText>
+                  <AppText variant="bodyStrong" color={guess.isCorrect ? colors.successDeep : colors.ink} style={styles.flex}>
+                    {guess.guess}
+                  </AppText>
+                  {guess.isCorrect ? <Icon name="checkCircle" size={22} color={colors.success} label={S.draw.room.correct} /> : null}
                 </View>
-              </View>
-            </View>
-          </Modal>
-        )}
+              ))
+            )}
 
-        {/* Finished State Modal */}
-        {room.game_status === 'finished' && !forceCloseModal &&
-         room.players && Array.isArray(room.players) && 
-         room.players.some(p => p && p.name === currentPlayerName) && (
-          <Modal
-            visible={true}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={() => {}}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <View style={styles.finishedHeader}>
-                  <Text style={styles.finishedTrophy}>🎉</Text>
-                  <Text style={styles.finishedTitle}>המשחק הסתיים! 🎉</Text>
-                </View>
-
-                {/* Podium */}
-                <View style={styles.podiumContainer}>
-                  {[...room.players]
-                    .sort((a, b) => b.score - a.score)
-                    .slice(0, 3)
-                    .map((player, idx) => {
-                      const position = idx === 0 ? 1 : idx === 1 ? 2 : 3;
-                      const medals = ['🥇', '🥈', '🥉'];
-                      const order = idx === 0 ? 1 : idx === 1 ? 0 : 2;
-                      
-                      return (
-                        <View key={player.name} style={[styles.podiumItem, { order }]}>
-                          <Text style={styles.medal}>{medals[idx]}</Text>
-                          <Text style={styles.podiumName}>{player.name}</Text>
-                          <View style={styles.podiumScore}>
-                            <Text style={styles.podiumScoreText}>{player.score} נקודות</Text>
-                          </View>
-                          <View style={[styles.podiumBase, styles[`podium${position}`]]}>
-                            <Text style={styles.podiumNumber}>{position}</Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                </View>
-
-                {/* All Players Results */}
-                {room.players.length > 3 && (
-                  <View style={styles.otherPlayersSection}>
-                    <Text style={styles.otherPlayersTitle}>שאר השחקנים:</Text>
-                    {[...room.players]
-                      .sort((a, b) => b.score - a.score)
-                      .slice(3)
-                      .map((player, idx) => (
-                        <View key={player.name} style={styles.otherPlayerRow}>
-                          <Text style={styles.otherPlayerRank}>#{idx + 4}</Text>
-                          <Text style={styles.otherPlayerName}>{player.name}</Text>
-                          <Text style={styles.otherPlayerScore}>{player.score} נקודות</Text>
-                        </View>
-                      ))}
-                  </View>
-                )}
-
-                <View style={styles.finishedActions}>
-                  <GradientButton
-                    title="משחק חדש"
-                    onPress={resetGame}
-                    variant="draw"
-                    style={styles.resetButton}
-                    disabled={!isHost}
+            <AppText variant="label" color={colors.inkSoft}>{S.draw.room.scoresTitle}</AppText>
+            <View style={styles.chips}>
+              {[...room.players].sort((a, b) => b.score - a.score).slice(0, 4).map((player) => {
+                const earnedPointThisRound = correctGuessers.some((winner) => winner.name === player.name);
+                return (
+                  <Badge
+                    key={player.name}
+                    label={`${player.name} · ${player.score}`}
+                    icon={earnedPointThisRound ? 'plus' : 'star'}
+                    tone={earnedPointThisRound ? 'success' : 'neutral'}
                   />
-                  {!isHost && (
-                    <Text style={styles.hostOnlyText}>רק המארח יכול להתחיל משחק חדש</Text>
-                  )}
-                  <GradientButton
-                    title="חזרה לתפריט הראשי"
-                    onPress={goBack}
-                    variant="draw"
-                    style={styles.exitButton}
-                  />
-                </View>
-              </View>
+                );
+              })}
             </View>
-          </Modal>
-        )}
-      </ScrollView>
-      <BannerAd />
-    </GradientBackground>
+          </>
+        ) : null}
+      </Dialog>
+
+      {/* Finished */}
+      <Dialog
+        visible={showFinished}
+        icon="trophy"
+        title={S.draw.room.gameOver}
+        actions={
+          <>
+            <Button title={S.draw.room.newGame} icon="dice" onPress={resetGame} disabled={!isHost} fullWidth />
+            {!isHost && (
+              <AppText variant="caption" align="center" color={colors.inkSoft}>
+                {S.draw.room.hostOnlyNewGame}
+              </AppText>
+            )}
+            <Button title={S.draw.room.backToMenu} icon="home" variant="secondary" onPress={goBack} fullWidth />
+          </>
+        }
+      >
+        {showFinished ? (
+          <>
+            {/* Podium: 2nd - 1st - 3rd */}
+            <View style={styles.podium}>
+              {(() => {
+                const top = [...room.players].sort((a, b) => b.score - a.score).slice(0, 3);
+                const order = [top[1], top[0], top[2]].map((p, i) => (p ? { player: p, rank: [2, 1, 3][i] } : null)).filter(Boolean);
+                return order.map(({ player, rank }) => (
+                  <View key={player.name} style={styles.podiumItem} accessible accessibilityLabel={`${rank}. ${player.name}, ${S.draw.room.pointsN(player.score)}`}>
+                    <View style={[styles.medal, { backgroundColor: MEDAL_COLORS[rank - 1] }]}>
+                      {rank === 1 ? <Icon name="crown" size={18} color={colors.ink} /> : null}
+                      <AppText variant="title" align="center" maxScale={1.2}>
+                        {rank}
+                      </AppText>
+                    </View>
+                    <AppText variant="bodyStrong" align="center" numberOfLines={1}>
+                      {player.name}
+                    </AppText>
+                    <AppText variant="caption" align="center" color={colors.inkSoft}>
+                      {S.draw.room.pointsN(player.score)}
+                    </AppText>
+                    <View style={[styles.podiumBase, { height: [64, 44, 30][rank - 1], backgroundColor: rank === 1 ? theme.accent : colors.cardboard }]} />
+                  </View>
+                ));
+              })()}
+            </View>
+
+            {room.players.length > 3 && (
+              <View style={styles.section}>
+                <AppText variant="label" color={colors.inkSoft}>
+                  {S.draw.room.otherPlayers}
+                </AppText>
+                {[...room.players]
+                  .sort((a, b) => b.score - a.score)
+                  .slice(3)
+                  .map((player, idx) => (
+                    <View key={player.name} style={styles.resultRow}>
+                      <AppText variant="bodyStrong" color={colors.inkSoft}>
+                        #{idx + 4}
+                      </AppText>
+                      <AppText variant="bodyStrong" style={styles.flex}>
+                        {player.name}
+                      </AppText>
+                      <AppText color={colors.inkSoft}>{S.draw.room.pointsN(player.score)}</AppText>
+                    </View>
+                  ))}
+              </View>
+            )}
+          </>
+        ) : null}
+      </Dialog>
+    </Screen>
   );
 }
 
+// Crayon box - same colors as before, with names for screen readers
+const CRAYONS = [
+  { color: '#000000', name: 'black' },
+  { color: '#EF4444', name: 'red' },
+  { color: '#F59E0B', name: 'orange' },
+  { color: '#FCD34D', name: 'yellow' },
+  { color: '#10B981', name: 'green' },
+  { color: '#3B82F6', name: 'blue' },
+  { color: '#8B5CF6', name: 'purple' },
+  { color: '#EC4899', name: 'pink' },
+  { color: '#6B7280', name: 'gray' },
+];
+
+// Gold / silver / bronze (ink text on all three)
+const MEDAL_COLORS = ['#E0A526', '#C9CED6', '#D49A62'];
+
+// Visual token colors for players (Draw players have no color field)
+const PLAYER_TOKEN_COLORS = ['#7A4FC2', '#2F6FB5', '#B83E33', '#3F7D3A', '#8A5A2B', '#22335C', '#B07E12', '#6B5443'];
+
+// The canvas is sized by DrawCanvas from the window; in the summary dialog it is
+// scaled down to fit (visual only - same formula as DrawCanvas)
+const WINDOW = Dimensions.get('window');
+const CANVAS_SIZE = Math.min(WINDOW.width - 40, WINDOW.height * 0.7, 600);
+const SUMMARY_CANVAS = Math.min(CANVAS_SIZE, 280);
+const SUMMARY_SCALE = SUMMARY_CANVAS / CANVAS_SIZE;
+
 const styles = StyleSheet.create({
-  scrollContent: {
-    flexGrow: 1,
-    padding: 4,
-    paddingBottom: 120, // Extra padding to allow scrolling to see input field when keyboard is open
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: 2,
-    position: 'relative',
-  },
-  headerCenter: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 1,
-  },
-  backButton: {
-    padding: 8,
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginLeft: 'auto',
-    zIndex: 2,
-  },
-  copyLinkButtonCompact: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  copyLinkIcon: {
-    fontSize: 14,
-  },
-  exitButtonHeader: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    minWidth: 60,
-  },
-  roomCodeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 8,
-  },
-  roomCodeLabel: {
-    color: '#6B7280',
-    fontSize: 12,
-  },
-  roomCodeText: {
-    color: '#C48CFF', // Draw theme color
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  copyButton: {
-    padding: 4,
-  },
-  copyIcon: {
-    fontSize: 14,
-  },
-  loadingContainer: {
+  flex: {
     flex: 1,
+  },
+  flexShrink: {
+    flexShrink: 1,
+  },
+  centered: {
     justifyContent: 'center',
     alignItems: 'center',
+    gap: spacing.md,
   },
-  loadingText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    marginTop: 16,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  errorTitle: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  errorMessage: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    marginBottom: 24,
-    textAlign: 'center',
-  },
-  errorButton: {
-    minWidth: 120,
-  },
-  lobbyCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 24,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  lobbyHeader: {
-    backgroundColor: '#C48CFF', // Draw theme color
-    padding: 20,
-    alignItems: 'center',
-  },
-  lobbyTitle: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  lobbyContent: {
-    padding: 20,
-    gap: 16,
-  },
-  hostCard: {
-    backgroundColor: '#F3E8FF',
-    borderWidth: 1,
-    borderColor: '#C48CFF', // Draw theme color
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-  },
-  hostRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  crownIcon: {
-    fontSize: 16,
-  },
-  hostText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#1F2937',
-  },
-  drinkingToggleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  drinkingToggleLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  drinkingBadge: {
-    backgroundColor: '#F97316',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
-    alignSelf: 'center',
-  },
-  drinkingBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  playersSection: {
-    gap: 12,
-  },
-  playersTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  playersList: {
-    gap: 12,
-    paddingVertical: 4,
-  },
-  playerCard: {
-    minWidth: 100,
-    backgroundColor: '#F9FAFB',
-    borderWidth: 2,
-    borderColor: '#C48CFF', // Draw theme color
-    borderRadius: 16,
-    padding: 12,
-    alignItems: 'center',
-    gap: 4,
-  },
-  playerCardName: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1F2937',
-  },
-  crownIconSmall: {
-    fontSize: 12,
-  },
-  startButton: {
-    marginTop: 8,
-  },
-  waitingText: {
-    textAlign: 'center',
-    color: '#6B7280',
-    fontSize: 14,
-  },
-  gameContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    gap: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingHorizontal: 8,
+  stateCard: {
     width: '100%',
+    alignItems: 'center',
+    gap: spacing.md,
   },
-  topBarCentered: {
+  section: {
+    gap: spacing.md,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 48,
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  centerChips: {
+    justifyContent: 'center',
+  },
+  waitingRow: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 4,
-    width: '100%',
-    marginBottom: 4,
-  },
-  wordCardCentered: {
-    backgroundColor: 'rgba(196, 140, 255, 0.25)',
-    borderWidth: 2,
-    borderColor: '#C48CFF',
-    borderRadius: 10,
-    padding: 8,
-    alignItems: 'center',
-    minWidth: 160,
-    maxWidth: '90%',
-  },
-  wordTextCentered: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#C48CFF',
-  },
-  drawerInfoCentered: {
-    alignItems: 'center',
-    padding: 8,
-  },
-  drawerTextCentered: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  timerBarCentered: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-    width: '100%',
-    marginBottom: 6,
-    maxWidth: 250,
-    alignSelf: 'center',
-  },
-  timerWrapper: {
-    flex: 1,
-    maxWidth: 120,
-  },
-  wordCardCompact: {
-    backgroundColor: 'rgba(196, 140, 255, 0.25)',
-    borderWidth: 2,
-    borderColor: '#C48CFF',
-    borderRadius: 12,
-    padding: 8,
-    flex: 1,
-    alignItems: 'center',
-  },
-  wordTextCompact: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#C48CFF',
-  },
-  drawerInfoCompact: {
-    flex: 1,
-    alignItems: 'center',
-    padding: 8,
-  },
-  drawerTextCompact: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  statusCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 12,
-    padding: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  statusContent: {
-    gap: 8,
-    alignItems: 'center',
-  },
-  timerContainer: {
-    marginBottom: 4,
-  },
-  turnBadge: {
-    backgroundColor: '#C48CFF', // Draw theme color
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  turnBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
   },
   wordCard: {
-    backgroundColor: 'rgba(196, 140, 255, 0.25)', // Draw theme color with less transparency
-    borderWidth: 2,
-    borderColor: '#C48CFF', // Draw theme color
-    borderRadius: 12,
-    padding: 10,
-    width: '100%',
     alignItems: 'center',
+    gap: 2,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.lg,
+    borderWidth: 2,
+    borderBottomWidth: 6,
   },
-  wordLabel: {
-    fontSize: 10,
-    color: '#C48CFF', // Draw theme color
-    marginBottom: 4,
-  },
-  wordText: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#C48CFF', // Draw theme color
-  },
-  drawerInfo: {
+  drawerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-  },
-  drawerIcon: {
-    fontSize: 20,
-  },
-  drawerText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#374151',
-  },
-  guessHint: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  guessInputContainer: {
-    flexDirection: 'row',
-    gap: 8,
-    width: '100%',
-  },
-  guessInput: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    padding: 12,
-    fontSize: 16,
-    textAlign: 'right',
-    borderWidth: 2,
-    borderColor: '#C48CFF', // Draw theme color
-  },
-  sendButton: {
-    backgroundColor: '#C48CFF', // Draw theme color
-    borderRadius: 16,
-    padding: 12,
     justifyContent: 'center',
-    alignItems: 'center',
-    minWidth: 50,
+    gap: spacing.sm,
   },
-  sendButtonDisabled: {
-    backgroundColor: '#D1D5DB',
-    opacity: 0.5,
+  canvasFrame: {
+    alignSelf: 'center',
+    padding: 4,
+    borderRadius: radii.lg + 4,
+    borderWidth: 3,
+    borderBottomWidth: 7,
+    backgroundColor: colors.cardboard,
   },
-  sendButtonText: {
-    fontSize: 20,
-  },
-  toolsSection: {
-    gap: 8,
-  },
-  toolButtons: {
+  toolsRow: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  toolGroup: {
+    flexDirection: 'row',
+    gap: spacing.xs,
   },
   toolButton: {
-    flex: 1,
-  },
-  canvasSidebarRow: {
-    flexDirection: 'row',
-    gap: 4,
-    alignItems: 'flex-start',
-    flex: 1,
-    paddingHorizontal: 2,
-  },
-  canvasWrapper: {
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    minHeight: 0,
-    // Prevent scrolling when touching canvas
-    zIndex: 10,
-  },
-  canvasContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 4,
-    width: '100%',
-    maxWidth: '100%',
-    flex: 1,
-    minHeight: 200,
-    aspectRatio: 1,
-    maxHeight: '100%',
-  },
-  bottomToolsContainer: {
-    width: '100%',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    gap: 8,
-  },
-  toolsTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    gap: 4,
-  },
-  brushSizesRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-    maxWidth: 150,
-  },
-  brushSizeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 48,
+    height: 48,
+    borderRadius: radii.md,
     borderWidth: 2,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#F9FAFB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  brushSizeButtonActive: {
-    borderColor: '#C48CFF',
-    backgroundColor: '#F3E8FF',
-  },
-  brushSizeIndicator: {
-    backgroundColor: '#6B7280',
-  },
-  brushSizeIndicatorActive: {
-    backgroundColor: '#C48CFF',
-  },
-  brushSizeIndicatorEraser: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#9CA3AF',
-  },
-  toolToggleContainer: {
-    flexDirection: 'row',
-    gap: 2,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    padding: 3,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    flexShrink: 0,
-  },
-  toolToggleButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    backgroundColor: 'transparent',
-  },
-  toolToggleButtonActive: {
-    backgroundColor: '#C48CFF',
-  },
-  toolToggleText: {
-    fontSize: 16,
-  },
-  toolToggleTextActive: {
-    opacity: 1,
-  },
-  colorsRow: {
-    flexDirection: 'row',
-    gap: 4,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  crayons: {
+    flexDirection: 'row',
     flexWrap: 'wrap',
-    width: '100%',
-    paddingHorizontal: 8,
-  },
-  colorButtonCompact: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
     justifyContent: 'center',
-    alignItems: 'center',
+    gap: spacing.sm,
   },
-  colorButtonWhite: {
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-  },
-  colorButtonSelected: {
+  crayon: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
     borderWidth: 3,
-    borderColor: '#C48CFF',
-    transform: [{ scale: 1.1 }],
-  },
-  colorCheckmark: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#C48CFF',
+    borderColor: colors.card,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
+    // Outer ring so light crayons stay visible on the card
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  colorCheckmarkInner: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: '#FFFFFF',
+  crayonActive: {
+    transform: [{ scale: 1.15 }],
+    borderColor: colors.ink,
   },
-  actionButtonsContainer: {
+  actionsRow: {
     flexDirection: 'row',
-    gap: 4,
-    flexShrink: 0,
+    gap: spacing.sm,
   },
-  actionButton: {
-    minWidth: 50,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-  },
-  guessInputRow: {
+  guessRow: {
     flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 8,
-    width: '100%',
     alignItems: 'center',
+    gap: spacing.sm,
   },
-  guessInputCompact: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
-    padding: 10,
-    fontSize: 16, // Minimum 16px to prevent zoom on mobile
-    textAlign: 'right',
-    borderWidth: 2,
-    borderColor: '#C48CFF',
-  },
-  sendButtonCompact: {
-    backgroundColor: '#C48CFF',
-    borderRadius: 12,
-    padding: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    minWidth: 50,
-  },
-  sidebar: {
-    width: 80,
-    maxWidth: 80,
-    gap: 4,
-    flexShrink: 0,
-  },
-  guessesCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  guessesHeader: {
-    backgroundColor: '#3B82F6',
-    padding: 6,
-    alignItems: 'center',
-  },
-  guessesTitle: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  guessesList: {
-    maxHeight: 180,
-    padding: 6,
-    gap: 4,
-  },
-  noGuessesText: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
-  guessItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    padding: 4,
-  },
-  guessItemCorrect: {
-    backgroundColor: '#D1FAE5',
-    borderColor: '#C48CFF', // Draw theme color
-  },
-  guessItemContent: {
-    flex: 1,
-    flexDirection: 'column',
+  reveal: {
     gap: 2,
-    alignItems: 'flex-start',
+    padding: spacing.md,
+    borderRadius: radii.md,
   },
-  guessPlayerName: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  guessText: {
-    fontSize: 11,
-    color: '#374151',
-  },
-  guessTextCorrect: {
-    color: '#059669',
-    fontWeight: '700',
-  },
-  checkmark: {
-    fontSize: 16,
-    color: '#C48CFF', // Draw theme color
-  },
-  scoreboardCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
+  summaryCanvasBox: {
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    maxHeight: 200,
-  },
-  scoreboardHeader: {
-    backgroundColor: '#C48CFF', // Draw theme color
-    padding: 6,
-    alignItems: 'center',
-  },
-  scoreboardTitle: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  scoreboardList: {
-    padding: 4,
-    maxHeight: 160,
-  },
-  scoreboardPlayerCard: {
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 6,
-    padding: 4,
-    marginBottom: 3,
-  },
-  scoreboardPlayerCardActive: {
-    backgroundColor: '#F3E8FF',
-    borderColor: '#C48CFF', // Draw theme color
-  },
-  scoreboardPlayerContent: {
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: 3,
-    width: '100%', // Ensure content takes full width of card
-  },
-  scoreboardRankRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    width: '100%',
-  },
-  scoreboardRank: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#9CA3AF',
-  },
-  trophyIcon: {
-    fontSize: 12,
-  },
-  scoreboardPlayerName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#1F2937',
-    width: '100%', // Take full width instead of flex: 1
-  },
-  drawingBadge: {
-    backgroundColor: '#C48CFF', // Draw theme color
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 6,
-    marginTop: 2,
-    alignSelf: 'flex-start', // Don't stretch to full width
-  },
-  drawingBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  scoreboardScore: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1F2937', // Dark color for better visibility
-    marginTop: 8,
-    paddingTop: 4,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 12,
-  },
-  modalContent: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    width: '100%',
-    maxWidth: 500,
-    maxHeight: '85%',
-    gap: 10,
-  },
-  modalContentSummary: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    width: '100%',
-    maxWidth: 500,
-    maxHeight: '90%',
-    overflow: 'hidden',
-    flexDirection: 'column',
-    flex: 1,
-  },
-  summaryScrollContent: {
-    flex: 1,
-    minHeight: 200,
-  },
-  summaryScrollContainer: {
-    padding: 16,
-    gap: 12,
-    paddingBottom: 8,
-    flexGrow: 1,
-  },
-  summaryButtonContainer: {
-    padding: 16,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-    backgroundColor: '#FFFFFF',
-  },
-  waitingForHostText: {
-    paddingVertical: 12,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  drinkingIcon: {
-    fontSize: 56,
-    textAlign: 'center',
-  },
-  drinkingTitle: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#F97316',
-    textAlign: 'center',
-  },
-  drinkingMessage: {
-    fontSize: 20,
-    color: '#374151',
-    textAlign: 'center',
-  },
-  drinkingPlayersList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-    marginVertical: 16,
-  },
-  drinkingPlayerBadge: {
-    backgroundColor: '#F97316',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
-  },
-  drinkingPlayerName: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  drinkingEmoji: {
-    fontSize: 48,
-    textAlign: 'center',
-  },
-  drinkingAction: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#F97316',
-    textAlign: 'center',
-  },
-  summaryHeader: {
-    backgroundColor: '#C48CFF', // Draw theme color
-    padding: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  summaryTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  winnerCard: {
-    backgroundColor: '#D1FAE5',
+    borderRadius: radii.md,
     borderWidth: 2,
-    borderColor: '#C48CFF', // Draw theme color
-    borderRadius: 10,
-    padding: 12,
-    gap: 8,
-    alignItems: 'center',
-    marginBottom: 8,
+    borderColor: colors.line,
+    backgroundColor: colors.white,
   },
-  trophyIconLarge: {
-    fontSize: 32,
-  },
-  winnerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#059669',
-    textAlign: 'center',
-  },
-  winnersList: {
+  resultRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  winnerBadge: {
-    backgroundColor: '#C48CFF', // Draw theme color
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  winnerBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  eyeIconLarge: {
-    fontSize: 24,
-  },
-  noWinnerTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#7C3AED',
-    textAlign: 'center',
-  },
-  wordReveal: {
-    fontSize: 12,
-    color: '#059669',
-    textAlign: 'center',
-  },
-  wordRevealBold: {
-    fontWeight: '700',
-  },
-  drawingSection: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  drawingSectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-    textAlign: 'center',
-  },
-  drawingDisplay: {
-    borderWidth: 2,
-    borderColor: '#C48CFF', // Draw theme color
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
     alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    aspectRatio: 1,
-    maxWidth: '100%',
-    minHeight: 200,
-    maxHeight: 350,
-    padding: 8,
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
   },
-  guessesSection: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  guessesSectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 4,
-  },
-  summaryGuessesList: {
-    gap: 4,
-  },
-  moreGuessesText: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    fontStyle: 'italic',
-  },
-  noGuessesTextSummary: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
-  summaryGuessItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 4,
-  },
-  summaryGuessItemCorrect: {
-    backgroundColor: '#D1FAE5',
-    borderColor: '#C48CFF', // Draw theme color
-  },
-  summaryGuessContent: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-  },
-  summaryGuessPlayerName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  summaryGuessLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  summaryGuessText: {
-    fontSize: 14,
-    color: '#374151',
-    fontWeight: '600',
-  },
-  summaryGuessTextCorrect: {
-    color: '#059669',
-    fontWeight: '700',
-  },
-  summaryCheckmark: {
-    fontSize: 20,
-    color: '#C48CFF', // Draw theme color
-  },
-  scoresSection: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  scoresSectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 4,
-  },
-  scoresGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-  },
-  scoreItem: {
-    flex: 1,
-    minWidth: '45%',
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    padding: 6,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  scoreItemEarned: {
-    backgroundColor: '#D1FAE5',
-    borderColor: '#C48CFF', // Draw theme color
-  },
-  scoreItemName: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  scoreItemBadge: {
-    backgroundColor: '#C48CFF', // Draw theme color
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  scoreItemBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  continueButton: {
-    marginTop: 4,
-  },
-  finishedHeader: {
-    alignItems: 'center',
-    gap: 16,
-  },
-  finishedTrophy: {
-    fontSize: 96,
-  },
-  finishedTitle: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  podiumContainer: {
+  podium: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'center',
-    gap: 16,
-    marginBottom: 24,
+    gap: spacing.sm,
   },
   podiumItem: {
+    flex: 1,
     alignItems: 'center',
-    gap: 8,
+    gap: 2,
   },
   medal: {
-    fontSize: 40,
-  },
-  podiumName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  podiumScore: {
-    backgroundColor: '#C48CFF', // Draw theme color
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  podiumScoreText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  podiumBase: {
-    width: 80,
-    borderRadius: 8,
-    paddingVertical: 16,
+    width: 48,
+    height: 48,
+    borderRadius: radii.pill,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: colors.card,
+    marginBottom: spacing.xs,
   },
-  podium1: {
-    height: 120,
-    backgroundColor: '#C48CFF', // Draw theme color
-  },
-  podium2: {
-    height: 100,
-    backgroundColor: '#D1D5DB',
-  },
-  podium3: {
-    height: 80,
-    backgroundColor: '#F59E0B',
-  },
-  podiumNumber: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  otherPlayersSection: {
-    gap: 8,
-    marginBottom: 24,
-  },
-  otherPlayersTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-    textAlign: 'center',
-  },
-  otherPlayerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
-    padding: 12,
-  },
-  otherPlayerRank: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  otherPlayerName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  otherPlayerScore: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  finishedActions: {
-    gap: 12,
+  podiumBase: {
     width: '100%',
-    flexDirection: 'column',
-    alignItems: 'stretch',
-  },
-  resetButton: {
-    width: '100%',
-    minHeight: 48,
-  },
-  exitButton: {
-    width: '100%',
-    minHeight: 48,
-  },
-  hostOnlyText: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  bottomSection: {
-    width: '100%',
-    paddingHorizontal: 4,
-    paddingTop: 8,
-    gap: 8,
-    maxHeight: 200,
-  },
-  guessesCardBottom: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    maxHeight: 100,
-  },
-  guessesListBottom: {
-    maxHeight: 80,
-    padding: 6,
-  },
-  guessesHorizontalContainer: {
-    flexDirection: 'row',
-    gap: 6,
-    paddingVertical: 4,
-  },
-  guessItemBottom: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    minWidth: 120,
-    maxWidth: 200,
-  },
-  scoreboardCardBottom: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    maxHeight: 100,
-  },
-  scoreboardListBottom: {
-    maxHeight: 80,
-    padding: 6,
-  },
-  scoreboardHorizontalContainer: {
-    flexDirection: 'row',
-    gap: 6,
-    paddingVertical: 4,
-  },
-  scoreboardPlayerCardBottom: {
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    padding: 12,
-    paddingBottom: 10,
-    minWidth: 100,
-    maxWidth: 140,
-    overflow: 'visible', // Allow content to be fully visible
+    borderTopLeftRadius: radii.sm,
+    borderTopRightRadius: radii.sm,
+    marginTop: spacing.xs,
   },
 });
